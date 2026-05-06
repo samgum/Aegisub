@@ -8,6 +8,9 @@ on:
     branches: [ master ]
   workflow_dispatch:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     name: ${{ matrix.config.name }}
@@ -18,7 +21,7 @@ jobs:
       matrix:
         config:
           - name: Windows MSVC Release
-            os: windows-latest
+            os: windows-2022
             msvc: true
             buildtype: release
             args: >-
@@ -92,11 +95,11 @@ jobs:
           pip install meson
 
       - name: Setup MSVC
-        if: matrix.config.os == 'windows-latest' && matrix.config.msvc == true
+        if: startsWith(matrix.config.os, 'windows-') && matrix.config.msvc == true
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Install dependencies (Windows)
-        if: matrix.config.os == 'windows-latest'
+        if: startsWith(matrix.config.os, 'windows-')
         run: |
           choco install ninja innosetup
 
@@ -148,19 +151,19 @@ jobs:
 
       # Windows artifacts
       - name: Generate Windows installer
-        if: matrix.config.os == 'windows-latest'
+        if: startsWith(matrix.config.os, 'windows-')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run:
           meson compile win-installer -C build
 
       - name: Generate Windows portable installer
-        if: matrix.config.os == 'windows-latest'
+        if: startsWith(matrix.config.os, 'windows-')
         run: cd build && ninja win-portable
 
       - name: Upload artifacts - win_installer
         uses: actions/upload-artifact@v6
-        if: matrix.config.os == 'windows-latest'
+        if: startsWith(matrix.config.os, 'windows-')
         with:
           name: ${{ matrix.config.name }} - installer
           path: build/Aegisub-*.exe
@@ -168,7 +171,7 @@ jobs:
 
       - name: Upload artifacts - portable.zip
         uses: actions/upload-artifact@v6
-        if: matrix.config.os == 'windows-latest'
+        if: startsWith(matrix.config.os, 'windows-')
         with:
           name: ${{ matrix.config.name }} - portable
           path: build/aegisub-portable-64.zip
