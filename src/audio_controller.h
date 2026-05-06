@@ -82,6 +82,9 @@ class AudioController final : public wxEvtHandler, private agi::signal::Connecti
 	/// The current playback mode
 	PlaybackMode playback_mode = PM_NotPlaying;
 
+	/// Playback speed multiplier. 1.0 is normal speed.
+	double playback_speed = 1.0;
+
 	/// Timer used for playback position updates
 	wxTimer playback_timer;
 
@@ -177,6 +180,13 @@ public:
 	/// @brief Set the playback audio volume
 	/// @param volume The new amplification factor for the audio
 	void SetVolume(double volume);
+
+	/// @brief Set the playback speed multiplier
+	/// @param speed The new playback speed. 1.0 is normal speed.
+	void SetPlaybackSpeed(double speed);
+
+	/// @brief Get the playback speed multiplier
+	double GetPlaybackSpeed() const { return playback_speed; }
 
 	/// @brief Return the current timing controller
 	/// @return The current timing controller or 0

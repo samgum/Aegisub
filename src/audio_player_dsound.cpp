@@ -65,6 +65,7 @@ class DirectSoundPlayer final : public AudioPlayer {
 
 	volatile bool playing = false;
 	float volume = 1.0f;
+	double playback_speed = 1.0;
 	int offset = 0;
 
 	DWORD bufSize = 0;
@@ -77,6 +78,7 @@ class DirectSoundPlayer final : public AudioPlayer {
 	IDirectSoundBuffer8 *buffer = nullptr;
 
 	bool FillBuffer(bool fill);
+	DWORD GetPlaybackFrequency() const;
 	DirectSoundPlayerThread *thread = nullptr;
 
 public:
@@ -93,6 +95,7 @@ public:
 	void SetEndPosition(int64_t pos);
 
 	void SetVolume(double vol) { volume = vol; }
+	void SetPlaybackSpeed(double speed) override;
 };
 
 DirectSoundPlayer::DirectSoundPlayer(agi::AudioProvider *provider, wxWindow *parent)
@@ -123,7 +126,7 @@ DirectSoundPlayer::DirectSoundPlayer(agi::AudioProvider *provider, wxWindow *par
 	bufSize = std::min(std::max(min,aim),max);
 	DSBUFFERDESC desc;
 	desc.dwSize = sizeof(DSBUFFERDESC);
-	desc.dwFlags = DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_GLOBALFOCUS;
+	desc.dwFlags = DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_GLOBALFOCUS | DSBCAPS_CTRLFREQUENCY;
 	desc.dwBufferBytes = bufSize;
 	desc.dwReserved = 0;
 	desc.lpwfxFormat = &waveFormat;
@@ -233,6 +236,10 @@ RetryLock:
 	return playPos < endPos;
 }
 
+DWORD DirectSoundPlayer::GetPlaybackFrequency() const {
+	return mid<DWORD>(DSBFREQUENCY_MIN, (DWORD)(provider->GetSampleRate() * playback_speed + 0.5), DSBFREQUENCY_MAX);
+}
+
 void DirectSoundPlayer::Play(int64_t start,int64_t count) {
 	// Make sure that it's stopped
 	Stop();
@@ -263,6 +270,7 @@ void DirectSoundPlayer::Play(int64_t start,int64_t count) {
 
 	// Play
 	buffer->SetCurrentPosition(0);
+	buffer->SetFrequency(GetPlaybackFrequency());
 	res = buffer->Play(0,0,play_flag);
 	if (SUCCEEDED(res)) playing = true;
 	startTime = GetTickCount();
@@ -301,7 +309,19 @@ int64_t DirectSoundPlayer::GetCurrentPosition() {
 	// (during vidoeo playback, cur_frame might get changed to resync)
 	DWORD curtime = GetTickCount();
 	int64_t tdiff = curtime - startTime;
-	return startPos + tdiff * provider->GetSampleRate() / 1000;
+	return startPos + tdiff * provider->GetSampleRate() * playback_speed / 1000;
+}
+
+void DirectSoundPlayer::SetPlaybackSpeed(double speed) {
+	if (!buffer) return;
+
+	if (playing) {
+		startPos = GetCurrentPosition();
+		startTime = GetTickCount();
+	}
+
+	playback_speed = mid(0.25, speed, 4.0);
+	buffer->SetFrequency(GetPlaybackFrequency());
 }
 
 DirectSoundPlayerThread::DirectSoundPlayerThread(DirectSoundPlayer *par) : wxThread(wxTHREAD_JOINABLE) {
@@ -318,7 +338,7 @@ wxThread::ExitCode DirectSoundPlayerThread::Entry() {
 
 	// Wake up thread every half second to fill buffer as needed
 	// This more or less assumes the buffer is at least one second long
-	while (WaitForSingleObject(stopnotify, 50) == WAIT_TIMEOUT) {
+	while (WaitForSingleObject(stopnotify, 10) == WAIT_TIMEOUT) {
 		if (!parent->FillBuffer(false)) {
 			// FillBuffer returns false when end of stream is reached
 			LOG_D("audio/player/dsound1") << "DS thread hit end of stream";
@@ -328,7 +348,7 @@ wxThread::ExitCode DirectSoundPlayerThread::Entry() {
 
 	// Now fill buffer with silence
 	DWORD bytesFilled = 0;
-	while (WaitForSingleObject(stopnotify, 50) == WAIT_TIMEOUT) {
+	while (WaitForSingleObject(stopnotify, 10) == WAIT_TIMEOUT) {
 		void *buf1, *buf2;
 		DWORD size1, size2;
 		DWORD playpos;

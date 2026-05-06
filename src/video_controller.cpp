@@ -177,7 +177,11 @@ void VideoController::Stop() {
 
 void VideoController::OnPlayTimer(wxTimerEvent &) {
 	using namespace std::chrono;
-	int next_frame = FrameAtTime(start_ms + duration_cast<milliseconds>(steady_clock::now() - playback_start_time).count());
+	auto elapsed = duration_cast<milliseconds>(steady_clock::now() - playback_start_time).count();
+	int playback_ms = context->audioController->IsPlaying()
+		? context->audioController->GetPlaybackPosition()
+		: start_ms + static_cast<int>(elapsed * context->audioController->GetPlaybackSpeed());
+	int next_frame = FrameAtTime(playback_ms);
 	if (next_frame == frame_n) return;
 
 	if (next_frame >= end_frame)

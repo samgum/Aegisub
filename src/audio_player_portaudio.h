@@ -58,10 +58,13 @@ class PortAudioPlayer final : public AudioPlayer {
 	DeviceVec default_device;
 
 	float volume = 1.f;  ///< Current volume level
+	double playback_speed = 1.0; ///< Current playback speed
+	double speed_position = 0.0; ///< Fractional source position for speed-adjusted playback
 	int64_t current = 0; ///< Current position
 	int64_t start = 0;   ///< Start position
 	int64_t end = 0;     ///< End position
 	PaTime pa_start;     ///< PortAudio internal start position
+	std::vector<char> speed_buffer; ///< Temporary buffer for speed-adjusted playback
 
 	PaStream *stream = nullptr; ///< PortAudio stream
 
@@ -127,6 +130,10 @@ public:
 	/// @brief Set volume level
 	/// @param vol Volume
 	void SetVolume(double vol) { volume = vol; }
+
+	/// @brief Set playback speed
+	/// @param speed Playback speed multiplier, 1.0 is normal speed
+	void SetPlaybackSpeed(double speed) override;
 
 	/// @brief Get current volume level
 	/// @return Volume level

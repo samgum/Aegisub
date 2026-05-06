@@ -80,6 +80,7 @@
 			"Enable" : true
 		},
 		"Spectrum" : true,
+		"Playback Speed" : 100,
 		"Start Drag Sensitivity" : 8,
 		"Track Cursor" : {
 			"Font Face" : ""

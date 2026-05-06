@@ -106,6 +106,8 @@ void AudioController::OnAudioPlayerChanged()
 		/// @todo This really shouldn't be just swallowing all audio player open errors
 		context->project->CloseAudio();
 	}
+	if (player)
+		player->SetPlaybackSpeed(playback_speed);
 	AnnounceAudioPlayerOpened();
 }
 
@@ -212,6 +214,13 @@ void AudioController::SetVolume(double volume)
 {
 	if (!player) return;
 	player->SetVolume(volume);
+}
+
+void AudioController::SetPlaybackSpeed(double speed)
+{
+	playback_speed = std::max(0.25, std::min(speed, 4.0));
+	if (player)
+		player->SetPlaybackSpeed(playback_speed);
 }
 
 int64_t AudioController::SamplesFromMilliseconds(int64_t ms) const

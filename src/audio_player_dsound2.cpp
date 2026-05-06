@@ -48,6 +48,8 @@
 #include <process.h>
 #include <dsound.h>
 
+#include <algorithm>
+
 namespace {
 class DirectSoundPlayer2Thread;
 
@@ -108,6 +110,10 @@ public:
 	/// @brief Change playback volume
 	/// @param vol Amplification factor
 	void SetVolume(double vol);
+
+	/// @brief Change playback speed
+	/// @param speed Playback speed multiplier, 1.0 is normal speed
+	void SetPlaybackSpeed(double speed) override;
 };
 
 /// @brief RAII support class to init and de-init the COM library
@@ -201,6 +207,9 @@ class DirectSoundPlayer2Thread {
 	/// Event object, world to thread, set if the volume was changed
 	Win32KernelHandle event_set_volume;
 
+	/// Event object, world to thread, set if the playback speed was changed
+	Win32KernelHandle event_set_speed;
+
 	/// Event object, world to thread, set if the thread should end as soon as possible
 	Win32KernelHandle event_kill_self;
 
@@ -219,6 +228,9 @@ class DirectSoundPlayer2Thread {
 	/// Playback volume, 1.0 is "unchanged"
 	double volume = 1.0;
 
+	/// Playback speed multiplier, 1.0 is normal speed
+	double playback_speed = 1.0;
+
 	/// Audio frame to start playback at
 	int64_t start_frame = 0;
 
@@ -236,6 +248,12 @@ class DirectSoundPlayer2Thread {
 
 	/// Audio provider to take sample data from
 	agi::AudioProvider *provider;
+
+	/// Get the DirectSound playback frequency for the current speed
+	DWORD GetPlaybackFrequency() const;
+
+	/// Convert a number of queued bytes to playback time at the current speed
+	int LatencyFromBytes(DWORD bytes, WAVEFORMATEX const& waveFormat) const;
 
 public:
 	/// @brief Constructor, creates and starts playback thread
@@ -263,6 +281,10 @@ public:
 	/// @brief Change audio playback volume
 	/// @param new_volume New playback amplification factor, 1.0 is "unchanged"
 	void SetVolume(double new_volume);
+
+	/// @brief Change audio playback speed
+	/// @param new_speed New playback speed multiplier, 1.0 is normal speed
+	void SetPlaybackSpeed(double new_speed);
 
 	/// @brief Tell whether audio playback is active
 	/// @return True if audio is being played back, false if it is not
@@ -331,7 +353,7 @@ void DirectSoundPlayer2Thread::Run()
 	DWORD bufSize = mid(min,aim,max); // size of entire playback buffer
 	DSBUFFERDESC desc;
 	desc.dwSize = sizeof(DSBUFFERDESC);
-	desc.dwFlags = DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_GLOBALFOCUS;
+	desc.dwFlags = DSBCAPS_GETCURRENTPOSITION2 | DSBCAPS_GLOBALFOCUS | DSBCAPS_CTRLFREQUENCY;
 	desc.dwBufferBytes = bufSize;
 	desc.dwReserved = 0;
 	desc.lpwfxFormat = &waveFormat;
@@ -361,6 +383,7 @@ void DirectSoundPlayer2Thread::Run()
 		event_stop_playback,
 		event_update_end_time,
 		event_set_volume,
+		event_set_speed,
 		event_kill_self
 	};
 
@@ -421,14 +444,18 @@ void DirectSoundPlayer2Thread::Run()
 				if (bytes_filled < wanted_latency_bytes)
 				{
 					// Very short playback length, do without streaming playback
-					current_latency = (bytes_filled*1000) / (waveFormat.nSamplesPerSec*provider->GetBytesPerSample());
+					current_latency = LatencyFromBytes(bytes_filled, waveFormat);
+					if (FAILED(bfr->SetFrequency(GetPlaybackFrequency())))
+						REPORT_ERROR("Could not set playback speed.")
 					if (FAILED(bfr->Play(0, 0, 0)))
 						REPORT_ERROR("Could not start single-buffer playback.")
 				}
 				else
 				{
 					// We filled the entire buffer so there's reason to do streaming playback
-					current_latency = wanted_latency;
+					current_latency = std::max(1, (int)(wanted_latency / playback_speed));
+					if (FAILED(bfr->SetFrequency(GetPlaybackFrequency())))
+						REPORT_ERROR("Could not set playback speed.")
 					if (FAILED(bfr->Play(0, 0, DSBPLAY_LOOPING)))
 						REPORT_ERROR("Could not start looping playback.")
 				}
@@ -467,6 +494,13 @@ stop_playback:
 			goto do_fill_buffer;
 
 		case WAIT_OBJECT_0+4:
+			// Change playback speed
+			if (FAILED(bfr->SetFrequency(GetPlaybackFrequency())))
+				REPORT_ERROR("Could not set playback speed.")
+			current_latency = std::max(1, (int)(wanted_latency / playback_speed));
+			break;
+
+		case WAIT_OBJECT_0+5:
 			// Perform suicide
 			running = false;
 			goto stop_playback;
@@ -552,12 +586,12 @@ do_fill_buffer:
 				else if (bytes_filled < wanted_latency_bytes)
 				{
 					// Didn't fill as much as we wanted to, let's get back to filling sooner than normal
-					current_latency = (bytes_filled*1000) / (waveFormat.nSamplesPerSec*provider->GetBytesPerSample());
+					current_latency = LatencyFromBytes(bytes_filled, waveFormat);
 				}
 				else
 				{
 					// Plenty filled in, do regular latency
-					current_latency = wanted_latency;
+					current_latency = std::max(1, (int)(wanted_latency / playback_speed));
 				}
 
 				break;
@@ -664,6 +698,7 @@ DirectSoundPlayer2Thread::DirectSoundPlayer2Thread(agi::AudioProvider *provider,
 , event_stop_playback   (CreateEvent(0, FALSE, FALSE, 0))
 , event_update_end_time (CreateEvent(0, FALSE, FALSE, 0))
 , event_set_volume      (CreateEvent(0, FALSE, FALSE, 0))
+, event_set_speed       (CreateEvent(0, FALSE, FALSE, 0))
 , event_kill_self       (CreateEvent(0, FALSE, FALSE, 0))
 , thread_running        (CreateEvent(0,  TRUE, FALSE, 0))
 , is_playing            (CreateEvent(0,  TRUE, FALSE, 0))
@@ -691,6 +726,16 @@ DirectSoundPlayer2Thread::DirectSoundPlayer2Thread(agi::AudioProvider *provider,
 	default:
 		throw AudioPlayerOpenError("Failed wait for thread start or thread error in DirectSoundPlayer2. This is bad.");
 	}
+}
+
+DWORD DirectSoundPlayer2Thread::GetPlaybackFrequency() const
+{
+	return mid<DWORD>(DSBFREQUENCY_MIN, (DWORD)(provider->GetSampleRate() * playback_speed + 0.5), DSBFREQUENCY_MAX);
+}
+
+int DirectSoundPlayer2Thread::LatencyFromBytes(DWORD bytes, WAVEFORMATEX const& waveFormat) const
+{
+	return std::max(1, (int)(bytes * 1000 / (waveFormat.nAvgBytesPerSec * playback_speed)));
 }
 
 DirectSoundPlayer2Thread::~DirectSoundPlayer2Thread()
@@ -747,6 +792,18 @@ void DirectSoundPlayer2Thread::SetVolume(double new_volume)
 	SetEvent(event_set_volume);
 }
 
+void DirectSoundPlayer2Thread::SetPlaybackSpeed(double new_speed)
+{
+	CheckError();
+
+	if (IsPlaying())
+		start_frame = GetCurrentFrame();
+
+	playback_speed = mid(0.25, new_speed, 4.0);
+	last_playback_restart = GetTickCount();
+	SetEvent(event_set_speed);
+}
+
 bool DirectSoundPlayer2Thread::IsPlaying()
 {
 	CheckError();
@@ -776,7 +833,7 @@ int64_t DirectSoundPlayer2Thread::GetCurrentFrame()
 
 	int64_t milliseconds_elapsed = GetTickCount() - last_playback_restart;
 
-	return start_frame + milliseconds_elapsed * provider->GetSampleRate() / 1000;
+	return start_frame + milliseconds_elapsed * provider->GetSampleRate() * playback_speed / 1000;
 }
 
 int64_t DirectSoundPlayer2Thread::GetEndFrame()
@@ -919,6 +976,18 @@ void DirectSoundPlayer2::SetVolume(double vol)
 	try
 	{
 		if (IsThreadAlive()) thread->SetVolume(vol);
+	}
+	catch (const char *msg)
+	{
+		LOG_E("audio/player/dsound") << msg;
+	}
+}
+
+void DirectSoundPlayer2::SetPlaybackSpeed(double speed)
+{
+	try
+	{
+		if (IsThreadAlive()) thread->SetPlaybackSpeed(speed);
 	}
 	catch (const char *msg)
 	{

@@ -42,6 +42,7 @@
 #include "utils.h"
 
 #include <cmath>
+#include <wx/choice.h>
 #include <wx/panel.h>
 #include <wx/slider.h>
 #include <wx/scrolbar.h>
@@ -53,8 +54,21 @@
 enum {
 	Audio_Horizontal_Zoom = 1600,
 	Audio_Vertical_Zoom,
-	Audio_Volume
+	Audio_Volume,
+	Audio_Playback_Speed
 };
+
+namespace {
+const int playback_speeds[] = { 50, 75, 100, 125, 150, 175, 200 };
+
+int PlaybackSpeedSelection(int speed) {
+	for (size_t i = 0; i < sizeof(playback_speeds) / sizeof(playback_speeds[0]); ++i) {
+		if (playback_speeds[i] == speed)
+			return static_cast<int>(i);
+	}
+	return 2;
+}
+}
 
 AudioBox::AudioBox(wxWindow *parent, agi::Context *context)
 : wxSashWindow(parent, -1, wxDefaultPosition, wxDefaultSize, wxSW_3D | wxCLIP_CHILDREN)
@@ -66,6 +80,7 @@ AudioBox::AudioBox(wxWindow *parent, agi::Context *context)
 , HorizontalZoom(new wxSlider(panel, Audio_Horizontal_Zoom, -OPT_GET("Audio/Zoom/Horizontal")->GetInt(), -50, 30, wxDefaultPosition, wxDefaultSize, wxSL_VERTICAL|wxSL_BOTH))
 , VerticalZoom(new wxSlider(panel, Audio_Vertical_Zoom, OPT_GET("Audio/Zoom/Vertical")->GetInt(), 0, 100, wxDefaultPosition, wxDefaultSize, wxSL_VERTICAL|wxSL_BOTH|wxSL_INVERSE))
 , VolumeBar(new wxSlider(panel, Audio_Volume, OPT_GET("Audio/Volume")->GetInt(), 0, 100, wxDefaultPosition, wxDefaultSize, wxSL_VERTICAL|wxSL_BOTH|wxSL_INVERSE))
+, PlaybackSpeed(new wxChoice(panel, Audio_Playback_Speed))
 {
 	SetSashVisible(wxSASH_BOTTOM, true);
 	Bind(wxEVT_SASH_DRAGGED, &AudioBox::OnSashDrag, this);
@@ -73,6 +88,10 @@ AudioBox::AudioBox(wxWindow *parent, agi::Context *context)
 	HorizontalZoom->SetToolTip(_("Horizontal zoom"));
 	VerticalZoom->SetToolTip(_("Vertical zoom"));
 	VolumeBar->SetToolTip(_("Audio Volume"));
+	PlaybackSpeed->SetToolTip(_("Playback speed"));
+	for (int speed : playback_speeds)
+		PlaybackSpeed->Append(wxString::Format("%g x", speed / 100.0));
+	PlaybackSpeed->SetSelection(PlaybackSpeedSelection(OPT_GET("Audio/Playback Speed")->GetInt()));
 
 	bool link = OPT_GET("Audio/Link")->GetBool();
 	if (link) {
@@ -103,7 +122,10 @@ AudioBox::AudioBox(wxWindow *parent, agi::Context *context)
 	// Main sizer
 	auto MainSizer = new wxBoxSizer(wxVERTICAL);
 	MainSizer->Add(TopSizer,1,wxEXPAND|wxALL,3);
-	MainSizer->Add(toolbar::GetToolbar(panel, "audio", context, "Audio"),0,wxEXPAND|wxLEFT|wxRIGHT,3);
+	auto toolbar_sizer = new wxBoxSizer(wxHORIZONTAL);
+	toolbar_sizer->Add(toolbar::GetToolbar(panel, "audio", context, "Audio"), 1, wxEXPAND, 0);
+	toolbar_sizer->Add(PlaybackSpeed, 0, wxALIGN_CENTER_VERTICAL | wxLEFT | wxRIGHT, 3);
+	MainSizer->Add(toolbar_sizer,0,wxEXPAND|wxLEFT|wxRIGHT,3);
 	MainSizer->Add(context->karaoke,0,wxEXPAND|wxALL,3);
 	MainSizer->Show(context->karaoke, false);
 	panel->SetSizer(MainSizer);
@@ -124,6 +146,7 @@ BEGIN_EVENT_TABLE(AudioBox,wxSashWindow)
 	EVT_COMMAND_SCROLL(Audio_Horizontal_Zoom, AudioBox::OnHorizontalZoom)
 	EVT_COMMAND_SCROLL(Audio_Vertical_Zoom, AudioBox::OnVerticalZoom)
 	EVT_COMMAND_SCROLL(Audio_Volume, AudioBox::OnVolume)
+	EVT_CHOICE(Audio_Playback_Speed, AudioBox::OnPlaybackSpeed)
 END_EVENT_TABLE()
 
 void AudioBox::OnMouseWheel(wxMouseEvent &evt) {
@@ -195,6 +218,16 @@ void AudioBox::OnVolume(wxScrollEvent &event) {
 	controller->SetVolume(pow(pos / 50.0, 3));
 }
 
+void AudioBox::OnPlaybackSpeed(wxCommandEvent &) {
+	int selection = PlaybackSpeed->GetSelection();
+	if (selection == wxNOT_FOUND)
+		return;
+
+	int speed = playback_speeds[selection];
+	OPT_SET("Audio/Playback Speed")->SetInt(speed);
+	controller->SetPlaybackSpeed(speed / 100.0);
+}
+
 void AudioBox::OnVerticalLink(agi::OptionValue const& opt) {
 	if (opt.GetBool()) {
 		int pos = mid(1, VerticalZoom->GetValue(), 100);
@@ -207,6 +240,7 @@ void AudioBox::OnVerticalLink(agi::OptionValue const& opt) {
 
 void AudioBox::OnAudioOpen() {
 	controller->SetVolume(pow(mid(1, VolumeBar->GetValue(), 100) / 50.0, 3));
+	controller->SetPlaybackSpeed(OPT_GET("Audio/Playback Speed")->GetInt() / 100.0);
 }
 
 void AudioBox::ShowKaraokeBar(bool show) {

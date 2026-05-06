@@ -55,6 +55,8 @@
 #include <vector>
 #include <wx/timer.h>
 
+#include <algorithm>
+
 // Auto-link to OpenAL lib for MSVC
 #ifdef _MSC_VER
 #pragma comment(lib, "openal32.lib")
@@ -68,6 +70,7 @@ class OpenALPlayer final : public AudioPlayer, wxTimer {
 	bool playing = false; ///< Is audio currently playing?
 
 	float volume = 1.f; ///< Current audio volume
+	double playback_speed = 1.0; ///< Current playback speed
 	ALsizei samplerate; ///< Sample rate of the audio
 	int bpf; ///< Bytes per frame
 
@@ -119,6 +122,7 @@ public:
 	void SetEndPosition(int64_t pos) override;
 
 	void SetVolume(double vol) override { volume = vol; }
+	void SetPlaybackSpeed(double speed) override;
 };
 
 OpenALPlayer::OpenALPlayer(agi::AudioProvider *provider)
@@ -207,8 +211,9 @@ void OpenALPlayer::Play(int64_t start, int64_t count)
 	FillBuffers(num_buffers);
 
 	// And go!
+	alSourcef(source, AL_PITCH, playback_speed);
 	alSourcePlay(source);
-	wxTimer::Start(100);
+	wxTimer::Start(std::max(10, (int)(100 / playback_speed)));
 	playback_segment_timer.Start();
 }
 
@@ -293,12 +298,27 @@ void OpenALPlayer::SetEndPosition(int64_t pos)
 	end_frame = pos;
 }
 
+void OpenALPlayer::SetPlaybackSpeed(double speed)
+{
+	if (playing) {
+		start_frame = GetCurrentPosition() - buffers_played * decode_buffer.size() / bpf;
+		playback_segment_timer.Start();
+	}
+
+	playback_speed = mid(0.25, speed, 4.0);
+	if (context) {
+		alcMakeContextCurrent(context);
+		alSourcef(source, AL_PITCH, playback_speed);
+		wxTimer::Start(std::max(10, (int)(100 / playback_speed)));
+	}
+}
+
 int64_t OpenALPlayer::GetCurrentPosition()
 {
 	// FIXME: this should be based on not duration played but actual sample being heard
 	// (during video playback, cur_frame might get changed to resync)
 	long extra = playback_segment_timer.Time();
-	return buffers_played * decode_buffer.size() / bpf + start_frame + extra * samplerate / 1000;
+	return buffers_played * decode_buffer.size() / bpf + start_frame + extra * samplerate * playback_speed / 1000;
 }
 }
 

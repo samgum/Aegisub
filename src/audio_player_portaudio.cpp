@@ -43,6 +43,9 @@
 #include <libaegisub/audio/provider.h>
 #include <libaegisub/log.h>
 
+#include <algorithm>
+#include <cstring>
+
 // Uncomment to enable extremely spammy debug logging
 //#define PORTAUDIO_DEBUG
 
@@ -176,6 +179,7 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 	current = start_sample;
 	start = start_sample;
 	end = start_sample + count;
+	speed_position = 0.0;
 
 	// Start playing
 	if (!IsPlaying()) {
@@ -221,25 +225,59 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 	int64_t lenAvailable = std::min<int64_t>(player->end - player->current, framesPerBuffer);
 
 	// Play something
-	if (lenAvailable > 0) {
+	if (lenAvailable > 0 && player->playback_speed == 1.0) {
 		player->provider->GetAudioWithVolume(outputBuffer, player->current, lenAvailable, player->GetVolume());
 
 		// Set play position
 		player->current += lenAvailable;
 
 		// Continue as normal
-		return 0;
+		return paContinue;
+	}
+
+	if (player->playback_speed != 1.0) {
+		const int bytes_per_frame = player->provider->GetChannels() * player->provider->GetBytesPerSample();
+		const auto source_frames = std::min<int64_t>(
+			player->end - player->current,
+			(int64_t)(framesPerBuffer * player->playback_speed) + 2);
+
+		if (source_frames <= 0)
+			return paComplete;
+
+		player->speed_buffer.resize(source_frames * bytes_per_frame);
+		player->provider->GetAudioWithVolume(player->speed_buffer.data(), player->current, source_frames, player->GetVolume());
+
+		auto out = static_cast<char *>(outputBuffer);
+		double source_position = player->speed_position;
+		unsigned long output_frame = 0;
+		for (; output_frame < framesPerBuffer; ++output_frame) {
+			int64_t source_frame = (int64_t)source_position;
+			if (source_frame >= source_frames)
+				break;
+
+			memcpy(out + output_frame * bytes_per_frame, player->speed_buffer.data() + source_frame * bytes_per_frame, bytes_per_frame);
+			source_position += player->playback_speed;
+		}
+
+		if (output_frame < framesPerBuffer)
+			memset(out + output_frame * bytes_per_frame, 0, (framesPerBuffer - output_frame) * bytes_per_frame);
+
+		auto consumed = std::min<int64_t>((int64_t)source_position, source_frames);
+		player->current += consumed;
+		player->speed_position = source_position - consumed;
+
+		return output_frame == framesPerBuffer ? paContinue : paComplete;
 	}
 
 	// Abort stream and stop the callback.
-	return paAbort;
+	return paComplete;
 }
 
 int64_t PortAudioPlayer::GetCurrentPosition() {
 	if (!IsPlaying()) return 0;
 
 	PaTime pa_time = Pa_GetStreamTime(stream);
-	int64_t real = (pa_time - pa_start) * provider->GetSampleRate() + start;
+	int64_t real = (pa_time - pa_start) * provider->GetSampleRate() * playback_speed + start;
 
 	// If portaudio isn't giving us time info then estimate based on buffer fill and current latency
 	if (pa_time == 0 && pa_start == 0)
@@ -277,6 +315,17 @@ wxArrayString PortAudioPlayer::GetOutputDevices() {
 
 bool PortAudioPlayer::IsPlaying() {
 	return !!Pa_IsStreamActive(stream);
+}
+
+void PortAudioPlayer::SetPlaybackSpeed(double speed) {
+	if (IsPlaying()) {
+		start = GetCurrentPosition();
+		current = start;
+		speed_position = 0.0;
+		pa_start = Pa_GetStreamTime(stream);
+	}
+
+	playback_speed = std::max(0.25, std::min(speed, 4.0));
 }
 
 std::unique_ptr<AudioPlayer> CreatePortAudioPlayer(agi::AudioProvider *provider, wxWindow *) {

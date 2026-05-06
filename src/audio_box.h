@@ -41,6 +41,7 @@ class AudioController;
 class AudioDisplay;
 class wxBitmapToggleButton;
 class wxButton;
+class wxChoice;
 class wxCommandEvent;
 class wxPanel;
 class wxScrollEvent;
@@ -68,6 +69,7 @@ class AudioBox final : public wxSashWindow, private agi::signal::ConnectionScope
 	wxSlider *HorizontalZoom;
 	wxSlider *VerticalZoom;
 	wxSlider *VolumeBar;
+	wxChoice *PlaybackSpeed;
 
 	// Mouse wheel zoom accumulator
 	int mouse_zoom_accum = 0;
@@ -80,6 +82,7 @@ class AudioBox final : public wxSashWindow, private agi::signal::ConnectionScope
 	void OnVerticalLink(agi::OptionValue const& opt);
 	void OnVerticalZoom(wxScrollEvent &event);
 	void OnVolume(wxScrollEvent &event);
+	void OnPlaybackSpeed(wxCommandEvent &event);
 
 public:
 	AudioBox(wxWindow *parent, agi::Context *context);

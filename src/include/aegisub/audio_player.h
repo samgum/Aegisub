@@ -52,6 +52,7 @@ public:
 	virtual bool IsPlaying()=0;
 
 	virtual void SetVolume(double volume)=0;
+	virtual void SetPlaybackSpeed([[maybe_unused]] double speed) { }
 
 	virtual int64_t GetEndPosition()=0;
 	virtual int64_t GetCurrentPosition()=0;
