@@ -70,6 +70,12 @@
 		"audio/play/toggle" : [
 			"B"
 		],
+		"audio/playback/speed/decrease" : [
+			"Ctrl-Down"
+		],
+		"audio/playback/speed/increase" : [
+			"Ctrl-Up"
+		],
 		"audio/scroll/left" : [
 			"A"
 		],

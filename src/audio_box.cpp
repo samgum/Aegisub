@@ -110,6 +110,7 @@ AudioBox::AudioBox(wxWindow *parent, agi::Context *context)
 	link_btn->SetMaxSize(wxDefaultSize);
 	VertVolArea->Add(link_btn, 0, wxRIGHT | wxEXPAND, 0);
 	BindConnection(OPT_SUB("Audio/Link", &AudioBox::OnVerticalLink, this));
+	BindConnection(OPT_SUB("Audio/Playback Speed", &AudioBox::OnPlaybackSpeedOption, this));
 
 	// Top sizer
 	wxSizer *TopSizer = new wxBoxSizer(wxHORIZONTAL);
@@ -225,6 +226,12 @@ void AudioBox::OnPlaybackSpeed(wxCommandEvent &) {
 
 	int speed = playback_speeds[selection];
 	OPT_SET("Audio/Playback Speed")->SetInt(speed);
+	controller->SetPlaybackSpeed(speed / 100.0);
+}
+
+void AudioBox::OnPlaybackSpeedOption(agi::OptionValue const& opt) {
+	int speed = opt.GetInt();
+	PlaybackSpeed->SetSelection(PlaybackSpeedSelection(speed));
 	controller->SetPlaybackSpeed(speed / 100.0);
 }
 

@@ -118,6 +118,18 @@ msgstr ""
 msgid "Audio Volume"
 msgstr ""
 
+#: ../src/audio_box.cpp:91
+msgid "Playback speed"
+msgstr ""
+
+#: ../src/command/audio.cpp:470
+msgid "Increase playback speed"
+msgstr ""
+
+#: ../src/command/audio.cpp:483
+msgid "Decrease playback speed"
+msgstr ""
+
 #: ../src/audio_display.cpp:718
 #, c-format
 msgid "%d%%, %d pixel/second"

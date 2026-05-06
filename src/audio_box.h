@@ -83,6 +83,7 @@ class AudioBox final : public wxSashWindow, private agi::signal::ConnectionScope
 	void OnVerticalZoom(wxScrollEvent &event);
 	void OnVolume(wxScrollEvent &event);
 	void OnPlaybackSpeed(wxCommandEvent &event);
+	void OnPlaybackSpeedOption(agi::OptionValue const& opt);
 
 public:
 	AudioBox(wxWindow *parent, agi::Context *context);

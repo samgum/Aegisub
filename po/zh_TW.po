@@ -109,6 +109,18 @@ msgstr "垂直縮放"
 msgid "Audio Volume"
 msgstr "音量"
 
+#: ../src/audio_box.cpp:91
+msgid "Playback speed"
+msgstr "播放速度"
+
+#: ../src/command/audio.cpp:470
+msgid "Increase playback speed"
+msgstr "提高播放速度"
+
+#: ../src/command/audio.cpp:483
+msgid "Decrease playback speed"
+msgstr "降低播放速度"
+
 #: ../src/audio_display.cpp:706
 #, c-format
 msgid "%d%%, %d pixel/second"

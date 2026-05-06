@@ -451,6 +451,60 @@ static inline void toggle(const char *opt) {
 	OPT_SET(opt)->SetBool(!OPT_GET(opt)->GetBool());
 }
 
+const int playback_speeds[] = { 50, 75, 100, 125, 150, 175, 200 };
+
+void set_playback_speed(agi::Context *c, int speed) {
+	OPT_SET("Audio/Playback Speed")->SetInt(speed);
+	c->audioController->SetPlaybackSpeed(speed / 100.0);
+}
+
+void adjust_playback_speed(agi::Context *c, int direction) {
+	int speed = OPT_GET("Audio/Playback Speed")->GetInt();
+	int next_speed = speed;
+
+	if (direction > 0) {
+		for (int candidate : playback_speeds) {
+			if (candidate > speed) {
+				next_speed = candidate;
+				break;
+			}
+		}
+	}
+	else {
+		for (int i = sizeof(playback_speeds) / sizeof(playback_speeds[0]) - 1; i >= 0; --i) {
+			if (playback_speeds[i] < speed) {
+				next_speed = playback_speeds[i];
+				break;
+			}
+		}
+	}
+
+	if (next_speed != speed)
+		set_playback_speed(c, next_speed);
+}
+
+struct audio_playback_speed_increase final : public Command {
+	CMD_NAME("audio/playback/speed/increase")
+	STR_MENU("Increase playback speed")
+	STR_DISP("Increase playback speed")
+	STR_HELP("Increase playback speed")
+
+	void operator()(agi::Context *c) override {
+		adjust_playback_speed(c, 1);
+	}
+};
+
+struct audio_playback_speed_decrease final : public Command {
+	CMD_NAME("audio/playback/speed/decrease")
+	STR_MENU("Decrease playback speed")
+	STR_DISP("Decrease playback speed")
+	STR_HELP("Decrease playback speed")
+
+	void operator()(agi::Context *c) override {
+		adjust_playback_speed(c, -1);
+	}
+};
+
 struct audio_autoscroll final : public Command {
 	CMD_NAME("audio/opt/autoscroll")
 	CMD_ICON(toggle_audio_autoscroll)
@@ -576,6 +630,8 @@ namespace cmd {
 		reg(std::make_unique<audio_play_before>());
 		reg(std::make_unique<audio_play_begin>());
 		reg(std::make_unique<audio_play_end>());
+		reg(std::make_unique<audio_playback_speed_decrease>());
+		reg(std::make_unique<audio_playback_speed_increase>());
 		reg(std::make_unique<audio_play_current_selection>());
 		reg(std::make_unique<audio_play_current_line>());
 		reg(std::make_unique<audio_play_selection>());
