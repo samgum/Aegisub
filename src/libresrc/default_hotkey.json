@@ -71,10 +71,10 @@
 			"B"
 		],
 		"audio/playback/speed/decrease" : [
-			"Ctrl-Down"
+			"Ctrl-Shift-Down"
 		],
 		"audio/playback/speed/increase" : [
-			"Ctrl-Up"
+			"Ctrl-Shift-Up"
 		],
 		"audio/scroll/left" : [
 			"A"

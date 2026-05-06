@@ -293,6 +293,9 @@ if host_machine.system() == 'windows' and not get_option('directsound').disabled
     dxguid_dep = cc.find_library('dxguid', required: true)
     if dsound_dep.found() and winmm_dep.found() and ole32_dep.found() and dxguid_dep.found() and have_dsound_h
         deps += [dsound_dep, winmm_dep, ole32_dep, dxguid_dep]
+        deps += dependency('soundtouch',
+                           fallback: ['soundtouch', 'soundtouch_dep'],
+                           default_options: ['soundtouch_dll=false', 'soundstretch=false'])
         conf.set('WITH_DIRECTSOUND', 1)
         dep_avail = ['DirectSound'] + dep_avail
     endif

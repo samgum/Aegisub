@@ -47,11 +47,167 @@
 #include <mmsystem.h>
 #include <process.h>
 #include <dsound.h>
+#include <SoundTouch.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <type_traits>
+#include <vector>
 
 namespace {
 class DirectSoundPlayer2Thread;
+
+class SoundTouchTempoStream {
+	agi::AudioProvider *provider;
+	soundtouch::SoundTouch processor;
+	std::vector<int16_t> source_buffer;
+	std::vector<soundtouch::SAMPLETYPE> process_buffer;
+	std::vector<soundtouch::SAMPLETYPE> output_buffer;
+
+	int64_t input_frame = 0;
+	int64_t end_frame = 0;
+	double playback_speed = 1.0;
+	double volume = 1.0;
+	bool input_finished = true;
+	bool flushed = true;
+	bool output_finished = true;
+
+	int channels() const { return provider->GetChannels(); }
+
+	static int16_t sample_to_int16(soundtouch::SAMPLETYPE sample) {
+		if constexpr (std::is_integral_v<soundtouch::SAMPLETYPE>)
+			return sample;
+		else
+			return mid(-32768, (int)std::lround(sample * 32768.0f), 32767);
+	}
+
+	static soundtouch::SAMPLETYPE int16_to_sample(int16_t sample) {
+		if constexpr (std::is_integral_v<soundtouch::SAMPLETYPE>)
+			return sample;
+		else
+			return sample / 32768.0f;
+	}
+
+	void feed_more() {
+		if (input_frame >= end_frame) {
+			input_finished = true;
+			return;
+		}
+
+		auto frames = (size_t)std::min<int64_t>(4096, end_frame - input_frame);
+		auto sample_count = frames * channels();
+		source_buffer.resize(sample_count);
+		process_buffer.resize(sample_count);
+
+		provider->GetAudioWithVolume(source_buffer.data(), input_frame, frames, volume);
+		input_frame += frames;
+
+		for (size_t i = 0; i < sample_count; ++i)
+			process_buffer[i] = int16_to_sample(source_buffer[i]);
+
+		processor.putSamples(process_buffer.data(), frames);
+	}
+
+public:
+	explicit SoundTouchTempoStream(agi::AudioProvider *provider)
+	: provider(provider)
+	{
+		processor.setSampleRate(provider->GetSampleRate());
+		processor.setChannels(provider->GetChannels());
+	}
+
+	void Reset(int64_t start, int64_t end, double speed, double new_volume) {
+		input_frame = start;
+		end_frame = end;
+		playback_speed = mid(0.25, speed, 4.0);
+		volume = new_volume;
+		input_finished = input_frame >= end_frame;
+		flushed = input_finished;
+		output_finished = input_finished;
+		processor.clear();
+		processor.setSampleRate(provider->GetSampleRate());
+		processor.setChannels(provider->GetChannels());
+		processor.setTempo(playback_speed);
+		processor.setPitch(1.0);
+		processor.setRate(1.0);
+	}
+
+	void SetEndFrame(int64_t end) {
+		end_frame = end;
+		if (input_frame < end_frame) {
+			input_finished = false;
+			flushed = false;
+			output_finished = false;
+		}
+	}
+
+	void SetVolume(double new_volume) {
+		volume = new_volume;
+	}
+
+	void SetPlaybackSpeed(double speed) {
+		playback_speed = mid(0.25, speed, 4.0);
+		processor.setTempo(playback_speed);
+	}
+
+	int64_t GetInputFrame() const {
+		return input_frame;
+	}
+
+	DWORD Fill(void *dst, DWORD bytes) {
+		auto bytes_per_frame = provider->GetChannels() * provider->GetBytesPerSample();
+		auto requested_frames = bytes / bytes_per_frame;
+		auto out = static_cast<int16_t *>(dst);
+
+		if (requested_frames == 0)
+			return 0;
+
+		if (std::abs(playback_speed - 1.0) < 0.001) {
+			auto available = (DWORD)std::max<int64_t>(0, std::min<int64_t>(requested_frames, end_frame - input_frame));
+			if (available)
+				provider->GetAudioWithVolume(dst, input_frame, available, volume);
+			if (available < requested_frames)
+				memset(out + available * channels(), 0, (requested_frames - available) * bytes_per_frame);
+
+			input_frame += available;
+			input_finished = input_frame >= end_frame;
+			output_finished = input_finished;
+			return bytes;
+		}
+
+		DWORD filled = 0;
+		output_buffer.resize(requested_frames * channels());
+
+		while (filled < requested_frames && !output_finished) {
+			auto got = processor.receiveSamples(output_buffer.data(), requested_frames - filled);
+			if (got) {
+				for (size_t i = 0; i < (size_t)got * channels(); ++i)
+					out[filled * channels() + i] = sample_to_int16(output_buffer[i]);
+				filled += got;
+				continue;
+			}
+
+			if (!input_finished) {
+				feed_more();
+				continue;
+			}
+
+			if (!flushed) {
+				processor.flush();
+				flushed = true;
+				continue;
+			}
+
+			output_finished = true;
+		}
+
+		if (filled < requested_frames)
+			memset(out + filled * channels(), 0, (requested_frames - filled) * bytes_per_frame);
+
+		return bytes;
+	}
+};
 
 /// @class DirectSoundPlayer2
 /// @brief New implementation of DirectSound-based audio player
@@ -185,7 +341,7 @@ class DirectSoundPlayer2Thread {
 	/// @param input_frame First audio frame to fill into buffers
 	/// @param bfr         DirectSound buffer object owning the buffer pair
 	/// @return Number of bytes written
-	DWORD FillAndUnlockBuffers(void *buf1, DWORD buf1sz, void *buf2, DWORD buf2sz, int64_t &input_frame, IDirectSoundBuffer8 *bfr);
+	DWORD FillAndUnlockBuffers(void *buf1, DWORD buf1sz, void *buf2, DWORD buf2sz, SoundTouchTempoStream& stream, int64_t &input_frame, IDirectSoundBuffer8 *bfr);
 
 	/// @brief Check for error state and throw exception if one occurred
 	void CheckError();
@@ -248,9 +404,6 @@ class DirectSoundPlayer2Thread {
 
 	/// Audio provider to take sample data from
 	agi::AudioProvider *provider;
-
-	/// Get the DirectSound playback frequency for the current speed
-	DWORD GetPlaybackFrequency() const;
 
 	/// Convert a number of queued bytes to playback time at the current speed
 	int LatencyFromBytes(DWORD bytes, WAVEFORMATEX const& waveFormat) const;
@@ -392,6 +545,7 @@ void DirectSoundPlayer2Thread::Run()
 	bool playback_should_be_running = false;
 	int current_latency = wanted_latency;
 	const DWORD wanted_latency_bytes = wanted_latency*waveFormat.nSamplesPerSec*provider->GetBytesPerSample()/1000;
+	SoundTouchTempoStream tempo_stream(provider);
 
 	while (running)
 	{
@@ -405,6 +559,7 @@ void DirectSoundPlayer2Thread::Run()
 				bfr->Stop();
 
 				next_input_frame = start_frame;
+				tempo_stream.Reset(start_frame, end_frame, playback_speed, volume);
 
 				DWORD buf_size; // size of buffer locked for filling
 				void *buf;
@@ -434,7 +589,7 @@ void DirectSoundPlayer2Thread::Run()
 				// Clear the buffer in case we can't fill it completely
 				memset(buf, 0, buf_size);
 
-				DWORD bytes_filled = FillAndUnlockBuffers(buf, buf_size, 0, 0, next_input_frame, bfr.get());
+				DWORD bytes_filled = FillAndUnlockBuffers(buf, buf_size, 0, 0, tempo_stream, next_input_frame, bfr.get());
 				buffer_offset += bytes_filled;
 				if (buffer_offset >= bufSize) buffer_offset -= bufSize;
 
@@ -445,17 +600,13 @@ void DirectSoundPlayer2Thread::Run()
 				{
 					// Very short playback length, do without streaming playback
 					current_latency = LatencyFromBytes(bytes_filled, waveFormat);
-					if (FAILED(bfr->SetFrequency(GetPlaybackFrequency())))
-						REPORT_ERROR("Could not set playback speed.")
 					if (FAILED(bfr->Play(0, 0, 0)))
 						REPORT_ERROR("Could not start single-buffer playback.")
 				}
 				else
 				{
 					// We filled the entire buffer so there's reason to do streaming playback
-					current_latency = std::max(1, (int)(wanted_latency / playback_speed));
-					if (FAILED(bfr->SetFrequency(GetPlaybackFrequency())))
-						REPORT_ERROR("Could not set playback speed.")
+					current_latency = wanted_latency;
 					if (FAILED(bfr->Play(0, 0, DSBPLAY_LOOPING)))
 						REPORT_ERROR("Could not start looping playback.")
 				}
@@ -476,7 +627,8 @@ stop_playback:
 
 		case WAIT_OBJECT_0+2:
 			// Set end frame
-			if (end_frame <= next_input_frame)
+			tempo_stream.SetEndFrame(end_frame);
+			if (end_frame <= GetCurrentFrame())
 			{
 				goto stop_playback;
 			}
@@ -491,13 +643,13 @@ stop_playback:
 			// We aren't thread safe right now, filling the buffers grabs volume directly
 			// from the field set by the controlling thread, but it shouldn't be a major
 			// problem if race conditions do occur, just some momentary distortion.
+			tempo_stream.SetVolume(volume);
 			goto do_fill_buffer;
 
 		case WAIT_OBJECT_0+4:
 			// Change playback speed
-			if (FAILED(bfr->SetFrequency(GetPlaybackFrequency())))
-				REPORT_ERROR("Could not set playback speed.")
-			current_latency = std::max(1, (int)(wanted_latency / playback_speed));
+			tempo_stream.SetPlaybackSpeed(playback_speed);
+			current_latency = wanted_latency;
 			break;
 
 		case WAIT_OBJECT_0+5:
@@ -573,7 +725,7 @@ do_fill_buffer:
 					break;
 				}
 
-				DWORD bytes_filled = FillAndUnlockBuffers(buf1, buf1sz, buf2, buf2sz, next_input_frame, bfr.get());
+				DWORD bytes_filled = FillAndUnlockBuffers(buf1, buf1sz, buf2, buf2sz, tempo_stream, next_input_frame, bfr.get());
 				buffer_offset += bytes_filled;
 				if (buffer_offset >= bufSize) buffer_offset -= bufSize;
 
@@ -591,7 +743,7 @@ do_fill_buffer:
 				else
 				{
 					// Plenty filled in, do regular latency
-					current_latency = std::max(1, (int)(wanted_latency / playback_speed));
+					current_latency = wanted_latency;
 				}
 
 				break;
@@ -606,62 +758,20 @@ do_fill_buffer:
 
 #undef REPORT_ERROR
 
-DWORD DirectSoundPlayer2Thread::FillAndUnlockBuffers(void *buf1, DWORD buf1sz, void *buf2, DWORD buf2sz, int64_t &input_frame, IDirectSoundBuffer8 *bfr)
+DWORD DirectSoundPlayer2Thread::FillAndUnlockBuffers(void *buf1, DWORD buf1sz, void *buf2, DWORD buf2sz, SoundTouchTempoStream& stream, int64_t &input_frame, IDirectSoundBuffer8 *bfr)
 {
 	// Assume buffers have been locked and are ready to be filled
 
-	DWORD bytes_per_frame = provider->GetChannels() * provider->GetBytesPerSample();
-	DWORD buf1szf = buf1sz / bytes_per_frame;
-	DWORD buf2szf = buf2sz / bytes_per_frame;
-
-	if (input_frame >= end_frame)
-	{
-		// Silence
-
-		if (buf1)
-			memset(buf1, 0, buf1sz);
-
-		if (buf2)
-			memset(buf2, 0, buf2sz);
-
-		input_frame += buf1szf + buf2szf;
-
-		bfr->Unlock(buf1, buf1sz, buf2, buf2sz); // should be checking for success
-
-		return buf1sz + buf2sz;
-	}
-
+	DWORD bytes_filled = 0;
 	if (buf1 && buf1sz)
-	{
-		if (buf1szf + input_frame > end_frame)
-		{
-			buf1szf = end_frame - input_frame;
-			buf1sz = buf1szf * bytes_per_frame;
-			buf2szf = 0;
-			buf2sz = 0;
-		}
-
-		provider->GetAudioWithVolume(buf1, input_frame, buf1szf, volume);
-
-		input_frame += buf1szf;
-	}
-
+		bytes_filled += stream.Fill(buf1, buf1sz);
 	if (buf2 && buf2sz)
-	{
-		if (buf2szf + input_frame > end_frame)
-		{
-			buf2szf = end_frame - input_frame;
-			buf2sz = buf2szf * bytes_per_frame;
-		}
-
-		provider->GetAudioWithVolume(buf2, input_frame, buf2szf, volume);
-
-		input_frame += buf2szf;
-	}
+		bytes_filled += stream.Fill(buf2, buf2sz);
 
 	bfr->Unlock(buf1, buf1sz, buf2, buf2sz); // bad? should check for success
 
-	return buf1sz + buf2sz;
+	input_frame = stream.GetInputFrame();
+	return bytes_filled;
 }
 
 void DirectSoundPlayer2Thread::CheckError()
@@ -728,14 +838,9 @@ DirectSoundPlayer2Thread::DirectSoundPlayer2Thread(agi::AudioProvider *provider,
 	}
 }
 
-DWORD DirectSoundPlayer2Thread::GetPlaybackFrequency() const
-{
-	return mid<DWORD>(DSBFREQUENCY_MIN, (DWORD)(provider->GetSampleRate() * playback_speed + 0.5), DSBFREQUENCY_MAX);
-}
-
 int DirectSoundPlayer2Thread::LatencyFromBytes(DWORD bytes, WAVEFORMATEX const& waveFormat) const
 {
-	return std::max(1, (int)(bytes * 1000 / (waveFormat.nAvgBytesPerSec * playback_speed)));
+	return std::max(1, (int)(bytes * 1000 / waveFormat.nAvgBytesPerSec));
 }
 
 DirectSoundPlayer2Thread::~DirectSoundPlayer2Thread()

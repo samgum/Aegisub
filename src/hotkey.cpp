@@ -25,6 +25,7 @@
 
 #include <boost/range/algorithm/find.hpp>
 #include <boost/range/iterator_range.hpp>
+#include <algorithm>
 #include <wx/intl.h>
 #include <wx/msgdlg.h>
 
@@ -47,6 +48,12 @@ namespace {
 		{nullptr}
 	};
 
+	const char *added_hotkeys_playback_speed[][3] = {
+		{"audio/playback/speed/increase", "Audio", "Ctrl-Shift-Up"},
+		{"audio/playback/speed/decrease", "Audio", "Ctrl-Shift-Down"},
+		{nullptr}
+	};
+
 #ifdef __WXMAC__
 	const char *added_hotkeys_minimize[][3] = {
 		{"app/minimize", "Default", "Ctrl-M"},
@@ -65,6 +72,44 @@ namespace {
 				continue;
 
 			hk_map.insert(make_pair(std::string(added[i][0]), std::move(combo)));
+			changed = true;
+		}
+
+		if (changed)
+			hotkey::inst->SetHotkeyMap(std::move(hk_map));
+	}
+
+	void migrate_playback_speed_hotkeys() {
+		auto hk_map = hotkey::inst->GetHotkeyMap();
+		bool changed = false;
+
+		auto remove_combo = [&](const char *command, const char *context, const char *key) {
+			for (auto it = hk_map.lower_bound(command); it != hk_map.upper_bound(command); ) {
+				if (it->second.Context() == context && it->second.Str() == key) {
+					it = hk_map.erase(it);
+					changed = true;
+				}
+				else {
+					++it;
+				}
+			}
+		};
+
+		auto has_hotkey = [&](const char *context, const char *key) {
+			return std::any_of(hk_map.begin(), hk_map.end(), [&](auto const& combo) {
+				return combo.second.Context() == context && combo.second.Str() == key;
+			});
+		};
+
+		remove_combo("audio/playback/speed/increase", "Audio", "Ctrl-Up");
+		remove_combo("audio/playback/speed/decrease", "Audio", "Ctrl-Down");
+
+		for (size_t i = 0; added_hotkeys_playback_speed[i][0]; ++i) {
+			if (has_hotkey(added_hotkeys_playback_speed[i][1], added_hotkeys_playback_speed[i][2]))
+				continue;
+
+			agi::hotkey::Combo combo(added_hotkeys_playback_speed[i][1], added_hotkeys_playback_speed[i][0], added_hotkeys_playback_speed[i][2]);
+			hk_map.insert(make_pair(std::string(added_hotkeys_playback_speed[i][0]), std::move(combo)));
 			changed = true;
 		}
 
@@ -96,6 +141,11 @@ void init() {
 	if (boost::find(migrations, "edit/line/duplicate/shift_back") == end(migrations)) {
 		migrate_hotkeys(added_hotkeys_shift_back);
 		migrations.emplace_back("edit/line/duplicate/shift_back");
+	}
+
+	if (boost::find(migrations, "audio/playback/speed") == end(migrations)) {
+		migrate_playback_speed_hotkeys();
+		migrations.emplace_back("audio/playback/speed");
 	}
 
 	if (boost::find(migrations, "duplicate -> split") == end(migrations)) {
