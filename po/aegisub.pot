@@ -5640,6 +5640,10 @@ msgstr ""
 msgid "Ignore punctuation"
 msgstr ""
 
+#: ../src/preferences.cpp:231
+msgid "Highlight lines wider than the video"
+msgstr ""
+
 #: ../src/preferences.cpp:232
 msgid "Grid"
 msgstr ""
@@ -5748,6 +5752,10 @@ msgstr ""
 msgid "Karaoke variables"
 msgstr ""
 
+#: ../src/preferences.cpp:280
+msgid "Overlong line highlight"
+msgstr ""
+
 #: ../src/preferences.cpp:285
 msgid "Audio Color Schemes"
 msgstr ""
@@ -5786,6 +5794,10 @@ msgstr ""
 
 #: ../src/preferences.cpp:296
 msgid "In frame background"
+msgstr ""
+
+#: ../src/preferences.cpp:297
+msgid "Overlong line background"
 msgstr ""
 
 #: ../src/preferences.cpp:297

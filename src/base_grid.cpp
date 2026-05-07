@@ -43,6 +43,7 @@
 #include "utils.h"
 #include "selection_controller.h"
 #include "subs_controller.h"
+#include "subtitle_overflow.h"
 #include "video_controller.h"
 
 #include <libaegisub/util.h>
@@ -98,6 +99,7 @@ BaseGrid::BaseGrid(wxWindow* parent, agi::Context *context)
 		OPT_SUB("Colour/Subtitle Grid/Background/Background", &BaseGrid::UpdateStyle, this),
 		OPT_SUB("Colour/Subtitle Grid/Background/Comment", &BaseGrid::UpdateStyle, this),
 		OPT_SUB("Colour/Subtitle Grid/Background/Inframe", &BaseGrid::UpdateStyle, this),
+		OPT_SUB("Colour/Subtitle Grid/Background/Overflow", &BaseGrid::UpdateStyle, this),
 		OPT_SUB("Colour/Subtitle Grid/Background/Selected Comment", &BaseGrid::UpdateStyle, this),
 		OPT_SUB("Colour/Subtitle Grid/Background/Selection", &BaseGrid::UpdateStyle, this),
 		OPT_SUB("Colour/Subtitle Grid/Collision", &BaseGrid::UpdateStyle, this),
@@ -108,7 +110,9 @@ BaseGrid::BaseGrid(wxWindow* parent, agi::Context *context)
 		OPT_SUB("Colour/Subtitle Grid/Standard", &BaseGrid::UpdateStyle, this),
 
 		OPT_SUB("Subtitle/Grid/Highlight Subtitles in Frame", &BaseGrid::OnHighlightVisibleChange, this),
+		OPT_SUB("Subtitle/Overflow Highlight/Enabled", [&](agi::OptionValue const&) { Refresh(false); }),
 		OPT_SUB("Subtitle/Grid/Hide Overrides", [&](agi::OptionValue const&) { Refresh(false); }),
+		context->project->AddVideoProviderListener([&](AsyncVideoProvider *) { Refresh(false); }),
 	});
 
 	Bind(wxEVT_CONTEXT_MENU, &BaseGrid::OnContextMenu, this);
@@ -144,6 +148,10 @@ void BaseGrid::OnSubtitlesCommit(int type) {
 	if (type & AssFile::COMMIT_DIAG_TIME)
 		Refresh(false);
 	else if (type & AssFile::COMMIT_DIAG_TEXT) {
+		if (OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool()) {
+			Refresh(false);
+			return;
+		}
 		for (auto const& rect : text_refresh_rects)
 			RefreshRect(rect, false);
 	}
@@ -189,6 +197,7 @@ void BaseGrid::UpdateStyle() {
 	row_colors.Selection.SetColour(to_wx(OPT_GET("Colour/Subtitle Grid/Background/Selection")->GetColor()));
 	row_colors.Comment.SetColour(to_wx(OPT_GET("Colour/Subtitle Grid/Background/Comment")->GetColor()));
 	row_colors.Visible.SetColour(to_wx(OPT_GET("Colour/Subtitle Grid/Background/Inframe")->GetColor()));
+	row_colors.Overflow.SetColour(to_wx(OPT_GET("Colour/Subtitle Grid/Background/Overflow")->GetColor()));
 	row_colors.SelectedComment.SetColour(to_wx(OPT_GET("Colour/Subtitle Grid/Background/Selected Comment")->GetColor()));
 	row_colors.LeftCol.SetColour(to_wx(OPT_GET("Colour/Subtitle Grid/Left Column")->GetColor()));
 
@@ -371,7 +380,12 @@ void BaseGrid::OnPaint(wxPaintEvent &) {
 				color = row_colors.Visible;
 			visible_rows.push_back(i + yPos);
 		}
+
+		if (!inSel && subtitle_overflow::Check(context, curDiag, &dc).overflow)
+			color = row_colors.Overflow;
+
 		dc.SetBrush(color);
+		dc.SetFont(font);
 
 		// Draw row background color
 		if (color != row_colors.Default) {

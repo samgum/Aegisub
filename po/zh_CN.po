@@ -5707,6 +5707,11 @@ msgid "Ignore punctuation"
 msgstr "忽略标点符号"
 
 #: ../src/preferences.cpp:232
+#: ../src/preferences.cpp:231
+msgid "Highlight lines wider than the video"
+msgstr "高亮超出画面宽度的行"
+
+#: ../src/preferences.cpp:232
 msgid "Grid"
 msgstr "字幕栏"
 
@@ -5815,6 +5820,11 @@ msgid "Karaoke variables"
 msgstr "卡拉OK变量"
 
 #: ../src/preferences.cpp:285
+#: ../src/preferences.cpp:280
+msgid "Overlong line highlight"
+msgstr "超宽行高亮"
+
+#: ../src/preferences.cpp:285
 msgid "Audio Color Schemes"
 msgstr "音频配色方案"
 
@@ -5853,6 +5863,11 @@ msgstr "冲突行前景色"
 #: ../src/preferences.cpp:296
 msgid "In frame background"
 msgstr "在当前帧显示的行背景色"
+
+#: ../src/preferences.cpp:297
+#: ../src/preferences.cpp:297
+msgid "Overlong line background"
+msgstr "超宽行背景"
 
 #: ../src/preferences.cpp:297
 msgid "Comment background"

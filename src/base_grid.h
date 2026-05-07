@@ -81,6 +81,7 @@ class BaseGrid final : public wxWindow {
 		wxBrush Selection;
 		wxBrush Comment;
 		wxBrush Visible;
+		wxBrush Overflow;
 		wxBrush SelectedComment;
 		wxBrush LeftCol;
 	} row_colors;

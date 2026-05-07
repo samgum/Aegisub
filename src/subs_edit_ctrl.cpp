@@ -36,7 +36,9 @@
 #include "options.h"
 #include "include/aegisub/context.h"
 #include "include/aegisub/spellchecker.h"
+#include "project.h"
 #include "selection_controller.h"
+#include "subtitle_overflow.h"
 #include "text_selection_controller.h"
 #include "thesaurus.h"
 #include "utils.h"
@@ -121,6 +123,7 @@ SubsTextEditCtrl::SubsTextEditCtrl(wxWindow* parent, wxSize wsize, long style, a
 		Bind(wxEVT_MENU, bind(&cmd::call, "edit/line/split/preserve", context), EDIT_MENU_SPLIT_PRESERVE);
 		Bind(wxEVT_MENU, bind(&cmd::call, "edit/line/split/estimate", context), EDIT_MENU_SPLIT_ESTIMATE);
 		Bind(wxEVT_MENU, bind(&cmd::call, "edit/line/split/video", context), EDIT_MENU_SPLIT_VIDEO);
+		BindConnection(context->project->AddVideoProviderListener([this](AsyncVideoProvider *) { UpdateStyle(); }));
 	}
 
 	Bind(wxEVT_CONTEXT_MENU, &SubsTextEditCtrl::OnContextMenu, this);
@@ -155,6 +158,8 @@ SubsTextEditCtrl::SubsTextEditCtrl(wxWindow* parent, wxSize wsize, long style, a
 
 	BindConnection(OPT_SUB("Colour/Subtitle/Background", &SubsTextEditCtrl::SetStyles, this));
 	BindConnection(OPT_SUB("Subtitle/Highlight/Syntax", &SubsTextEditCtrl::UpdateStyle, this));
+	BindConnection(OPT_SUB("Subtitle/Overflow Highlight/Enabled", &SubsTextEditCtrl::UpdateStyle, this));
+	BindConnection(OPT_SUB("Colour/Subtitle/Overflow Highlight", &SubsTextEditCtrl::SetStyles, this));
 	BindConnection(OPT_SUB("App/Call Tips", &SubsTextEditCtrl::UpdateCallTip, this));
 
 	Bind(wxEVT_MENU, [this](wxCommandEvent&) {
@@ -273,6 +278,24 @@ void SubsTextEditCtrl::SetStyles() {
 	// IME pending text indicator
 	IndicatorSetStyle(1, wxSTC_INDIC_PLAIN);
 	IndicatorSetUnder(1, true);
+
+	// Overlong line indicator
+	IndicatorSetStyle(2, wxSTC_INDIC_ROUNDBOX);
+	IndicatorSetForeground(2, to_wx(OPT_GET("Colour/Subtitle/Overflow Highlight")->GetColor()));
+	IndicatorSetUnder(2, true);
+}
+
+void SubsTextEditCtrl::UpdateOverflowHighlight() {
+	SetIndicatorCurrent(2);
+	IndicatorClearRange(0, GetTextLength());
+
+	AssDialogue *diag = context ? context->selectionController->GetActiveLine() : nullptr;
+	auto result = subtitle_overflow::Check(context, diag);
+	if (!result.overflow)
+		return;
+
+	for (auto const& range : result.ranges)
+		IndicatorFillRange(range.start, range.length);
 }
 
 void SubsTextEditCtrl::UpdateStyle() {
@@ -284,6 +307,7 @@ void SubsTextEditCtrl::UpdateStyle() {
 
 	cursor_pos = -1;
 	UpdateCallTip();
+	UpdateOverflowHighlight();
 
 	StartStyling(0);
 

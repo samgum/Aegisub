@@ -95,6 +95,7 @@ class SubsTextEditCtrl final : public wxStyledTextCtrl, private agi::signal::Con
 
 	void StyleSpellCheck();
 	void UpdateCallTip();
+	void UpdateOverflowHighlight();
 	void SetStyles();
 
 	void UpdateStyle();

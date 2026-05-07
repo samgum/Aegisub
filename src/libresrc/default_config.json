@@ -213,6 +213,7 @@
 				"Background" : "rgb(255,255,255)",
 				"Comment" : "rgb(216, 222, 245)",
 				"Inframe" : "rgb(255, 253, 234)",
+				"Overflow" : "rgb(255, 246, 143)",
 				"Selected Comment" : "rgb(211, 238, 238)",
 				"Selection" : "rgb(206, 255, 231)"
 			},
@@ -226,6 +227,7 @@
 		},
 		"Subtitle" : {
 			"Background" : "rgb(255, 255, 255)",
+			"Overflow Highlight" : "rgb(255, 214, 64)",
 			"Syntax" : {
 				"Background" : {
 					"Brackets" : "",
@@ -399,6 +401,9 @@
 		},
 		"Highlight" : {
 			"Syntax" : true
+		},
+		"Overflow Highlight" : {
+			"Enabled" : true
 		},
 		"Provider" : "libass",
 		"Show Original": false,
