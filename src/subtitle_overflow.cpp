@@ -285,6 +285,15 @@ double measure_char(wxDC& dc, TextState const& state, std::string_view raw) {
 	return extent.GetWidth() * state.scalex / 100.;
 }
 
+double measure_text(wxDC& dc, TextState const& state, std::string_view raw) {
+	if (raw.empty())
+		return 0.;
+
+	dc.SetFont(make_font(state));
+	wxSize extent = dc.GetTextExtent(to_wx(raw));
+	return extent.GetWidth() * state.scalex / 100.;
+}
+
 int line_margin(AssDialogue const& line, AssStyle const& style, int index) {
 	return line.Margin[index] ? line.Margin[index] : style.Margin[index];
 }
@@ -423,26 +432,52 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 		if (start >= end || state.drawing > 0)
 			return;
 
+		struct RunChar {
+			size_t start = 0;
+			size_t end = 0;
+			double width = 0.;
+		};
+		std::vector<RunChar> chars;
+		double summed_width = 0.;
+
 		for (size_t pos = start; pos < end;) {
 			size_t char_start = pos;
 			pos = std::min(end, pos + utf8_char_len(static_cast<unsigned char>(text[pos])));
 
 			double char_width = measure_char(dc, state, std::string_view(text).substr(char_start, pos - char_start));
-			double char_left = segment.width + leading_spacing();
+			chars.push_back({ char_start, pos, char_width });
+			summed_width += char_width;
+		}
+
+		if (chars.empty())
+			return;
+
+		double text_width = measure_text(dc, state, std::string_view(text).substr(start, end - start));
+		double scale = summed_width > 0. ? text_width / summed_width : 1.;
+		double spacing = state.spacing * state.script_to_video_x * state.scalex / 100.;
+		double cursor = segment.width + leading_spacing();
+
+		for (size_t i = 0; i < chars.size(); ++i) {
+			if (i)
+				cursor += spacing;
+			double char_width = chars[i].width * scale;
+			double char_left = cursor;
 			double char_right = char_left + char_width;
 			double outline = state.outline_w * state.script_to_video_x;
 			double shadow = state.shadow_w * state.script_to_video_x;
 			segment.chars.push_back({
-				static_cast<int>(char_start),
-				static_cast<int>(pos - char_start),
+				static_cast<int>(chars[i].start),
+				static_cast<int>(chars[i].end - chars[i].start),
 				char_left,
 				char_right,
 				outline + std::max(0., -shadow),
 				outline + std::max(0., shadow)
 			});
-			segment.width = char_right;
-			first_char = false;
+			cursor = char_right;
 		}
+
+		segment.width = cursor;
+		first_char = false;
 	};
 
 	for (size_t pos = 0; pos < text.size();) {
