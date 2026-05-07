@@ -1,20 +1,16 @@
 #include "subtitle_overflow.h"
 
-#include "ass_attachment.h"
 #include "ass_dialogue.h"
 #include "ass_file.h"
-#include "ass_info.h"
 #include "ass_style.h"
 #include "async_video_provider.h"
 #include "compat.h"
 #include "include/aegisub/context.h"
 #include "options.h"
 #include "project.h"
-#include "subtitles_provider_libass.h"
 
 #include <algorithm>
 #include <cctype>
-#include <cstring>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -185,74 +181,27 @@ int measure_char(wxDC& dc, TextState const& state, std::string_view raw) {
 	return static_cast<int>(extent.GetWidth() * state.scalex / 100.);
 }
 
+size_t count_utf8_chars(std::string_view raw) {
+	size_t count = 0;
+	for (size_t pos = 0; pos < raw.size();) {
+		pos += utf8_char_len(static_cast<unsigned char>(raw[pos]));
+		++count;
+	}
+	return count;
+}
+
+int measure_text(wxDC& dc, TextState const& state, std::string_view raw) {
+	if (raw.empty())
+		return 0;
+
+	dc.SetFont(make_font(state));
+	wxSize extent = dc.GetTextExtent(to_wx(raw));
+	double spacing = std::max<size_t>(1, count_utf8_chars(raw)) - 1;
+	return static_cast<int>(extent.GetWidth() * state.scalex / 100. + spacing * state.spacing * state.script_to_video_x);
+}
+
 int line_margin(AssDialogue const& line, AssStyle const& style, int index) {
 	return line.Margin[index] ? line.Margin[index] : style.Margin[index];
-}
-
-bool has_explicit_positioning(std::string const& text) {
-	return text.find("\\pos(") != std::string::npos || text.find("\\move(") != std::string::npos;
-}
-
-std::string build_single_line_ass(AssFile const& ass, AssDialogue const& line) {
-	std::string data;
-
-	auto push_header = [&](const char *str) {
-		data.insert(data.end(), str, str + strlen(str));
-	};
-	auto push_line = [&](std::string const& str) {
-		data.insert(data.end(), str.begin(), str.end());
-		data.push_back('\n');
-	};
-
-	push_header("\xEF\xBB\xBF[Script Info]\n");
-	for (auto const& info : ass.Info)
-		push_line(info.GetEntryData());
-
-	push_header("[V4+ Styles]\n");
-	for (auto const& style : ass.Styles)
-		push_line(style.GetEntryData());
-
-	if (!ass.Attachments.empty()) {
-		push_header("[Fonts]\n");
-		for (auto const& attachment : ass.Attachments) {
-			if (attachment.Group() == AssEntryGroup::FONT)
-				push_line(attachment.GetEntryData());
-		}
-	}
-
-	push_header("[Events]\n");
-	push_line(line.GetEntryData());
-	return data;
-}
-
-struct RenderCheck {
-	bool valid = false;
-	bool overflow = false;
-};
-
-RenderCheck check_rendered_bounds(agi::Context *context, AssDialogue const& line, AssStyle const& style, int video_w, int video_h, double scale_x) {
-	RenderCheck result;
-
-	std::string data = build_single_line_ass(*context->ass, line);
-	int start = static_cast<int>(line.Start);
-	int end = static_cast<int>(line.End);
-	int time = start + std::max(1, std::min(50, (end - start) / 2));
-	auto bounds = libass::GetRenderedBounds(data.data(), data.size(), video_w, video_h, time);
-	if (!bounds.valid)
-		return result;
-
-	result.valid = true;
-
-	int left = 0;
-	int right = video_w;
-	if (!has_explicit_positioning(line.Text.get())) {
-		left = static_cast<int>(line_margin(line, style, 0) * scale_x);
-		right = video_w - static_cast<int>(line_margin(line, style, 1) * scale_x);
-	}
-
-	const int tolerance = 2;
-	result.overflow = bounds.min_x < left - tolerance || bounds.max_x > right + tolerance;
-	return result;
 }
 
 subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const *line, wxDC& dc) {
@@ -303,6 +252,49 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 		segment_overflow = false;
 	};
 
+	auto leading_spacing = [&] {
+		return first_char ? 0 : static_cast<int>(state.spacing * state.script_to_video_x);
+	};
+
+	auto add_plain_run = [&](size_t start, size_t end) {
+		if (start >= end || state.drawing > 0)
+			return;
+
+		std::string_view run = std::string_view(text).substr(start, end - start);
+		int next_width = width + leading_spacing() + measure_text(dc, state, run);
+		if (segment_overflow) {
+			result.overflow = true;
+			result.ranges.push_back({ static_cast<int>(start), static_cast<int>(end - start) });
+			width = next_width;
+			first_char = false;
+			return;
+		}
+
+		if (next_width <= available_width && !segment_overflow) {
+			width = next_width;
+			first_char = false;
+			return;
+		}
+
+		for (size_t pos = start; pos < end;) {
+			size_t char_start = pos;
+			pos = std::min(end, pos + utf8_char_len(static_cast<unsigned char>(text[pos])));
+
+			int char_width = measure_char(dc, state, std::string_view(text).substr(char_start, pos - char_start));
+			next_width = width + leading_spacing() + char_width;
+			if (next_width > available_width || segment_overflow) {
+				result.overflow = true;
+				segment_overflow = true;
+				result.ranges.push_back({ static_cast<int>(char_start), static_cast<int>(end - char_start) });
+				width = next_width;
+				first_char = false;
+				return;
+			}
+			width = next_width;
+			first_char = false;
+		}
+	};
+
 	for (size_t pos = 0; pos < text.size();) {
 		if (text[pos] == '{') {
 			size_t end = text.find('}', pos + 1);
@@ -327,7 +319,7 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 					continue;
 
 				int char_width = measure_char(dc, state, " ");
-				int next_width = width + (first_char ? 0 : static_cast<int>(state.spacing * state.script_to_video_x)) + char_width;
+				int next_width = width + leading_spacing() + char_width;
 				if (next_width > available_width || segment_overflow) {
 					result.overflow = true;
 					segment_overflow = true;
@@ -340,34 +332,17 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 		}
 
 		size_t start = pos;
-		size_t length = utf8_char_len(static_cast<unsigned char>(text[pos]));
-		pos = std::min(text.size(), pos + length);
-		if (state.drawing > 0)
-			continue;
-
-		int char_width = measure_char(dc, state, std::string_view(text).substr(start, pos - start));
-		int next_width = width + (first_char ? 0 : static_cast<int>(state.spacing * state.script_to_video_x)) + char_width;
-		if (next_width > available_width || segment_overflow) {
-			result.overflow = true;
-			segment_overflow = true;
-			result.ranges.push_back({ static_cast<int>(start), static_cast<int>(pos - start) });
+		while (pos < text.size()) {
+			if (text[pos] == '{')
+				break;
+			if (text[pos] == '\\' && pos + 1 < text.size() && (text[pos + 1] == 'N' || text[pos + 1] == 'n' || text[pos + 1] == 'h'))
+				break;
+			pos = std::min(text.size(), pos + utf8_char_len(static_cast<unsigned char>(text[pos])));
 		}
-		width = next_width;
-		first_char = false;
+		add_plain_run(start, pos);
 	}
 
 	dc.SetFont(old_font);
-
-	if (auto rendered = check_rendered_bounds(context, *line, *style, video_w, video_h, scale_x); rendered.valid) {
-		result.overflow = rendered.overflow;
-		if (!result.overflow) {
-			result.ranges.clear();
-		}
-		else if (result.ranges.empty()) {
-			result.ranges.push_back({ 0, static_cast<int>(text.size()) });
-		}
-	}
-
 	return result;
 }
 

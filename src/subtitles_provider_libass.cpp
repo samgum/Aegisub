@@ -44,7 +44,6 @@
 #include <libaegisub/log.h>
 #include <libaegisub/util.h>
 
-#include <algorithm>
 #include <atomic>
 #include <boost/gil.hpp>
 #include <memory>
@@ -207,56 +206,6 @@ void LibassSubtitlesProvider::DrawSubtitles(VideoFrame &frame,double time) {
 namespace libass {
 std::unique_ptr<SubtitlesProvider> Create(std::string const&, agi::BackgroundRunner *br) {
 	return std::make_unique<LibassSubtitlesProvider>(br);
-}
-
-RenderedBounds GetRenderedBounds(const char *data, size_t len, int width, int height, int time_ms) {
-	RenderedBounds bounds;
-	if (!library || !data || !len || width <= 0 || height <= 0)
-		return bounds;
-
-	ASS_Track *track = ass_read_memory(library, const_cast<char *>(data), len, nullptr);
-	if (!track)
-		return bounds;
-
-	ASS_Renderer *renderer = ass_renderer_init(library);
-	if (!renderer) {
-		ass_free_track(track);
-		return bounds;
-	}
-
-	ass_set_font_scale(renderer, 1.);
-	ass_set_fonts(renderer, nullptr, "Sans", 1, nullptr, true);
-	ass_set_frame_size(renderer, width, height);
-	ass_set_storage_size(renderer, width, height);
-
-	ASS_Image *img = ass_render_frame(renderer, track, time_ms, nullptr);
-	for (; img; img = img->next) {
-		if (img->w <= 0 || img->h <= 0)
-			continue;
-
-		int min_x = img->dst_x;
-		int min_y = img->dst_y;
-		int max_x = img->dst_x + img->w;
-		int max_y = img->dst_y + img->h;
-
-		if (!bounds.valid) {
-			bounds.valid = true;
-			bounds.min_x = min_x;
-			bounds.min_y = min_y;
-			bounds.max_x = max_x;
-			bounds.max_y = max_y;
-		}
-		else {
-			bounds.min_x = std::min(bounds.min_x, min_x);
-			bounds.min_y = std::min(bounds.min_y, min_y);
-			bounds.max_x = std::max(bounds.max_x, max_x);
-			bounds.max_y = std::max(bounds.max_y, max_y);
-		}
-	}
-
-	ass_renderer_done(renderer);
-	ass_free_track(track);
-	return bounds;
 }
 
 void CacheFonts() {

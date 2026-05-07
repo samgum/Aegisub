@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -24,15 +23,6 @@ class SubtitlesProvider;
 namespace agi { class BackgroundRunner; }
 
 namespace libass {
-	struct RenderedBounds {
-		bool valid = false;
-		int min_x = 0;
-		int min_y = 0;
-		int max_x = 0;
-		int max_y = 0;
-	};
-
 	std::unique_ptr<SubtitlesProvider> Create(std::string const&, agi::BackgroundRunner *br);
 	void CacheFonts();
-	RenderedBounds GetRenderedBounds(const char *data, size_t len, int width, int height, int time_ms);
 }

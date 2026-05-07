@@ -31,6 +31,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <wx/brush.h>
 #include <wx/scrolbar.h>
@@ -43,6 +44,7 @@ namespace agi {
 class AssDialogue;
 class GridColumn;
 class WidthHelper;
+class wxDC;
 
 class BaseGrid final : public wxWindow {
 	std::vector<agi::signal::Connection> connections;
@@ -66,6 +68,9 @@ class BaseGrid final : public wxWindow {
 
 	/// Rows which are visible on the current video frame
 	std::vector<int> visible_rows;
+
+	/// Cached subtitle overflow state, keyed by AssDialogue::Id
+	std::unordered_map<int, bool> overflow_cache;
 
 	agi::Context *context; ///< Associated project context
 
@@ -113,6 +118,8 @@ class BaseGrid final : public wxWindow {
 	void SetColumnWidths();
 
 	bool IsDisplayed(const AssDialogue *line) const;
+	bool IsOverflow(AssDialogue const *line, wxDC& dc);
+	void ClearOverflowCache();
 
 	void UpdateMaps();
 	void UpdateStyle();
