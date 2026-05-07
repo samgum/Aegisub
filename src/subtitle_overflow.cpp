@@ -41,6 +41,8 @@ struct LayoutState {
 	int alignment = 2;
 	bool positioned = false;
 	double x = 0.;
+	double x2 = 0.;
+	bool has_secondary_x = false;
 };
 
 struct MeasuredChar {
@@ -150,6 +152,8 @@ void apply_override_block(std::string_view text, TextState& state, TextState con
 			if (parse_tag_numbers(text, pos, values, 2)) {
 				layout.positioned = true;
 				layout.x = values[0];
+				layout.x2 = values[0];
+				layout.has_secondary_x = false;
 			}
 			--pos;
 		}
@@ -159,6 +163,8 @@ void apply_override_block(std::string_view text, TextState& state, TextState con
 			if (parse_tag_numbers(text, pos, values, 4)) {
 				layout.positioned = true;
 				layout.x = values[0];
+				layout.x2 = values[2];
+				layout.has_secondary_x = true;
 			}
 			--pos;
 		}
@@ -298,9 +304,9 @@ int line_margin(AssDialogue const& line, AssStyle const& style, int index) {
 	return line.Margin[index] ? line.Margin[index] : style.Margin[index];
 }
 
-double line_anchor_x(LayoutState const& layout, AssDialogue const& line, AssStyle const& style, int script_w, double scale_x) {
+double line_anchor_x(LayoutState const& layout, AssDialogue const& line, AssStyle const& style, int script_w, double scale_x, bool secondary = false) {
 	if (layout.positioned)
-		return layout.x * scale_x;
+		return (secondary && layout.has_secondary_x ? layout.x2 : layout.x) * scale_x;
 
 	int margin_l = line_margin(line, style, 0);
 	int margin_r = line_margin(line, style, 1);
@@ -400,24 +406,35 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 			return;
 		}
 
-		double anchor_x = line_anchor_x(layout, *line, *style, script_w, scale_x);
-		double left = segment_left(anchor_x, layout.alignment, segment.width);
-		double bound_left = left;
-		double bound_right = left + segment.width;
-		for (auto const& ch : segment.chars) {
-			bound_left = std::min(bound_left, left + ch.left - ch.pad_left);
-			bound_right = std::max(bound_right, left + ch.right + ch.pad_right);
-		}
-		bool segment_overflow = bound_left < 0. || bound_right > video_w;
-
-		if (segment_overflow) {
-			result.overflow = true;
+		std::vector<bool> highlight(segment.chars.size(), false);
+		auto check_anchor = [&](double anchor_x) {
+			double left = segment_left(anchor_x, layout.alignment, segment.width);
+			double bound_left = left;
+			double bound_right = left + segment.width;
 			for (auto const& ch : segment.chars) {
+				bound_left = std::min(bound_left, left + ch.left - ch.pad_left);
+				bound_right = std::max(bound_right, left + ch.right + ch.pad_right);
+			}
+			if (bound_left >= 0. && bound_right <= video_w)
+				return;
+
+			result.overflow = true;
+			for (size_t i = 0; i < segment.chars.size(); ++i) {
+				auto const& ch = segment.chars[i];
 				double ch_left = left + ch.left - ch.pad_left;
 				double ch_right = left + ch.right + ch.pad_right;
 				if (ch_left < 0. || ch_right > video_w)
-					add_range(result, ch.start, ch.length);
+					highlight[i] = true;
 			}
+		};
+
+		check_anchor(line_anchor_x(layout, *line, *style, script_w, scale_x));
+		if (layout.has_secondary_x && layout.x2 != layout.x)
+			check_anchor(line_anchor_x(layout, *line, *style, script_w, scale_x, true));
+
+		for (size_t i = 0; i < segment.chars.size(); ++i) {
+			if (highlight[i])
+				add_range(result, segment.chars[i].start, segment.chars[i].length);
 		}
 
 		segment = MeasuredSegment();
