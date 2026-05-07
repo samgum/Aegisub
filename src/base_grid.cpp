@@ -646,6 +646,9 @@ void BaseGrid::OnCharHook(wxKeyEvent &event) {
 		key == WXK_PAGEUP || key == WXK_PAGEDOWN ||
 		key == WXK_HOME || key == WXK_END)
 	{
+		if (event.CmdDown() && hotkey::check("Audio", context, event))
+			return;
+
 		event.Skip();
 		return;
 	}
