@@ -1,16 +1,20 @@
 #include "subtitle_overflow.h"
 
+#include "ass_attachment.h"
 #include "ass_dialogue.h"
 #include "ass_file.h"
+#include "ass_info.h"
 #include "ass_style.h"
 #include "async_video_provider.h"
 #include "compat.h"
 #include "include/aegisub/context.h"
 #include "options.h"
 #include "project.h"
+#include "subtitles_provider_libass.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -185,6 +189,72 @@ int line_margin(AssDialogue const& line, AssStyle const& style, int index) {
 	return line.Margin[index] ? line.Margin[index] : style.Margin[index];
 }
 
+bool has_explicit_positioning(std::string const& text) {
+	return text.find("\\pos(") != std::string::npos || text.find("\\move(") != std::string::npos;
+}
+
+std::string build_single_line_ass(AssFile const& ass, AssDialogue const& line) {
+	std::string data;
+
+	auto push_header = [&](const char *str) {
+		data.insert(data.end(), str, str + strlen(str));
+	};
+	auto push_line = [&](std::string const& str) {
+		data.insert(data.end(), str.begin(), str.end());
+		data.push_back('\n');
+	};
+
+	push_header("\xEF\xBB\xBF[Script Info]\n");
+	for (auto const& info : ass.Info)
+		push_line(info.GetEntryData());
+
+	push_header("[V4+ Styles]\n");
+	for (auto const& style : ass.Styles)
+		push_line(style.GetEntryData());
+
+	if (!ass.Attachments.empty()) {
+		push_header("[Fonts]\n");
+		for (auto const& attachment : ass.Attachments) {
+			if (attachment.Group() == AssEntryGroup::FONT)
+				push_line(attachment.GetEntryData());
+		}
+	}
+
+	push_header("[Events]\n");
+	push_line(line.GetEntryData());
+	return data;
+}
+
+struct RenderCheck {
+	bool valid = false;
+	bool overflow = false;
+};
+
+RenderCheck check_rendered_bounds(agi::Context *context, AssDialogue const& line, AssStyle const& style, int video_w, int video_h, double scale_x) {
+	RenderCheck result;
+
+	std::string data = build_single_line_ass(*context->ass, line);
+	int start = static_cast<int>(line.Start);
+	int end = static_cast<int>(line.End);
+	int time = start + std::max(1, std::min(50, (end - start) / 2));
+	auto bounds = libass::GetRenderedBounds(data.data(), data.size(), video_w, video_h, time);
+	if (!bounds.valid)
+		return result;
+
+	result.valid = true;
+
+	int left = 0;
+	int right = video_w;
+	if (!has_explicit_positioning(line.Text.get())) {
+		left = static_cast<int>(line_margin(line, style, 0) * scale_x);
+		right = video_w - static_cast<int>(line_margin(line, style, 1) * scale_x);
+	}
+
+	const int tolerance = 2;
+	result.overflow = bounds.min_x < left - tolerance || bounds.max_x > right + tolerance;
+	return result;
+}
+
 subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const *line, wxDC& dc) {
 	subtitle_overflow::Result result;
 
@@ -287,6 +357,17 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 	}
 
 	dc.SetFont(old_font);
+
+	if (auto rendered = check_rendered_bounds(context, *line, *style, video_w, video_h, scale_x); rendered.valid) {
+		result.overflow = rendered.overflow;
+		if (!result.overflow) {
+			result.ranges.clear();
+		}
+		else if (result.ranges.empty()) {
+			result.ranges.push_back({ 0, static_cast<int>(text.size()) });
+		}
+	}
+
 	return result;
 }
 
