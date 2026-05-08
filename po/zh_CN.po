@@ -7092,3 +7092,149 @@ msgstr ""
 
 #~ msgid "Drawings"
 #~ msgstr "绘图代码"
+
+#: default_menu.json:0
+msgid "&Tools"
+msgstr "工具(&O)"
+
+#: ../src/command/tool.cpp:0
+msgid "Stitch &Timings..."
+msgstr "拼接时间轴(&T)..."
+
+#: ../src/command/tool.cpp:0 ../src/dialog_timing_tools.cpp:0
+msgid "Stitch Timings"
+msgstr "拼接时间轴"
+
+#: ../src/command/tool.cpp:0
+msgid "Stitch adjacent subtitle timing gaps"
+msgstr "拼接相邻字幕行的时间间隙"
+
+#: ../src/command/tool.cpp:0
+msgid "Check &Style Overlaps..."
+msgstr "检查样式重叠(&O)..."
+
+#: ../src/command/tool.cpp:0 ../src/dialog_timing_tools.cpp:0
+msgid "Check Style Overlaps"
+msgstr "检查样式重叠"
+
+#: ../src/command/tool.cpp:0
+msgid "Check overlapping subtitle lines within each style"
+msgstr "检查每个样式内部重叠的字幕行"
+
+#: ../src/dialog_about.cpp:0
+msgid "Modified and produced by Shanggan Mieya."
+msgstr "该项目由伤感咩吖修改制作"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "previous line end"
+msgstr "上一行结束时间"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "next line start"
+msgstr "下一行开始时间"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "frames"
+msgstr "帧"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "time"
+msgstr "时间"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "gap"
+msgstr "间隙"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Use previous line end"
+msgstr "使用上一行结束时间"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Use next line start"
+msgstr "使用下一行开始时间"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Stitch by"
+msgstr "拼接依据"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Time"
+msgstr "时间"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Frames"
+msgstr "帧"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Units"
+msgstr "单位"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "All rows"
+msgstr "全部行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Selected rows"
+msgstr "选中行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Maximum gap (seconds):"
+msgstr "最大间隙（秒）："
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Maximum gap must be a non-negative number of seconds."
+msgstr "最大间隙必须是非负秒数。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No subtitle gaps matched the current settings."
+msgstr "没有字幕间隙符合当前设置。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "stitch timings"
+msgstr "拼接时间轴"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style overlap check"
+msgstr "样式重叠检查"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid ""
+"Comment lines are ignored. Counts are pairs within the same style; touching "
+"endpoints are not counted as crossing overlaps."
+msgstr "已忽略注释行。计数为同一样式内的行对；仅端点相接不计为交叉重叠。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "lines"
+msgstr "行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Exact same time pairs"
+msgstr "时间完全相同的行对"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "lines involved"
+msgstr "涉及行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Same start time pairs"
+msgstr "开始时间相同的行对"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Same end time pairs"
+msgstr "结束时间相同的行对"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Crossing overlap pairs"
+msgstr "时间交叉的行对"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "First crossing row pairs"
+msgstr "前几组交叉行号"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No non-comment dialogue lines were found."
+msgstr "没有找到非注释对白行。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No same-style timing overlaps were found."
+msgstr "没有找到同一样式内的时间重叠。"

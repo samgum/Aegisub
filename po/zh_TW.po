@@ -6591,3 +6591,149 @@ msgstr ""
 "GNU通用公共許可證第二版(GPLv2)，這意味著您可以將該應用程式用於任何目的而不需"
 "要支付費用，但同時也不會得到任何形式的擔保。%n%n您可以到Aegisub官網取得原始程"
 "式碼資訊。"
+
+#: default_menu.json:0
+msgid "&Tools"
+msgstr "工具(&O)"
+
+#: ../src/command/tool.cpp:0
+msgid "Stitch &Timings..."
+msgstr "拼接時間軸(&T)..."
+
+#: ../src/command/tool.cpp:0 ../src/dialog_timing_tools.cpp:0
+msgid "Stitch Timings"
+msgstr "拼接時間軸"
+
+#: ../src/command/tool.cpp:0
+msgid "Stitch adjacent subtitle timing gaps"
+msgstr "拼接相鄰字幕列的時間間隙"
+
+#: ../src/command/tool.cpp:0
+msgid "Check &Style Overlaps..."
+msgstr "檢查樣式重疊(&O)..."
+
+#: ../src/command/tool.cpp:0 ../src/dialog_timing_tools.cpp:0
+msgid "Check Style Overlaps"
+msgstr "檢查樣式重疊"
+
+#: ../src/command/tool.cpp:0
+msgid "Check overlapping subtitle lines within each style"
+msgstr "檢查每個樣式內部重疊的字幕列"
+
+#: ../src/dialog_about.cpp:0
+msgid "Modified and produced by Shanggan Mieya."
+msgstr "該專案由傷感咩吖修改製作"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "previous line end"
+msgstr "上一列結束時間"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "next line start"
+msgstr "下一列開始時間"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "frames"
+msgstr "影格"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "time"
+msgstr "時間"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "gap"
+msgstr "間隙"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Use previous line end"
+msgstr "使用上一列結束時間"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Use next line start"
+msgstr "使用下一列開始時間"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Stitch by"
+msgstr "拼接依據"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Time"
+msgstr "時間"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Frames"
+msgstr "影格"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Units"
+msgstr "單位"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "All rows"
+msgstr "全部列"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Selected rows"
+msgstr "選取列"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Maximum gap (seconds):"
+msgstr "最大間隙（秒）："
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Maximum gap must be a non-negative number of seconds."
+msgstr "最大間隙必須是非負秒數。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No subtitle gaps matched the current settings."
+msgstr "沒有字幕間隙符合目前設定。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "stitch timings"
+msgstr "拼接時間軸"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style overlap check"
+msgstr "樣式重疊檢查"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid ""
+"Comment lines are ignored. Counts are pairs within the same style; touching "
+"endpoints are not counted as crossing overlaps."
+msgstr "已忽略註解列。計數為同一樣式內的列對；僅端點相接不計為交叉重疊。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "lines"
+msgstr "列"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Exact same time pairs"
+msgstr "時間完全相同的列對"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "lines involved"
+msgstr "涉及列"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Same start time pairs"
+msgstr "開始時間相同的列對"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Same end time pairs"
+msgstr "結束時間相同的列對"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Crossing overlap pairs"
+msgstr "時間交叉的列對"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "First crossing row pairs"
+msgstr "前幾組交叉列號"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No non-comment dialogue lines were found."
+msgstr "沒有找到非註解對白列。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No same-style timing overlaps were found."
+msgstr "沒有找到同一樣式內的時間重疊。"
