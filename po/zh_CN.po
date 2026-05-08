@@ -5707,9 +5707,13 @@ msgid "Ignore punctuation"
 msgstr "忽略标点符号"
 
 #: ../src/preferences.cpp:232
+msgid "Video Width Highlight"
+msgstr "视频宽度高亮"
+
+#: ../src/preferences.cpp:232
 #: ../src/preferences.cpp:231
 msgid "Highlight lines wider than the video"
-msgstr "高亮超出画面宽度的行"
+msgstr "高亮超出视频宽度的行"
 
 #: ../src/preferences.cpp:232
 msgid "Grid"
@@ -5821,8 +5825,8 @@ msgstr "卡拉OK变量"
 
 #: ../src/preferences.cpp:285
 #: ../src/preferences.cpp:280
-msgid "Overlong line highlight"
-msgstr "超宽行高亮"
+msgid "Video width overflow highlight"
+msgstr "超出视频宽度文本高亮"
 
 #: ../src/preferences.cpp:285
 msgid "Audio Color Schemes"
@@ -5866,8 +5870,8 @@ msgstr "在当前帧显示的行背景色"
 
 #: ../src/preferences.cpp:297
 #: ../src/preferences.cpp:297
-msgid "Overlong line background"
-msgstr "超宽行背景"
+msgid "Video width overflow background"
+msgstr "超出视频宽度行背景"
 
 #: ../src/preferences.cpp:297
 msgid "Comment background"
@@ -7094,8 +7098,8 @@ msgstr ""
 #~ msgstr "绘图代码"
 
 #: default_menu.json:0
-msgid "&Tools"
-msgstr "工具(&O)"
+msgid "Too&ls"
+msgstr "工具(&L)"
 
 #: ../src/command/tool.cpp:0
 msgid "Stitch &Timings..."
@@ -7188,6 +7192,10 @@ msgstr "最大间隙必须是非负秒数。"
 #: ../src/dialog_timing_tools.cpp:0
 msgid "No subtitle gaps matched the current settings."
 msgstr "没有字幕间隙符合当前设置。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Stitched %d subtitle gaps."
+msgstr "已拼接 %d 处字幕间隙。"
 
 #: ../src/dialog_timing_tools.cpp:0
 msgid "stitch timings"

@@ -5640,6 +5640,10 @@ msgstr ""
 msgid "Ignore punctuation"
 msgstr ""
 
+#: ../src/preferences.cpp:232
+msgid "Video Width Highlight"
+msgstr ""
+
 #: ../src/preferences.cpp:231
 msgid "Highlight lines wider than the video"
 msgstr ""
@@ -5753,7 +5757,7 @@ msgid "Karaoke variables"
 msgstr ""
 
 #: ../src/preferences.cpp:280
-msgid "Overlong line highlight"
+msgid "Video width overflow highlight"
 msgstr ""
 
 #: ../src/preferences.cpp:285
@@ -5796,8 +5800,8 @@ msgstr ""
 msgid "In frame background"
 msgstr ""
 
-#: ../src/preferences.cpp:297
-msgid "Overlong line background"
+#: ../src/preferences.cpp:298
+msgid "Video width overflow background"
 msgstr ""
 
 #: ../src/preferences.cpp:297
@@ -6992,3 +6996,10 @@ msgstr ""
 msgid "This will install Aegisub {#BUILD_GIT_VERSION_STRING} on your computer.%n%nAegisub is covered by the GNU General Public License version 2. This means you may use the application for any purpose without charge, but that no warranties of any kind are given either.%n%nSee the Aegisub website for information on obtaining the source code."
 msgstr ""
 
+#: default_menu.json:0
+msgid "Too&ls"
+msgstr ""
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Stitched %d subtitle gaps."
+msgstr ""

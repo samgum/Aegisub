@@ -228,7 +228,9 @@ void Interface(wxTreebook *book, Preferences *parent) {
 	p->OptionAdd(character_count, _("Characters Per Second Error Threshold"), "Subtitle/Character Counter/CPS Error Threshold", 0, 1000);
 	p->OptionAdd(character_count, _("Ignore whitespace"), "Subtitle/Character Counter/Ignore Whitespace");
 	p->OptionAdd(character_count, _("Ignore punctuation"), "Subtitle/Character Counter/Ignore Punctuation");
-	p->OptionAdd(character_count, _("Highlight lines wider than the video"), "Subtitle/Overflow Highlight/Enabled");
+
+	auto video_width = p->PageSizer(_("Video Width Highlight"));
+	p->OptionAdd(video_width, _("Highlight lines wider than the video"), "Subtitle/Overflow Highlight/Enabled");
 
 	auto grid = p->PageSizer(_("Grid"));
 	p->OptionAdd(grid, _("Focus grid on click"), "Subtitle/Grid/Focus Allow");
@@ -278,7 +280,7 @@ void Interface_Colours(wxTreebook *book, Preferences *parent) {
 	p->OptionAdd(syntax, _("Line Break"), "Colour/Subtitle/Syntax/Line Break");
 	p->OptionAdd(syntax, _("Karaoke templates"), "Colour/Subtitle/Syntax/Karaoke Template");
 	p->OptionAdd(syntax, _("Karaoke variables"), "Colour/Subtitle/Syntax/Karaoke Variable");
-	p->OptionAdd(syntax, _("Overlong line highlight"), "Colour/Subtitle/Overflow Highlight");
+	p->OptionAdd(syntax, _("Video width overflow highlight"), "Colour/Subtitle/Overflow Highlight");
 
 	p->sizer = new wxBoxSizer(wxVERTICAL);
 	main_sizer->AddSpacer(5);
@@ -296,7 +298,7 @@ void Interface_Colours(wxTreebook *book, Preferences *parent) {
 	p->OptionAdd(grid, _("Selection background"), "Colour/Subtitle Grid/Background/Selection");
 	p->OptionAdd(grid, _("Collision foreground"), "Colour/Subtitle Grid/Collision");
 	p->OptionAdd(grid, _("In frame background"), "Colour/Subtitle Grid/Background/Inframe");
-	p->OptionAdd(grid, _("Overlong line background"), "Colour/Subtitle Grid/Background/Overflow");
+	p->OptionAdd(grid, _("Video width overflow background"), "Colour/Subtitle Grid/Background/Overflow");
 	p->OptionAdd(grid, _("Comment background"), "Colour/Subtitle Grid/Background/Comment");
 	p->OptionAdd(grid, _("Selected comment background"), "Colour/Subtitle Grid/Background/Selected Comment");
 	p->OptionAdd(grid, _("Header background"), "Colour/Subtitle Grid/Header");

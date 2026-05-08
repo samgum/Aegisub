@@ -317,6 +317,7 @@ void DialogStitchTimings::Process(wxCommandEvent &) {
 	if (changed) {
 		context->ass->Commit(_("stitch timings"), AssFile::COMMIT_DIAG_TIME);
 		SaveHistory(changed);
+		wxMessageBox(wxString::Format(_("Stitched %d subtitle gaps."), changed), _("Stitch Timings"), wxICON_INFORMATION);
 	}
 	else {
 		wxMessageBox(_("No subtitle gaps matched the current settings."), _("Stitch Timings"), wxICON_INFORMATION);
