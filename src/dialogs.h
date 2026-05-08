@@ -73,6 +73,8 @@ void ShowSearchReplaceDialog(agi::Context *c, bool replace);
 void ShowSelectLinesDialog(agi::Context *c);
 void ShowShiftTimesDialog(agi::Context *c);
 void ShowSpellcheckerDialog(agi::Context *c);
+void ShowStitchTimingsDialog(agi::Context *c);
+void ShowStyleOverlapCheckDialog(agi::Context *c);
 void ShowStyleManagerDialog(agi::Context *c);
 void ShowTimingProcessorDialog(agi::Context *c);
 void ShowVideoDetailsDialog(agi::Context *c);

@@ -124,6 +124,10 @@
         { "command" : "audio/open/blank" },
         { "command" : "audio/open/noise" }
     ],
+    "main/tools" : [
+        { "command" : "tool/time/stitch", "text" : "拼接时间轴..." },
+        { "command" : "tool/style/overlap_check", "text" : "检查样式重叠..." }
+    ],
     "main/view" : [
         { "command" : "app/language" },
         { "command" : "app/options", "special" : "options" },

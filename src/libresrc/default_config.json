@@ -526,6 +526,12 @@
 			"Time" : 0,
 			"Type" : 0
 		},
+		"Stitch Timings" : {
+			"Anchor" : 0,
+			"By Frames" : false,
+			"Max Gap" : 1000,
+			"Selection Only" : false
+		},
 		"Spell Checker" : {
 			"Backend" : "hunspell",
 			"Language" : "en_US",

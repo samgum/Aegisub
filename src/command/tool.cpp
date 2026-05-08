@@ -168,6 +168,29 @@ struct tool_time_kanji final : public Command {
 	}
 };
 
+struct tool_time_stitch final : public Command {
+	CMD_NAME("tool/time/stitch")
+	CMD_ICON(shift_times_toolbutton)
+	STR_MENU("Stitch &Timings...")
+	STR_DISP("Stitch Timings")
+	STR_HELP("Stitch adjacent subtitle timing gaps")
+
+	void operator()(agi::Context *c) override {
+		ShowStitchTimingsDialog(c);
+	}
+};
+
+struct tool_style_overlap_check final : public Command {
+	CMD_NAME("tool/style/overlap_check")
+	STR_MENU("Check &Style Overlaps...")
+	STR_DISP("Check Style Overlaps")
+	STR_HELP("Check overlapping subtitle lines within each style")
+
+	void operator()(agi::Context *c) override {
+		ShowStyleOverlapCheckDialog(c);
+	}
+};
+
 struct tool_time_postprocess final : public Command {
 	CMD_NAME("tool/time/postprocess")
 	CMD_ICON(timing_processor_toolbutton)
@@ -273,6 +296,8 @@ namespace cmd {
 		reg(std::make_unique<tool_styling_assistant_preview>());
 		reg(std::make_unique<tool_style_manager>());
 		reg(std::make_unique<tool_time_kanji>());
+		reg(std::make_unique<tool_time_stitch>());
+		reg(std::make_unique<tool_style_overlap_check>());
 		reg(std::make_unique<tool_time_postprocess>());
 		reg(std::make_unique<tool_translation_assistant>());
 		reg(std::make_unique<tool_translation_assistant_commit>());
