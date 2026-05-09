@@ -46,6 +46,10 @@
 #include <algorithm>
 #include <cstring>
 
+#ifdef WITH_SOUNDTOUCH
+#include "audio_player_soundtouch.h"
+#endif
+
 // Uncomment to enable extremely spammy debug logging
 //#define PORTAUDIO_DEBUG
 
@@ -87,6 +91,16 @@ PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(pro
 
 	if (provider)
 		OpenStream();
+
+#ifdef WITH_SOUNDTOUCH
+	try {
+		if (provider)
+			tempo_processor = std::make_unique<SoundTouchAudioProcessor>(provider);
+	}
+	catch (...) {
+		// SoundTouch init failed, fall back to nearest-neighbor resampling
+	}
+#endif
 }
 
 void PortAudioPlayer::GatherDevices(PaHostApiIndex host_idx) {
@@ -119,6 +133,9 @@ PortAudioPlayer::~PortAudioPlayer() {
 		Stop();
 		Pa_CloseStream(stream);
 	}
+#ifdef WITH_SOUNDTOUCH
+	tempo_processor.reset();
+#endif
 	Pa_Terminate();
 }
 
@@ -181,6 +198,11 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 	end = start_sample + count;
 	speed_position = 0.0;
 
+#ifdef WITH_SOUNDTOUCH
+	if (tempo_processor)
+		tempo_processor->Reset(start_sample, start_sample + count, playback_speed, volume);
+#endif
+
 	// Start playing
 	if (!IsPlaying()) {
 		PaError err = Pa_SetStreamFinishedCallback(stream, paStreamFinishedCallback);
@@ -236,6 +258,14 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 	}
 
 	if (player->playback_speed != 1.0) {
+#ifdef WITH_SOUNDTOUCH
+		if (player->tempo_processor) {
+			auto out = static_cast<char *>(outputBuffer);
+			player->tempo_processor->Fill(out, framesPerBuffer);
+			player->current = player->tempo_processor->GetInputFrame();
+			return player->tempo_processor->IsFinished() ? paComplete : paContinue;
+		}
+#endif
 		const int bytes_per_frame = player->provider->GetChannels() * player->provider->GetBytesPerSample();
 		const auto source_frames = std::min<int64_t>(
 			player->end - player->current,
@@ -326,6 +356,11 @@ void PortAudioPlayer::SetPlaybackSpeed(double speed) {
 	}
 
 	playback_speed = std::max(0.25, std::min(speed, 4.0));
+
+#ifdef WITH_SOUNDTOUCH
+	if (tempo_processor)
+		tempo_processor->SetPlaybackSpeed(playback_speed);
+#endif
 }
 
 std::unique_ptr<AudioPlayer> CreatePortAudioPlayer(agi::AudioProvider *provider, wxWindow *) {

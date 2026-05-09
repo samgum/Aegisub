@@ -110,9 +110,9 @@ BaseGrid::BaseGrid(wxWindow* parent, agi::Context *context)
 		OPT_SUB("Colour/Subtitle Grid/Standard", &BaseGrid::UpdateStyle, this),
 
 		OPT_SUB("Subtitle/Grid/Highlight Subtitles in Frame", &BaseGrid::OnHighlightVisibleChange, this),
-		OPT_SUB("Subtitle/Overflow Highlight/Enabled", [&](agi::OptionValue const&) { ClearOverflowCache(); Refresh(false); }),
+		OPT_SUB("Subtitle/Overflow Highlight/Enabled", [&](agi::OptionValue const&) { subtitle_overflow::InvalidateAll(); Refresh(false); }),
 		OPT_SUB("Subtitle/Grid/Hide Overrides", [&](agi::OptionValue const&) { Refresh(false); }),
-		context->project->AddVideoProviderListener([&](AsyncVideoProvider *) { ClearOverflowCache(); Refresh(false); }),
+		context->project->AddVideoProviderListener([&](AsyncVideoProvider *) { subtitle_overflow::InvalidateAll(); Refresh(false); }),
 	});
 
 	Bind(wxEVT_CONTEXT_MENU, &BaseGrid::OnContextMenu, this);
@@ -136,21 +136,11 @@ void BaseGrid::OnDPIChanged(wxDPIChangedEvent &e) {
 	e.Skip();
 }
 
-void BaseGrid::ClearOverflowCache() {
-	overflow_cache.clear();
-}
-
 bool BaseGrid::IsOverflow(AssDialogue const *line, wxDC& dc) {
 	if (!line || !OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool())
 		return false;
 
-	auto it = overflow_cache.find(line->Id);
-	if (it != overflow_cache.end())
-		return it->second;
-
-	bool overflow = subtitle_overflow::Check(context, line, &dc).overflow;
-	overflow_cache[line->Id] = overflow;
-	return overflow;
+	return subtitle_overflow::Check(context, line, &dc).overflow;
 }
 
 void BaseGrid::OnSubtitlesCommit(int type) {
@@ -158,16 +148,23 @@ void BaseGrid::OnSubtitlesCommit(int type) {
 		UpdateMaps();
 
 	if (type == AssFile::COMMIT_NEW || type & AssFile::COMMIT_SCRIPTINFO || type & AssFile::COMMIT_STYLES || type & AssFile::COMMIT_DIAG_FULL)
-		ClearOverflowCache();
+		subtitle_overflow::InvalidateAll();
 
 	if (type & AssFile::COMMIT_DIAG_META) {
 		SetColumnWidths();
 		Refresh(false);
 		return;
 	}
-	if (type & AssFile::COMMIT_DIAG_TIME)
+	if (type & AssFile::COMMIT_DIAG_TIME) {
+		// Invalidate only the active line when its timing changes
+		if (auto *active = context->selectionController->GetActiveLine())
+			subtitle_overflow::InvalidateLine(active->Id);
 		Refresh(false);
+	}
 	else if (type & AssFile::COMMIT_DIAG_TEXT) {
+		// Invalidate only the active line when its text changes
+		if (auto *active = context->selectionController->GetActiveLine())
+			subtitle_overflow::InvalidateLine(active->Id);
 		if (OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool()) {
 			Refresh(false);
 			return;
@@ -199,7 +196,7 @@ void BaseGrid::OnHighlightVisibleChange(agi::OptionValue const& opt) {
 }
 
 void BaseGrid::UpdateStyle() {
-	ClearOverflowCache();
+	subtitle_overflow::InvalidateAll();
 
 	font = *wxNORMAL_FONT;
 	wxString fontname = FontFace("Subtitle/Grid");
@@ -233,7 +230,7 @@ void BaseGrid::UpdateStyle() {
 }
 
 void BaseGrid::UpdateMaps() {
-	ClearOverflowCache();
+	subtitle_overflow::InvalidateAll();
 	index_line_map.clear();
 
 	for (auto& curdiag : context->ass->Events)

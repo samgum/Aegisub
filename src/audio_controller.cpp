@@ -36,8 +36,11 @@
 #include "project.h"
 
 #include <libaegisub/audio/provider.h>
+#include <libaegisub/log.h>
 
 #include <algorithm>
+
+#include <wx/msgdlg.h>
 
 AudioController::AudioController(agi::Context *context)
 : context(context)
@@ -101,9 +104,35 @@ void AudioController::OnAudioPlayerChanged()
 	{
 		player = AudioPlayerFactory::GetAudioPlayer(provider, context->parent);
 	}
+	catch (AudioPlayerOpenError const& err)
+	{
+		LOG_E("audio/controller") << "Failed to open audio player: " << err.GetMessage();
+		wxMessageBox(
+			wxString::Format("Failed to open audio player:\n%s", err.GetMessage()),
+			"Audio Error",
+			wxOK | wxICON_WARNING,
+			context->parent);
+		context->project->CloseAudio();
+	}
+	catch (std::exception const& e)
+	{
+		LOG_E("audio/controller") << "Failed to open audio player: " << e.what();
+		wxMessageBox(
+			wxString::Format("Failed to open audio player:\n%s", e.what()),
+			"Audio Error",
+			wxOK | wxICON_WARNING,
+			context->parent);
+		context->project->CloseAudio();
+	}
 	catch (...)
 	{
-		/// @todo This really shouldn't be just swallowing all audio player open errors
+		LOG_E("audio/controller") << "Failed to open audio player: unknown error";
+		wxMessageBox(
+			"Failed to open audio player due to an unknown error.\n"
+			"Please check your audio device settings in Preferences.",
+			"Audio Error",
+			wxOK | wxICON_WARNING,
+			context->parent);
 		context->project->CloseAudio();
 	}
 	if (player)

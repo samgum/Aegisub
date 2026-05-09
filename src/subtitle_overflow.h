@@ -22,4 +22,7 @@ struct Result {
 
 Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc = nullptr);
 
+void InvalidateLine(int id);
+void InvalidateAll();
+
 }

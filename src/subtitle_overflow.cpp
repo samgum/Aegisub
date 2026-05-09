@@ -12,8 +12,10 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <functional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include <wx/bitmap.h>
@@ -58,6 +60,34 @@ struct MeasuredSegment {
 	std::vector<MeasuredChar> chars;
 	double width = 0.;
 };
+
+struct FontKey {
+	std::string font;
+	int pixel_size;
+	bool bold;
+	bool italic;
+
+	bool operator==(FontKey const& o) const {
+		return font == o.font && pixel_size == o.pixel_size && bold == o.bold && italic == o.italic;
+	}
+};
+
+struct FontKeyHash {
+	size_t operator()(FontKey const& k) const {
+		size_t h = std::hash<std::string>()(k.font);
+		h ^= std::hash<int>()(k.pixel_size) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		h ^= std::hash<bool>()(k.bold) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		h ^= std::hash<bool>()(k.italic) + 0x9e3779b9 + (h << 6) + (h >> 2);
+		return h;
+	}
+};
+
+// Character width cache: avoids redundant GDI font measurements
+// Maps (font state) -> (utf8 char) -> raw pixel width
+static std::unordered_map<FontKey, std::unordered_map<std::string, int>, FontKeyHash> char_width_cache;
+
+// Shared result cache: keyed by AssDialogue::Id, shared between grid and edit control
+static std::unordered_map<int, subtitle_overflow::Result> result_cache;
 
 size_t utf8_char_len(unsigned char c) {
 	if (c < 0x80) return 1;
@@ -285,10 +315,31 @@ wxFont make_font(TextState const& state) {
 	return font;
 }
 
-double measure_char(wxDC& dc, TextState const& state, std::string_view raw) {
+int get_raw_char_width(wxDC& dc, TextState const& state, std::string_view raw) {
+	FontKey key{
+		state.font,
+		static_cast<int>(std::max(1., state.fontsize * state.script_to_video_y * state.scaley / 100.)),
+		state.bold,
+		state.italic
+	};
+	std::string ch(raw);
+
+	auto fit = char_width_cache.find(key);
+	if (fit != char_width_cache.end()) {
+		auto cit = fit->second.find(ch);
+		if (cit != fit->second.end())
+			return cit->second;
+	}
+
 	dc.SetFont(make_font(state));
-	wxSize extent = dc.GetTextExtent(to_wx(raw));
-	return extent.GetWidth() * state.scalex / 100.;
+	int w = dc.GetTextExtent(to_wx(raw)).GetWidth();
+	char_width_cache[key][ch] = w;
+	return w;
+}
+
+double measure_char(wxDC& dc, TextState const& state, std::string_view raw) {
+	int w = get_raw_char_width(dc, state, raw);
+	return w * state.scalex / 100.;
 }
 
 double measure_text(wxDC& dc, TextState const& state, std::string_view raw) {
@@ -383,19 +434,8 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 
 	wxFont old_font = dc.GetFont();
 	auto const& text = line->Text.get();
-	for (size_t pos = 0; pos < text.size();) {
-		if (text[pos] != '{') {
-			++pos;
-			continue;
-		}
-		size_t end = text.find('}', pos + 1);
-		if (end == std::string::npos)
-			break;
-		TextState scan_state = base;
-		apply_override_block(std::string_view(text).substr(pos + 1, end - pos - 1), scan_state, base, layout, *context->ass);
-		pos = end + 1;
-	}
 
+	// Single-pass: parse override blocks and process text inline
 	MeasuredSegment segment;
 	bool first_char = true;
 
@@ -497,6 +537,7 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 		first_char = false;
 	};
 
+	// Single pass: process text inline, parsing overrides as we encounter them
 	for (size_t pos = 0; pos < text.size();) {
 		if (text[pos] == '{') {
 			size_t end = text.find('}', pos + 1);
@@ -560,15 +601,35 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 namespace subtitle_overflow {
 
 Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
-	if (dc)
-		return check_with_dc(context, line, *dc);
+	if (!context || !line || line->Comment || !OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool())
+		return {};
 
-	wxBitmap bmp(1, 1);
-	wxMemoryDC mem_dc;
-	mem_dc.SelectObject(bmp);
-	auto result = check_with_dc(context, line, mem_dc);
-	mem_dc.SelectObject(wxNullBitmap);
+	auto it = result_cache.find(line->Id);
+	if (it != result_cache.end() && it->second.valid)
+		return it->second;
+
+	Result result;
+	if (dc) {
+		result = check_with_dc(context, line, *dc);
+	} else {
+		wxBitmap bmp(1, 1);
+		wxMemoryDC mem_dc;
+		mem_dc.SelectObject(bmp);
+		result = check_with_dc(context, line, mem_dc);
+		mem_dc.SelectObject(wxNullBitmap);
+	}
+
+	result_cache[line->Id] = result;
 	return result;
+}
+
+void InvalidateLine(int id) {
+	result_cache.erase(id);
+}
+
+void InvalidateAll() {
+	result_cache.clear();
+	char_width_cache.clear();
 }
 
 }

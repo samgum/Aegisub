@@ -57,6 +57,11 @@
 
 #include <algorithm>
 
+#ifdef WITH_SOUNDTOUCH
+#include "audio_player_soundtouch.h"
+#include <memory>
+#endif
+
 // Auto-link to OpenAL lib for MSVC
 #ifdef _MSC_VER
 #pragma comment(lib, "openal32.lib")
@@ -65,7 +70,7 @@
 namespace {
 class OpenALPlayer final : public AudioPlayer, wxTimer {
 	/// Number of OpenAL buffers to use
-	static const ALsizei num_buffers = 8;
+	static const ALsizei num_buffers = 16;
 
 	bool playing = false; ///< Is audio currently playing?
 
@@ -73,6 +78,10 @@ class OpenALPlayer final : public AudioPlayer, wxTimer {
 	double playback_speed = 1.0; ///< Current playback speed
 	ALsizei samplerate; ///< Sample rate of the audio
 	int bpf; ///< Bytes per frame
+
+#ifdef WITH_SOUNDTOUCH
+	std::unique_ptr<SoundTouchAudioProcessor> tempo_processor; ///< SoundTouch tempo processor for pitch-preserving speed changes
+#endif
 
 	int64_t start_frame = 0; ///< First frame of playback
 	int64_t cur_frame = 0; ///< Next frame to write to playback buffers
@@ -133,8 +142,17 @@ OpenALPlayer::OpenALPlayer(agi::AudioProvider *provider)
 	device = alcOpenDevice(nullptr);
 	if (!device) throw AudioPlayerOpenError("Failed opening default OpenAL device");
 
-	// Determine buffer length
-	decode_buffer.resize(samplerate * bpf / num_buffers / 2); // buffers for half a second of audio
+	// Determine buffer length — larger buffers prevent underruns on Rosetta 2
+	decode_buffer.resize(samplerate * bpf / 4); // each buffer holds ~250ms of audio
+
+#ifdef WITH_SOUNDTOUCH
+	try {
+		tempo_processor = std::make_unique<SoundTouchAudioProcessor>(provider);
+	}
+	catch (...) {
+		// SoundTouch init failed, fall back to AL_PITCH speed changes
+	}
+#endif
 }
 
 OpenALPlayer::~OpenALPlayer()
@@ -208,10 +226,24 @@ void OpenALPlayer::Play(int64_t start, int64_t count)
 	buffers_played = 0;
 	buf_first_free = 0;
 	buf_first_queued = 0;
+
+#ifdef WITH_SOUNDTOUCH
+	if (tempo_processor) {
+		tempo_processor->Reset(start, start + count, playback_speed, volume);
+	}
+#endif
+
 	FillBuffers(num_buffers);
 
 	// And go!
-	alSourcef(source, AL_PITCH, playback_speed);
+#ifdef WITH_SOUNDTOUCH
+	if (tempo_processor) {
+		alSourcef(source, AL_PITCH, 1.0f);
+	} else
+#endif
+	{
+		alSourcef(source, AL_PITCH, (float)playback_speed);
+	}
 	alSourcePlay(source);
 	wxTimer::Start(std::max(10, (int)(100 / playback_speed)));
 	playback_segment_timer.Start();
@@ -241,16 +273,24 @@ void OpenALPlayer::FillBuffers(ALsizei count)
 	InitContext();
 	// Do the actual filling/queueing
 	for (count = mid(1, count, buffers_free); count > 0; --count) {
-		ALsizei fill_len = mid<ALsizei>(0, decode_buffer.size() / bpf, end_frame - cur_frame);
+#ifdef WITH_SOUNDTOUCH
+		if (tempo_processor) {
+			tempo_processor->Fill(&decode_buffer[0], decode_buffer.size() / bpf);
+			cur_frame = tempo_processor->GetInputFrame();
+		} else
+#endif
+		{
+			ALsizei fill_len = mid<ALsizei>(0, decode_buffer.size() / bpf, end_frame - cur_frame);
 
-		if (fill_len > 0)
-			// Get fill_len frames of audio
-			provider->GetAudioWithVolume(&decode_buffer[0], cur_frame, fill_len, volume);
-		if ((size_t)fill_len * bpf < decode_buffer.size())
-			// And zerofill the rest
-			memset(&decode_buffer[fill_len * bpf], 0, decode_buffer.size() - fill_len * bpf);
+			if (fill_len > 0)
+				// Get fill_len frames of audio
+				provider->GetAudioWithVolume(&decode_buffer[0], cur_frame, fill_len, volume);
+			if ((size_t)fill_len * bpf < decode_buffer.size())
+				// And zerofill the rest
+				memset(&decode_buffer[fill_len * bpf], 0, decode_buffer.size() - fill_len * bpf);
 
-		cur_frame += fill_len;
+			cur_frame += fill_len;
+		}
 
 		alBufferData(buffers[buf_first_free], AL_FORMAT_MONO16, &decode_buffer[0], decode_buffer.size(), samplerate);
 		alSourceQueueBuffers(source, 1, &buffers[buf_first_free]); // FIXME: collect buffer handles and queue all at once instead of one at a time?
@@ -287,6 +327,15 @@ void OpenALPlayer::Notify()
 	}
 
 	LOG_D("player/audio/openal") << "frames played=" << (buffers_played - num_buffers) * decode_buffer.size() / bpf << " num frames=" << end_frame - start_frame;
+
+#ifdef WITH_SOUNDTOUCH
+	// Check if SoundTouch processor has finished outputting all audio
+	if (tempo_processor && tempo_processor->IsFinished()) {
+		Stop();
+		return;
+	}
+#endif
+
 	// Check that all of the selected audio plus one full set of buffers has been queued
 	if ((buffers_played - num_buffers) * (int64_t)decode_buffer.size() > (end_frame - start_frame) * bpf) {
 		Stop();
@@ -306,15 +355,35 @@ void OpenALPlayer::SetPlaybackSpeed(double speed)
 	}
 
 	playback_speed = mid(0.25, speed, 4.0);
+
+#ifdef WITH_SOUNDTOUCH
+	if (tempo_processor) {
+		tempo_processor->SetPlaybackSpeed(playback_speed);
+		if (context) {
+			alcMakeContextCurrent(context);
+			alSourcef(source, AL_PITCH, 1.0f);
+			wxTimer::Start(std::max(10, (int)(100 / playback_speed)));
+		}
+		return;
+	}
+#endif
+
 	if (context) {
 		alcMakeContextCurrent(context);
-		alSourcef(source, AL_PITCH, playback_speed);
+		alSourcef(source, AL_PITCH, (float)playback_speed);
 		wxTimer::Start(std::max(10, (int)(100 / playback_speed)));
 	}
 }
 
 int64_t OpenALPlayer::GetCurrentPosition()
 {
+#ifdef WITH_SOUNDTOUCH
+	if (tempo_processor) {
+		// Pure time-based estimation for SoundTouch: position advances at playback_speed
+		long extra = playback_segment_timer.Time();
+		return start_frame + extra * samplerate * playback_speed / 1000;
+	}
+#endif
 	// FIXME: this should be based on not duration played but actual sample being heard
 	// (during video playback, cur_frame might get changed to resync)
 	long extra = playback_segment_timer.Time();

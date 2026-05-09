@@ -36,11 +36,16 @@
 
 #include "include/aegisub/audio_player.h"
 
+#ifdef WITH_SOUNDTOUCH
+#include "audio_player_soundtouch.h"
+#endif
+
 extern "C" {
 #include <portaudio.h>
 }
 
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -67,6 +72,10 @@ class PortAudioPlayer final : public AudioPlayer {
 	std::vector<char> speed_buffer; ///< Temporary buffer for speed-adjusted playback
 
 	PaStream *stream = nullptr; ///< PortAudio stream
+
+#ifdef WITH_SOUNDTOUCH
+	std::unique_ptr<SoundTouchAudioProcessor> tempo_processor; ///< SoundTouch tempo processor for pitch-preserving speed changes
+#endif
 
 	/// @brief PortAudio callback, used to fill buffer for playback, and prime the playback buffer.
 	/// @param inputBuffer     Input buffer.

@@ -31,7 +31,6 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 #include <wx/brush.h>
 #include <wx/scrolbar.h>
@@ -68,9 +67,6 @@ class BaseGrid final : public wxWindow {
 
 	/// Rows which are visible on the current video frame
 	std::vector<int> visible_rows;
-
-	/// Cached subtitle overflow state, keyed by AssDialogue::Id
-	std::unordered_map<int, bool> overflow_cache;
 
 	agi::Context *context; ///< Associated project context
 
@@ -119,7 +115,6 @@ class BaseGrid final : public wxWindow {
 
 	bool IsDisplayed(const AssDialogue *line) const;
 	bool IsOverflow(AssDialogue const *line, wxDC& dc);
-	void ClearOverflowCache();
 
 	void UpdateMaps();
 	void UpdateStyle();

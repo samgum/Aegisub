@@ -297,7 +297,19 @@ if host_machine.system() == 'windows' and not get_option('directsound').disabled
                            fallback: ['soundtouch', 'soundtouch_dep'],
                            default_options: ['soundtouch_dll=false', 'soundstretch=false'])
         conf.set('WITH_DIRECTSOUND', 1)
+        conf.set('WITH_SOUNDTOUCH', 1)
         dep_avail = ['DirectSound'] + dep_avail
+    endif
+endif
+
+if host_machine.system() != 'windows'
+    soundtouch_dep = dependency('soundtouch',
+                                fallback: ['soundtouch', 'soundtouch_dep'],
+                                default_options: ['soundtouch_dll=false', 'soundstretch=false'],
+                                required: false)
+    if soundtouch_dep.found()
+        deps += soundtouch_dep
+        conf.set('WITH_SOUNDTOUCH', 1)
     endif
 endif
 

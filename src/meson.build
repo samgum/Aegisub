@@ -258,3 +258,7 @@ foreach opt: opt_src
         aegisub_src += files(opt[1])
     endif
 endforeach
+
+if conf.has('WITH_SOUNDTOUCH')
+    aegisub_src += files('audio_player_soundtouch.cpp')
+endif
