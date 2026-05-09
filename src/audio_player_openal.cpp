@@ -251,21 +251,24 @@ void OpenALPlayer::Play(int64_t start, int64_t count)
 
 void OpenALPlayer::Stop()
 {
-	TeardownContext();
 	if (!playing) return;
 
-	// Reset data
+	// Stop the source before tearing down context
 	wxTimer::Stop();
 	playing = false;
+
+	if (context) {
+		alcMakeContextCurrent(context);
+		alSourceStop(source);
+		alSourcei(source, AL_BUFFER, 0);
+		alcMakeContextCurrent(nullptr);
+	}
+
+	TeardownContext();
+
 	start_frame = 0;
 	cur_frame = 0;
 	end_frame = 0;
-
-	// Then drop the playback
-	alcMakeContextCurrent(context);
-	alSourceStop(source);
-	alSourcei(source, AL_BUFFER, 0);
-	alcMakeContextCurrent(nullptr);
 }
 
 void OpenALPlayer::FillBuffers(ALsizei count)
@@ -379,9 +382,9 @@ int64_t OpenALPlayer::GetCurrentPosition()
 {
 #ifdef WITH_SOUNDTOUCH
 	if (tempo_processor) {
-		// Pure time-based estimation for SoundTouch: position advances at playback_speed
+		// Use cur_frame (SoundTouch input position) as base, plus fractional time since last buffer fill
 		long extra = playback_segment_timer.Time();
-		return start_frame + extra * samplerate * playback_speed / 1000;
+		return cur_frame + extra * samplerate * playback_speed / 1000;
 	}
 #endif
 	// FIXME: this should be based on not duration played but actual sample being heard

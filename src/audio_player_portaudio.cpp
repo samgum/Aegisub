@@ -306,6 +306,14 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 int64_t PortAudioPlayer::GetCurrentPosition() {
 	if (!IsPlaying()) return 0;
 
+#ifdef WITH_SOUNDTOUCH
+	// When SoundTouch is active, use the tracked input position directly
+	// as it's more reliable than time-based estimation
+	if (playback_speed != 1.0 && tempo_processor) {
+		return current;
+	}
+#endif
+
 	PaTime pa_time = Pa_GetStreamTime(stream);
 	int64_t real = (pa_time - pa_start) * provider->GetSampleRate() * playback_speed + start;
 

@@ -14,6 +14,11 @@ SoundTouchAudioProcessor::SoundTouchAudioProcessor(agi::AudioProvider *prov)
 {
 	processor->setSampleRate(provider->GetSampleRate());
 	processor->setChannels(provider->GetChannels());
+
+	// Pre-allocate buffers to avoid memory allocation in the audio hot path
+	source_buffer.resize(4096 * provider->GetChannels());
+	process_buffer.resize(4096 * provider->GetChannels());
+	output_buffer.resize(8192 * provider->GetChannels());
 }
 
 SoundTouchAudioProcessor::~SoundTouchAudioProcessor() = default;
@@ -30,8 +35,12 @@ void SoundTouchAudioProcessor::feed_more() {
 
 	auto frames = (size_t)std::min<int64_t>(4096, end_frame - input_frame);
 	auto sample_count = frames * channels();
-	source_buffer.resize(sample_count);
-	process_buffer.resize(sample_count);
+
+	// Ensure buffers are large enough (pre-allocated in constructor, but grow if needed)
+	if (source_buffer.size() < sample_count)
+		source_buffer.resize(sample_count);
+	if (process_buffer.size() < sample_count)
+		process_buffer.resize(sample_count);
 
 	provider->GetAudioWithVolume(source_buffer.data(), input_frame, frames, volume);
 	input_frame += frames;
@@ -93,7 +102,8 @@ size_t SoundTouchAudioProcessor::Fill(void *dst, size_t frames_requested) {
 	}
 
 	size_t filled = 0;
-	output_buffer.resize(frames_requested * channels());
+	if (output_buffer.size() < frames_requested * channels())
+		output_buffer.resize(frames_requested * channels());
 
 	while (filled < frames_requested && !output_finished) {
 		auto got = processor->receiveSamples(output_buffer.data(), (unsigned int)(frames_requested - filled));
