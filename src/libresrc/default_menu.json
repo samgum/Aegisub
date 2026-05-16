@@ -126,7 +126,8 @@
     ],
     "main/tools" : [
         { "command" : "tool/time/stitch" },
-        { "command" : "tool/style/overlap_check" }
+        { "command" : "tool/style/overlap_check" },
+        { "command" : "tool/text/cleanup" }
     ],
     "main/view" : [
         { "command" : "app/language" },

@@ -75,6 +75,7 @@ void ShowShiftTimesDialog(agi::Context *c);
 void ShowSpellcheckerDialog(agi::Context *c);
 void ShowStitchTimingsDialog(agi::Context *c);
 void ShowStyleOverlapCheckDialog(agi::Context *c);
+void ShowSubtitleTextCleanupDialog(agi::Context *c);
 void ShowStyleManagerDialog(agi::Context *c);
 void ShowTimingProcessorDialog(agi::Context *c);
 void ShowVideoDetailsDialog(agi::Context *c);

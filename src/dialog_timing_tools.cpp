@@ -42,6 +42,7 @@
 #include <vector>
 
 #include <wx/button.h>
+#include <wx/checkbox.h>
 #include <wx/dialog.h>
 #include <wx/listbox.h>
 #include <wx/msgdlg.h>
@@ -100,6 +101,26 @@ class DialogStitchTimings final : public wxDialog {
 public:
 	DialogStitchTimings(agi::Context *context);
 	~DialogStitchTimings();
+};
+
+class DialogTextCleaner final : public wxDialog {
+	agi::Context *context;
+	agi::signal::Connection selected_set_changed_slot;
+
+	wxCheckBox *replace_commas;
+	wxCheckBox *clean_periods;
+	wxCheckBox *replace_quotes;
+	wxCheckBox *check_double_spaces;
+	wxCheckBox *fix_double_spaces;
+	wxRadioBox *selection_mode;
+
+	void Process(wxCommandEvent&);
+	void OnDoubleSpaceCheckChanged(wxCommandEvent&);
+	void OnSelectedSetChanged();
+
+public:
+	DialogTextCleaner(agi::Context *context);
+	~DialogTextCleaner();
 };
 
 DialogStitchTimings::DialogStitchTimings(agi::Context *context)
@@ -325,6 +346,307 @@ void DialogStitchTimings::Process(wxCommandEvent &) {
 	Close();
 }
 
+DialogTextCleaner::DialogTextCleaner(agi::Context *context)
+: wxDialog(context->parent, -1, _("Subtitle Text Cleanup"))
+, context(context)
+, selected_set_changed_slot(context->selectionController->AddSelectionListener(&DialogTextCleaner::OnSelectedSetChanged, this))
+{
+	replace_commas = new wxCheckBox(this, -1, _("Replace Chinese commas with spaces"));
+	clean_periods = new wxCheckBox(this, -1, _("Remove Chinese periods; use a space when text follows"));
+	replace_quotes = new wxCheckBox(this, -1, _("Replace Chinese double quotes with English quotes"));
+	check_double_spaces = new wxCheckBox(this, -1, _("Check for consecutive spaces"));
+	fix_double_spaces = new wxCheckBox(this, -1, _("Replace consecutive spaces with one space"));
+
+	replace_commas->SetValue(OPT_GET("Tool/Text Cleanup/Replace Commas")->GetBool());
+	clean_periods->SetValue(OPT_GET("Tool/Text Cleanup/Clean Periods")->GetBool());
+	replace_quotes->SetValue(OPT_GET("Tool/Text Cleanup/Replace Quotes")->GetBool());
+	check_double_spaces->SetValue(OPT_GET("Tool/Text Cleanup/Check Double Spaces")->GetBool());
+	fix_double_spaces->SetValue(OPT_GET("Tool/Text Cleanup/Fix Double Spaces")->GetBool());
+
+	wxString selection_vals[] = { _("All rows"), _("Selected rows") };
+	selection_mode = new wxRadioBox(this, -1, _("Apply to"), wxDefaultPosition, wxDefaultSize, 2, selection_vals);
+	selection_mode->SetSelection(OPT_GET("Tool/Text Cleanup/Selection Only")->GetBool() ? 1 : 0);
+
+	auto operations_sizer = new wxStaticBoxSizer(wxVERTICAL, this, _("Operations"));
+	operations_sizer->Add(replace_commas, wxSizerFlags().Expand().Border(wxBOTTOM, 4));
+	operations_sizer->Add(clean_periods, wxSizerFlags().Expand().Border(wxBOTTOM, 4));
+	operations_sizer->Add(replace_quotes, wxSizerFlags().Expand().Border(wxBOTTOM, 4));
+	operations_sizer->Add(check_double_spaces, wxSizerFlags().Expand().Border(wxBOTTOM, 4));
+	operations_sizer->Add(fix_double_spaces, wxSizerFlags().Expand());
+
+	auto main_sizer = new wxBoxSizer(wxVERTICAL);
+	main_sizer->Add(operations_sizer, wxSizerFlags().Expand().Border());
+	main_sizer->Add(selection_mode, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+	main_sizer->Add(CreateButtonSizer(wxOK | wxCANCEL), wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+
+	SetSizerAndFit(main_sizer);
+	CenterOnParent();
+
+	Bind(wxEVT_BUTTON, &DialogTextCleaner::Process, this, wxID_OK);
+	check_double_spaces->Bind(wxEVT_CHECKBOX, &DialogTextCleaner::OnDoubleSpaceCheckChanged, this);
+	wxCommandEvent evt;
+	OnDoubleSpaceCheckChanged(evt);
+	OnSelectedSetChanged();
+}
+
+DialogTextCleaner::~DialogTextCleaner() {
+	OPT_SET("Tool/Text Cleanup/Replace Commas")->SetBool(replace_commas->GetValue());
+	OPT_SET("Tool/Text Cleanup/Clean Periods")->SetBool(clean_periods->GetValue());
+	OPT_SET("Tool/Text Cleanup/Replace Quotes")->SetBool(replace_quotes->GetValue());
+	OPT_SET("Tool/Text Cleanup/Check Double Spaces")->SetBool(check_double_spaces->GetValue());
+	OPT_SET("Tool/Text Cleanup/Fix Double Spaces")->SetBool(fix_double_spaces->GetValue());
+	OPT_SET("Tool/Text Cleanup/Selection Only")->SetBool(selection_mode->GetSelection() == 1);
+}
+
+void DialogTextCleaner::OnDoubleSpaceCheckChanged(wxCommandEvent&) {
+	fix_double_spaces->Enable(check_double_spaces->GetValue());
+	if (!check_double_spaces->GetValue())
+		fix_double_spaces->SetValue(false);
+}
+
+void DialogTextCleaner::OnSelectedSetChanged() {
+	bool has_selection = !context->selectionController->GetSelectedSet().empty();
+	selection_mode->Enable(1, has_selection);
+	if (!has_selection)
+		selection_mode->SetSelection(0);
+}
+
+struct TextCleanupStats {
+	size_t checked_lines = 0;
+	size_t changed_lines = 0;
+
+	size_t comma_lines = 0;
+	size_t comma_replacements = 0;
+
+	size_t period_removed_lines = 0;
+	size_t period_spaced_lines = 0;
+	size_t periods_removed = 0;
+	size_t periods_spaced = 0;
+
+	size_t quote_lines = 0;
+	size_t quote_replacements = 0;
+
+	size_t double_space_lines = 0;
+	size_t double_space_runs = 0;
+	size_t double_space_fixed_lines = 0;
+	size_t double_space_runs_fixed = 0;
+};
+
+size_t replace_all(std::string& text, std::string const& from, std::string const& to) {
+	size_t count = 0;
+	size_t pos = 0;
+	while ((pos = text.find(from, pos)) != std::string::npos) {
+		text.replace(pos, from.size(), to);
+		pos += to.size();
+		++count;
+	}
+	return count;
+}
+
+enum class FollowingText {
+	None,
+	StartsWithSpace,
+	StartsWithoutSpace
+};
+
+FollowingText following_plain_text(std::vector<std::unique_ptr<AssDialogueBlock>> const& blocks, size_t block_index) {
+	for (size_t i = block_index + 1; i < blocks.size(); ++i) {
+		if (blocks[i]->GetType() != AssBlockType::PLAIN)
+			continue;
+
+		auto const& text = static_cast<AssDialogueBlockPlain const *>(blocks[i].get())->text;
+		if (!text.empty())
+			return text[0] == ' ' ? FollowingText::StartsWithSpace : FollowingText::StartsWithoutSpace;
+	}
+
+	return FollowingText::None;
+}
+
+size_t clean_fullwidth_periods(std::string& text, FollowingText following_text, size_t& spaced) {
+	static std::string const period = "\xE3\x80\x82";
+	size_t removed = 0;
+	spaced = 0;
+
+	size_t pos = 0;
+	while ((pos = text.find(period, pos)) != std::string::npos) {
+		size_t next = pos + period.size();
+		if ((next < text.size() && text[next] != ' ') || (next == text.size() && following_text == FollowingText::StartsWithoutSpace)) {
+			text.replace(pos, period.size(), " ");
+			++spaced;
+			pos += 1;
+		}
+		else {
+			text.erase(pos, period.size());
+			++removed;
+		}
+	}
+
+	return removed;
+}
+
+size_t count_double_space_runs(std::string const& text) {
+	size_t runs = 0;
+	for (size_t i = 0; i + 1 < text.size(); ++i) {
+		if (text[i] == ' ' && text[i + 1] == ' ') {
+			++runs;
+			while (i + 1 < text.size() && text[i + 1] == ' ')
+				++i;
+		}
+	}
+	return runs;
+}
+
+size_t collapse_double_space_runs(std::string& text) {
+	size_t runs = 0;
+	size_t write = 0;
+	bool previous_space = false;
+
+	for (size_t read = 0; read < text.size(); ++read) {
+		if (text[read] == ' ') {
+			if (previous_space) {
+				if (read == 1 || text[read - 2] != ' ')
+					++runs;
+				continue;
+			}
+			previous_space = true;
+		}
+		else {
+			previous_space = false;
+		}
+
+		text[write++] = text[read];
+	}
+
+	text.resize(write);
+	return runs;
+}
+
+void DialogTextCleaner::Process(wxCommandEvent&) {
+	bool do_commas = replace_commas->GetValue();
+	bool do_periods = clean_periods->GetValue();
+	bool do_quotes = replace_quotes->GetValue();
+	bool do_check_double_spaces = check_double_spaces->GetValue();
+	bool do_fix_double_spaces = do_check_double_spaces && fix_double_spaces->GetValue();
+
+	if (!do_commas && !do_periods && !do_quotes && !do_check_double_spaces) {
+		wxMessageBox(_("No cleanup operations are selected."), _("Subtitle Text Cleanup"), wxICON_EXCLAMATION);
+		return;
+	}
+
+	std::vector<AssDialogue *> lines;
+	if (selection_mode->GetSelection() == 1)
+		lines = context->selectionController->GetSortedSelection();
+	else {
+		for (auto& line : context->ass->Events)
+			lines.push_back(&line);
+	}
+
+	TextCleanupStats stats;
+	static std::string const fullwidth_comma = "\xEF\xBC\x8C";
+	static std::string const left_quote = "\xE2\x80\x9C";
+	static std::string const right_quote = "\xE2\x80\x9D";
+
+	for (auto line : lines) {
+		if (line->Comment)
+			continue;
+
+		++stats.checked_lines;
+
+		auto blocks = line->ParseTags();
+		bool line_changed = false;
+		bool line_has_commas = false;
+		bool line_removed_periods = false;
+		bool line_spaced_periods = false;
+		bool line_has_quotes = false;
+		bool line_has_double_spaces = false;
+		bool line_fixed_double_spaces = false;
+
+		for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
+			auto& block = blocks[block_index];
+			if (block->GetType() != AssBlockType::PLAIN)
+				continue;
+
+			auto& text = static_cast<AssDialogueBlockPlain *>(block.get())->text;
+
+			if (do_commas) {
+				size_t count = replace_all(text, fullwidth_comma, " ");
+				if (count) {
+					stats.comma_replacements += count;
+					line_has_commas = true;
+					line_changed = true;
+				}
+			}
+
+			if (do_periods) {
+				size_t spaced = 0;
+				size_t removed = clean_fullwidth_periods(text, following_plain_text(blocks, block_index), spaced);
+				if (removed || spaced) {
+					stats.periods_removed += removed;
+					stats.periods_spaced += spaced;
+					line_removed_periods = line_removed_periods || removed != 0;
+					line_spaced_periods = line_spaced_periods || spaced != 0;
+					line_changed = true;
+				}
+			}
+
+			if (do_quotes) {
+				size_t count = replace_all(text, left_quote, "\"");
+				count += replace_all(text, right_quote, "\"");
+				if (count) {
+					stats.quote_replacements += count;
+					line_has_quotes = true;
+					line_changed = true;
+				}
+			}
+
+			if (do_check_double_spaces) {
+				size_t runs = count_double_space_runs(text);
+				if (runs) {
+					stats.double_space_runs += runs;
+					line_has_double_spaces = true;
+
+					if (do_fix_double_spaces) {
+						size_t fixed = collapse_double_space_runs(text);
+						stats.double_space_runs_fixed += fixed;
+						line_fixed_double_spaces = line_fixed_double_spaces || fixed != 0;
+						line_changed = line_changed || fixed != 0;
+					}
+				}
+			}
+		}
+
+		if (line_has_commas) ++stats.comma_lines;
+		if (line_removed_periods) ++stats.period_removed_lines;
+		if (line_spaced_periods) ++stats.period_spaced_lines;
+		if (line_has_quotes) ++stats.quote_lines;
+		if (line_has_double_spaces) ++stats.double_space_lines;
+		if (line_fixed_double_spaces) ++stats.double_space_fixed_lines;
+
+		if (line_changed) {
+			line->UpdateText(blocks);
+			++stats.changed_lines;
+		}
+	}
+
+	if (stats.changed_lines)
+		context->ass->Commit(_("clean subtitle text"), AssFile::COMMIT_DIAG_TEXT);
+
+	wxString report;
+	report += _("Subtitle text cleanup");
+	report += "\n\n";
+	report += wxString::Format("%s: %llu\n", _("Checked non-comment dialogue lines").c_str(), static_cast<unsigned long long>(stats.checked_lines));
+	report += wxString::Format("%s: %llu\n\n", _("Changed lines").c_str(), static_cast<unsigned long long>(stats.changed_lines));
+	report += wxString::Format("%s: %llu (%s: %llu)\n", _("Chinese comma replacements").c_str(), static_cast<unsigned long long>(stats.comma_replacements), _("lines involved").c_str(), static_cast<unsigned long long>(stats.comma_lines));
+	report += wxString::Format("%s: %llu (%s: %llu)\n", _("Chinese periods removed").c_str(), static_cast<unsigned long long>(stats.periods_removed), _("lines involved").c_str(), static_cast<unsigned long long>(stats.period_removed_lines));
+	report += wxString::Format("%s: %llu (%s: %llu)\n", _("Chinese periods converted to spaces").c_str(), static_cast<unsigned long long>(stats.periods_spaced), _("lines involved").c_str(), static_cast<unsigned long long>(stats.period_spaced_lines));
+	report += wxString::Format("%s: %llu (%s: %llu)\n", _("Chinese quote replacements").c_str(), static_cast<unsigned long long>(stats.quote_replacements), _("lines involved").c_str(), static_cast<unsigned long long>(stats.quote_lines));
+	report += wxString::Format("%s: %llu (%s: %llu)\n", _("Consecutive space groups found").c_str(), static_cast<unsigned long long>(stats.double_space_runs), _("lines involved").c_str(), static_cast<unsigned long long>(stats.double_space_lines));
+	report += wxString::Format("%s: %llu (%s: %llu)\n", _("Consecutive space groups replaced").c_str(), static_cast<unsigned long long>(stats.double_space_runs_fixed), _("lines involved").c_str(), static_cast<unsigned long long>(stats.double_space_fixed_lines));
+
+	wxMessageBox(report, _("Subtitle Text Cleanup"), wxICON_INFORMATION);
+	Close();
+}
+
 wxString format_pair(AssDialogue const* a, AssDialogue const* b) {
 	return wxString::Format("%d-%d", a->Row + 1, b->Row + 1);
 }
@@ -451,4 +773,8 @@ void ShowStyleOverlapCheckDialog(agi::Context *c) {
 	d.SetSizer(sizer);
 	d.CenterOnParent();
 	d.ShowModal();
+}
+
+void ShowSubtitleTextCleanupDialog(agi::Context *c) {
+	DialogTextCleaner(c).ShowModal();
 }

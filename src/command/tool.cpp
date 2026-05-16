@@ -191,6 +191,17 @@ struct tool_style_overlap_check final : public Command {
 	}
 };
 
+struct tool_text_cleanup final : public Command {
+	CMD_NAME("tool/text/cleanup")
+	STR_MENU("Subtitle &Text Cleanup...")
+	STR_DISP("Subtitle Text Cleanup")
+	STR_HELP("Clean Chinese punctuation and consecutive spaces in subtitle text")
+
+	void operator()(agi::Context *c) override {
+		ShowSubtitleTextCleanupDialog(c);
+	}
+};
+
 struct tool_time_postprocess final : public Command {
 	CMD_NAME("tool/time/postprocess")
 	CMD_ICON(timing_processor_toolbutton)
@@ -298,6 +309,7 @@ namespace cmd {
 		reg(std::make_unique<tool_time_kanji>());
 		reg(std::make_unique<tool_time_stitch>());
 		reg(std::make_unique<tool_style_overlap_check>());
+		reg(std::make_unique<tool_text_cleanup>());
 		reg(std::make_unique<tool_time_postprocess>());
 		reg(std::make_unique<tool_translation_assistant>());
 		reg(std::make_unique<tool_translation_assistant_commit>());

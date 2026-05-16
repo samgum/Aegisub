@@ -532,6 +532,14 @@
 			"Max Gap" : 1000,
 			"Selection Only" : false
 		},
+		"Text Cleanup" : {
+			"Check Double Spaces" : true,
+			"Clean Periods" : true,
+			"Fix Double Spaces" : false,
+			"Replace Commas" : true,
+			"Replace Quotes" : true,
+			"Selection Only" : false
+		},
 		"Spell Checker" : {
 			"Backend" : "hunspell",
 			"Language" : "en_US",

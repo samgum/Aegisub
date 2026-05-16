@@ -7238,3 +7238,87 @@ msgstr "没有找到非注释对白行。"
 #: ../src/dialog_timing_tools.cpp:0
 msgid "No same-style timing overlaps were found."
 msgstr "没有找到同一样式内的时间重叠。"
+
+#: ../src/command/tool.cpp:0
+msgid "Subtitle &Text Cleanup..."
+msgstr "清理字幕文本(&T)..."
+
+#: ../src/command/tool.cpp:0 ../src/dialog_timing_tools.cpp:0
+msgid "Subtitle Text Cleanup"
+msgstr "清理字幕文本"
+
+#: ../src/command/tool.cpp:0
+msgid "Clean Chinese punctuation and consecutive spaces in subtitle text"
+msgstr "清理字幕文本中的中文标点和连续空格"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Replace Chinese commas with spaces"
+msgstr "将中文逗号替换为空格"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Remove Chinese periods; use a space when text follows"
+msgstr "删除中文句号；后面还有文字时改为空格"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Replace Chinese double quotes with English quotes"
+msgstr "将中文双引号替换为英文双引号"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check for consecutive spaces"
+msgstr "检查连续两个空格"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Replace consecutive spaces with one space"
+msgstr "将连续空格替换为一个空格"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Apply to"
+msgstr "应用于"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Operations"
+msgstr "操作"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No cleanup operations are selected."
+msgstr "没有选择任何清理操作。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "clean subtitle text"
+msgstr "清理字幕文本"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Subtitle text cleanup"
+msgstr "字幕文本清理"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Checked non-comment dialogue lines"
+msgstr "已检查非注释对白行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Changed lines"
+msgstr "已修改行数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Chinese comma replacements"
+msgstr "中文逗号替换数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Chinese periods removed"
+msgstr "中文句号删除数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Chinese periods converted to spaces"
+msgstr "中文句号改为空格数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Chinese quote replacements"
+msgstr "中文引号替换数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Consecutive space groups found"
+msgstr "发现连续空格组数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Consecutive space groups replaced"
+msgstr "已替换连续空格组数"
