@@ -53,8 +53,33 @@ def test_wrap_bounds_use_margins_and_video_edges():
     assert "wrap_overflow && (ch_left < wrap_left || ch_right > wrap_right)" in source
 
 
+def test_final_overflow_uses_libass_pixels():
+    source = SOURCE.read_text(encoding="utf-8")
+    libass = (ROOT / "src" / "subtitles_provider_libass.cpp").read_text(encoding="utf-8")
+    header = (ROOT / "src" / "subtitles_provider_libass.h").read_text(encoding="utf-8")
+    assert "libass::GetRenderedBounds" in source
+    assert "make_single_line_file" in source
+    assert "file.SetScriptInfo(\"WrapStyle\", \"2\")" in source
+    assert "appears_auto_wrapped" in source
+    assert "outside_video(normal, video_w, video_h)" in source
+    assert "RenderedBounds GetRenderedBounds" in header
+    assert "row[x]" in libass
+    assert "bounds.bands = count_bands" in libass
+
+
+def test_grid_cache_uses_render_relevant_signature():
+    source = SOURCE.read_text(encoding="utf-8")
+    assert "static_cast<int>(line.Start)" in source
+    assert "static_cast<int>(line.End)" in source
+    assert "line.Actor.get()" in source
+    assert "line.Effect.get()" in source
+    assert "for (auto const& info : context->ass->Info)" in source
+    assert "for (auto const& s : context->ass->Styles)" in source
+
+
 def test_grid_mode_uses_video_overflow_only():
     source = SOURCE.read_text(encoding="utf-8")
+    assert "result = check_with_libass(context, line, text);" in source
     assert "check_with_dc(context, line, text, *dc, false)" in source
     assert "check_with_dc(context, line, text, mem_dc, false)" in source
     assert "check_with_dc(context, line, text, *dc, true)" in source
@@ -105,6 +130,8 @@ def main():
         test_edit_box_checks_live_text_not_cached_line_text,
         test_cache_is_guarded_by_text_content,
         test_wrap_bounds_use_margins_and_video_edges,
+        test_final_overflow_uses_libass_pixels,
+        test_grid_cache_uses_render_relevant_signature,
         test_grid_mode_uses_video_overflow_only,
         test_public_check_text_api_exists,
         test_margin_overflow_marks_wrapped_english_tail,

@@ -34,6 +34,11 @@
 
 #include "subtitles_provider_libass.h"
 
+#include "ass_attachment.h"
+#include "ass_dialogue.h"
+#include "ass_file.h"
+#include "ass_info.h"
+#include "ass_style.h"
 #include "compat.h"
 #include "include/aegisub/subtitles_provider.h"
 #include "video_frame.h"
@@ -44,10 +49,14 @@
 #include <libaegisub/log.h>
 #include <libaegisub/util.h>
 
+#include <algorithm>
 #include <atomic>
 #include <boost/gil.hpp>
+#include <climits>
+#include <cstring>
 #include <memory>
 #include <mutex>
+#include <vector>
 
 #include <wx/intl.h>
 #include <wx/thread.h>
@@ -59,6 +68,8 @@ extern "C" {
 namespace {
 std::unique_ptr<agi::dispatch::Queue> cache_queue;
 ASS_Library *library;
+std::mutex overflow_renderer_mutex;
+ASS_Renderer *overflow_renderer = nullptr;
 
 void msg_callback(int level, const char *fmt, va_list args, void *) {
 	if (level >= 7) return;
@@ -73,6 +84,64 @@ void msg_callback(int level, const char *fmt, va_list args, void *) {
 		LOG_I("subtitle/provider/libass") << buf;
 	else // verbose
 		LOG_D("subtitle/provider/libass") << buf;
+}
+
+std::vector<char> serialize_subtitles(AssFile *subs) {
+	std::vector<char> buffer;
+	auto push_header = [&](const char *str) {
+		buffer.insert(buffer.end(), str, str + strlen(str));
+	};
+	auto push_line = [&](std::string const& str) {
+		buffer.insert(buffer.end(), &str[0], &str[0] + str.size());
+		buffer.push_back('\n');
+	};
+
+	push_header("\xEF\xBB\xBF[Script Info]\n");
+	for (auto const& line : subs->Info)
+		push_line(line.GetEntryData());
+
+	push_header("[V4+ Styles]\n");
+	for (auto const& line : subs->Styles)
+		push_line(line.GetEntryData());
+
+	if (!subs->Attachments.empty()) {
+		push_header("[Fonts]\n");
+		for (auto const& attachment : subs->Attachments)
+			if (attachment.Group() == AssEntryGroup::FONT)
+				push_line(attachment.GetEntryData());
+	}
+
+	push_header("[Events]\n");
+	for (auto const& line : subs->Events) {
+		if (!line.Comment)
+			push_line(line.GetEntryData());
+	}
+
+	return buffer;
+}
+
+ASS_Renderer *get_overflow_renderer() {
+	if (!overflow_renderer) {
+		overflow_renderer = ass_renderer_init(library);
+		ass_set_font_scale(overflow_renderer, 1.);
+		ass_set_fonts(overflow_renderer, nullptr, "Sans", 1, nullptr, true);
+	}
+	return overflow_renderer;
+}
+
+int count_bands(std::vector<std::pair<int, int>>& bands) {
+	if (bands.empty())
+		return 0;
+
+	std::sort(bands.begin(), bands.end());
+	int count = 0;
+	int current_bottom = INT_MIN;
+	for (auto const& band : bands) {
+		if (band.first > current_bottom + 3)
+			++count;
+		current_bottom = std::max(current_bottom, band.second);
+	}
+	return count;
 }
 
 // Stuff used on the cache thread, owned by a shared_ptr in case the provider
@@ -206,6 +275,83 @@ void LibassSubtitlesProvider::DrawSubtitles(VideoFrame &frame,double time) {
 namespace libass {
 std::unique_ptr<SubtitlesProvider> Create(std::string const&, agi::BackgroundRunner *br) {
 	return std::make_unique<LibassSubtitlesProvider>(br);
+}
+
+RenderedBounds GetRenderedBounds(AssFile *subs, int time_ms, int width, int height) {
+	RenderedBounds bounds;
+	if (!subs || !library || width <= 0 || height <= 0)
+		return bounds;
+
+	std::lock_guard<std::mutex> lock(overflow_renderer_mutex);
+	auto renderer = get_overflow_renderer();
+	if (!renderer)
+		return bounds;
+
+	auto data = serialize_subtitles(subs);
+	ASS_Track *track = ass_read_memory(library, data.data(), data.size(), nullptr);
+	if (!track)
+		return bounds;
+
+	ass_set_frame_size(renderer, width, height);
+	ass_set_storage_size(renderer, width, height);
+
+	ASS_Image *img = ass_render_frame(renderer, track, time_ms, nullptr);
+	bounds.valid = true;
+	std::vector<std::pair<int, int>> y_bands;
+
+	for (; img; img = img->next) {
+		unsigned int opacity = 255 - ((unsigned int)_a(img->color));
+		if (!opacity || img->w <= 0 || img->h <= 0)
+			continue;
+
+		int img_left = INT_MAX;
+		int img_top = INT_MAX;
+		int img_right = INT_MIN;
+		int img_bottom = INT_MIN;
+
+		for (int y = 0; y < img->h; ++y) {
+			auto row = img->bitmap + y * img->stride;
+			int row_left = -1;
+			int row_right = -1;
+			for (int x = 0; x < img->w; ++x) {
+				if (!row[x])
+					continue;
+				if (row_left < 0)
+					row_left = x;
+				row_right = x + 1;
+			}
+
+			if (row_left < 0)
+				continue;
+
+			img_left = std::min(img_left, img->dst_x + row_left);
+			img_right = std::max(img_right, img->dst_x + row_right);
+			img_top = std::min(img_top, img->dst_y + y);
+			img_bottom = std::max(img_bottom, img->dst_y + y + 1);
+		}
+
+		if (img_left == INT_MAX)
+			continue;
+
+		if (!bounds.has_pixels) {
+			bounds.left = img_left;
+			bounds.top = img_top;
+			bounds.right = img_right;
+			bounds.bottom = img_bottom;
+			bounds.has_pixels = true;
+		}
+		else {
+			bounds.left = std::min(bounds.left, img_left);
+			bounds.top = std::min(bounds.top, img_top);
+			bounds.right = std::max(bounds.right, img_right);
+			bounds.bottom = std::max(bounds.bottom, img_bottom);
+		}
+		y_bands.emplace_back(img_top, img_bottom);
+	}
+
+	bounds.bands = count_bands(y_bands);
+	ass_free_track(track);
+	return bounds;
 }
 
 void CacheFonts() {

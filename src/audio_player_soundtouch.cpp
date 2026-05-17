@@ -42,11 +42,12 @@ void SoundTouchAudioProcessor::feed_more() {
 	if (process_buffer.size() < sample_count)
 		process_buffer.resize(sample_count);
 
-	provider->GetAudioWithVolume(source_buffer.data(), input_frame, frames, volume);
+	provider->GetAudio(source_buffer.data(), input_frame, frames);
 	input_frame += frames;
 
+	auto gain = static_cast<float>(std::clamp(volume, 0.0, 2.0) * 0.98);
 	for (size_t i = 0; i < sample_count; ++i)
-		process_buffer[i] = (float)source_buffer[i] / 32768.0f;
+		process_buffer[i] = (float)source_buffer[i] * gain / 32768.0f;
 
 	processor->putSamples(process_buffer.data(), (unsigned int)frames);
 }
@@ -108,8 +109,10 @@ size_t SoundTouchAudioProcessor::Fill(void *dst, size_t frames_requested) {
 	while (filled < frames_requested && !output_finished) {
 		auto got = processor->receiveSamples(output_buffer.data(), (unsigned int)(frames_requested - filled));
 		if (got) {
-			for (size_t i = 0; i < (size_t)got * channels(); ++i)
-				out[filled * channels() + i] = (int16_t)std::clamp((int)std::lround(output_buffer[i] * 32768.0f), -32768, 32767);
+			for (size_t i = 0; i < (size_t)got * channels(); ++i) {
+				auto sample = std::clamp(output_buffer[i], -1.0f, 1.0f);
+				out[filled * channels() + i] = (int16_t)std::lround(sample * 32767.0f);
+			}
 			filled += got;
 			continue;
 		}

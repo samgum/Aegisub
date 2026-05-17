@@ -78,6 +78,7 @@ class OpenALPlayer final : public AudioPlayer, wxTimer {
 	double playback_speed = 1.0; ///< Current playback speed
 	ALsizei samplerate; ///< Sample rate of the audio
 	int bpf; ///< Bytes per frame
+	ALenum audio_format = AL_FORMAT_MONO16; ///< OpenAL sample format
 
 #ifdef WITH_SOUNDTOUCH
 	std::unique_ptr<SoundTouchAudioProcessor> tempo_processor; ///< SoundTouch tempo processor for pitch-preserving speed changes
@@ -130,7 +131,7 @@ public:
 	int64_t GetCurrentPosition() override;
 	void SetEndPosition(int64_t pos) override;
 
-	void SetVolume(double vol) override { volume = vol; }
+	void SetVolume(double vol) override;
 	void SetPlaybackSpeed(double speed) override;
 };
 
@@ -139,6 +140,15 @@ OpenALPlayer::OpenALPlayer(agi::AudioProvider *provider)
 , samplerate(provider->GetSampleRate())
 , bpf(provider->GetChannels() * provider->GetBytesPerSample())
 {
+	if (provider->GetBytesPerSample() != 2)
+		throw AudioPlayerOpenError("OpenAL player requires 16-bit audio");
+	if (provider->GetChannels() == 1)
+		audio_format = AL_FORMAT_MONO16;
+	else if (provider->GetChannels() == 2)
+		audio_format = AL_FORMAT_STEREO16;
+	else
+		throw AudioPlayerOpenError("OpenAL player requires mono or stereo audio");
+
 	device = alcOpenDevice(nullptr);
 	if (!device) throw AudioPlayerOpenError("Failed opening default OpenAL device");
 
@@ -295,7 +305,7 @@ void OpenALPlayer::FillBuffers(ALsizei count)
 			cur_frame += fill_len;
 		}
 
-		alBufferData(buffers[buf_first_free], AL_FORMAT_MONO16, &decode_buffer[0], decode_buffer.size(), samplerate);
+		alBufferData(buffers[buf_first_free], audio_format, &decode_buffer[0], decode_buffer.size(), samplerate);
 		alSourceQueueBuffers(source, 1, &buffers[buf_first_free]); // FIXME: collect buffer handles and queue all at once instead of one at a time?
 		buf_first_free = (buf_first_free + 1) % num_buffers;
 		--buffers_free;
@@ -348,6 +358,15 @@ void OpenALPlayer::Notify()
 void OpenALPlayer::SetEndPosition(int64_t pos)
 {
 	end_frame = pos;
+}
+
+void OpenALPlayer::SetVolume(double vol)
+{
+	volume = vol;
+#ifdef WITH_SOUNDTOUCH
+	if (tempo_processor)
+		tempo_processor->SetVolume(vol);
+#endif
 }
 
 void OpenALPlayer::SetPlaybackSpeed(double speed)

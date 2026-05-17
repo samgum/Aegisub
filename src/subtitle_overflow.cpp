@@ -1,18 +1,22 @@
 #include "subtitle_overflow.h"
 
+#include "ass_attachment.h"
 #include "ass_dialogue.h"
 #include "ass_file.h"
+#include "ass_info.h"
 #include "ass_style.h"
 #include "async_video_provider.h"
 #include "compat.h"
 #include "include/aegisub/context.h"
 #include "options.h"
 #include "project.h"
+#include "subtitles_provider_libass.h"
 
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <functional>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -200,11 +204,19 @@ std::string cache_signature(agi::Context *context, AssDialogue const& line, bool
 
 	std::ostringstream ss;
 	ss << detect_wrap_overflow << ',' << script_w << ',' << script_h << ',' << video_w << ',' << video_h << ','
-		<< line.Style.get() << ',' << line.Margin[0] << ',' << line.Margin[1] << ',' << line.Margin[2] << ','
+		<< static_cast<int>(line.Start) << ',' << static_cast<int>(line.End) << ','
+		<< line.Layer << ',' << line.Style.get() << ',' << line.Actor.get() << ',' << line.Effect.get() << ','
+		<< line.Margin[0] << ',' << line.Margin[1] << ',' << line.Margin[2] << ','
 		<< style->font << ',' << style->fontsize << ',' << style->scalex << ',' << style->scaley << ','
 		<< style->spacing << ',' << style->outline_w << ',' << style->shadow_w << ','
 		<< style->bold << ',' << style->italic << ',' << style->alignment << ','
 		<< style->Margin[0] << ',' << style->Margin[1] << ',' << style->Margin[2];
+
+	for (auto const& info : context->ass->Info)
+		ss << "|I:" << info.GetEntryData();
+	for (auto const& s : context->ass->Styles)
+		ss << "|S:" << s.GetEntryData();
+	ss << "|A:" << context->ass->Attachments.size();
 	return ss.str();
 }
 
@@ -445,6 +457,106 @@ void add_range(subtitle_overflow::Result& result, int start, int length) {
 	result.ranges.push_back({ start, length });
 }
 
+AssFile make_single_line_file(AssFile const& source, AssDialogue const& line, std::string const& text, bool disable_wrap) {
+	AssFile file;
+	file.Info = source.Info;
+	if (disable_wrap)
+		file.SetScriptInfo("WrapStyle", "2");
+
+	for (auto const& style : source.Styles)
+		file.Styles.push_back(*new AssStyle(style));
+
+	file.Attachments = source.Attachments;
+	file.Extradata = source.Extradata;
+	file.next_extradata_id = source.next_extradata_id;
+
+	auto line_copy = new AssDialogue(line);
+	line_copy->Text = boost::flyweight<std::string>(text);
+	line_copy->Comment = false;
+	file.Events.push_back(*line_copy);
+	return file;
+}
+
+std::vector<int> sample_times(AssDialogue const& line, std::string const& text) {
+	int start = static_cast<int>(line.Start);
+	int end = std::max(start + 1, static_cast<int>(line.End));
+	int mid = start + (end - start) / 2;
+
+	if (text.find("\\t") == std::string::npos)
+		return { mid };
+
+	return { start, mid, std::max(start, end - 1) };
+}
+
+bool outside_video(libass::RenderedBounds const& bounds, int video_w, int video_h) {
+	return bounds.has_pixels && (bounds.left < 0 || bounds.top < 0 || bounds.right > video_w || bounds.bottom > video_h);
+}
+
+bool appears_auto_wrapped(libass::RenderedBounds const& normal, libass::RenderedBounds const& nowrap, int video_w, int video_h) {
+	if (!normal.has_pixels || !nowrap.has_pixels)
+		return false;
+
+	int normal_w = normal.right - normal.left;
+	int normal_h = normal.bottom - normal.top;
+	int nowrap_w = nowrap.right - nowrap.left;
+	int nowrap_h = nowrap.bottom - nowrap.top;
+
+	if (normal.bands > nowrap.bands)
+		return true;
+	if (nowrap_h > 0 && nowrap_w > 0 && normal_h > nowrap_h * 1.35 && normal_w < nowrap_w * 0.92)
+		return true;
+	if (outside_video(nowrap, video_w, video_h) && !outside_video(normal, video_w, video_h) && normal_w < nowrap_w * 0.92)
+		return true;
+
+	return false;
+}
+
+subtitle_overflow::Result check_with_libass(agi::Context *context, AssDialogue const *line, std::string const& text) {
+	subtitle_overflow::Result result;
+	if (!context || !line || line->Comment)
+		return result;
+
+	auto provider = context->project->VideoProvider();
+	if (!provider)
+		return result;
+
+	int video_w = provider->GetWidth();
+	int video_h = provider->GetHeight();
+	if (video_w <= 0 || video_h <= 0)
+		return result;
+
+	result.valid = true;
+	auto normal_file = make_single_line_file(*context->ass, *line, text, false);
+	std::unique_ptr<AssFile> nowrap_file;
+
+	for (int time : sample_times(*line, text)) {
+		auto normal = libass::GetRenderedBounds(&normal_file, time, video_w, video_h);
+		if (!normal.valid) {
+			result.valid = false;
+			return result;
+		}
+		if (outside_video(normal, video_w, video_h)) {
+			result.overflow = true;
+			return result;
+		}
+
+		if (!nowrap_file)
+			nowrap_file = std::make_unique<AssFile>(make_single_line_file(*context->ass, *line, text, true));
+		auto nowrap = libass::GetRenderedBounds(nowrap_file.get(), time, video_w, video_h);
+		if (!nowrap.valid) {
+			result.valid = false;
+			return result;
+		}
+
+		if (appears_auto_wrapped(normal, nowrap, video_w, video_h)) {
+			result.overflow = true;
+			return result;
+		}
+	}
+
+	return result;
+}
+
 subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const *line, std::string const& text, wxDC& dc, bool detect_wrap_overflow) {
 	subtitle_overflow::Result result;
 
@@ -664,9 +776,11 @@ Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
 		return it->second.result;
 
 	Result result;
-	if (dc) {
+	result = check_with_libass(context, line, text);
+	if (!result.valid && dc) {
 		result = check_with_dc(context, line, text, *dc, false);
-	} else {
+	}
+	else if (!result.valid) {
 		wxBitmap bmp(1, 1);
 		wxMemoryDC mem_dc;
 		mem_dc.SelectObject(bmp);
@@ -696,6 +810,21 @@ Result CheckText(agi::Context *context, AssDialogue const *line, std::string con
 		mem_dc.SelectObject(bmp);
 		result = check_with_dc(context, line, text, mem_dc, true);
 		mem_dc.SelectObject(wxNullBitmap);
+	}
+
+	auto rendered = check_with_libass(context, line, text);
+	if (rendered.valid) {
+		if (rendered.overflow) {
+			result.valid = true;
+			result.overflow = true;
+			if (result.ranges.empty() && !text.empty())
+				result.ranges.push_back({ 0, static_cast<int>(text.size()) });
+		}
+		else {
+			result.valid = true;
+			result.overflow = false;
+			result.ranges.clear();
+		}
 	}
 
 	result_cache[line->Id] = { text, signature, result };

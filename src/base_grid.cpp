@@ -143,7 +143,7 @@ bool BaseGrid::IsOverflow(AssDialogue const *line, wxDC& dc) {
 	return subtitle_overflow::Check(context, line, &dc).overflow;
 }
 
-void BaseGrid::OnSubtitlesCommit(int type) {
+void BaseGrid::OnSubtitlesCommit(int type, const AssDialogue *single_line) {
 	if (type == AssFile::COMMIT_NEW || type & AssFile::COMMIT_ORDER || type & AssFile::COMMIT_DIAG_ADDREM)
 		UpdateMaps();
 
@@ -156,15 +156,17 @@ void BaseGrid::OnSubtitlesCommit(int type) {
 		return;
 	}
 	if (type & AssFile::COMMIT_DIAG_TIME) {
-		// Invalidate only the active line when its timing changes
-		if (auto *active = context->selectionController->GetActiveLine())
-			subtitle_overflow::InvalidateLine(active->Id);
+		if (single_line)
+			subtitle_overflow::InvalidateLine(single_line->Id);
+		else
+			subtitle_overflow::InvalidateAll();
 		Refresh(false);
 	}
 	else if (type & AssFile::COMMIT_DIAG_TEXT) {
-		// Invalidate only the active line when its text changes
-		if (auto *active = context->selectionController->GetActiveLine())
-			subtitle_overflow::InvalidateLine(active->Id);
+		if (single_line)
+			subtitle_overflow::InvalidateLine(single_line->Id);
+		else
+			subtitle_overflow::InvalidateAll();
 		if (OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool()) {
 			Refresh(false);
 			return;

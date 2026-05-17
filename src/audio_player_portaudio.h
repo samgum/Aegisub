@@ -138,7 +138,13 @@ public:
 
 	/// @brief Set volume level
 	/// @param vol Volume
-	void SetVolume(double vol) { volume = vol; }
+	void SetVolume(double vol) {
+		volume = vol;
+#ifdef WITH_SOUNDTOUCH
+		if (tempo_processor)
+			tempo_processor->SetVolume(vol);
+#endif
+	}
 
 	/// @brief Set playback speed
 	/// @param speed Playback speed multiplier, 1.0 is normal speed

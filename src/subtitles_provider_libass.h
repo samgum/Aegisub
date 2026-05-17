@@ -20,9 +20,21 @@
 #include <string>
 
 class SubtitlesProvider;
+class AssFile;
 namespace agi { class BackgroundRunner; }
 
 namespace libass {
+	struct RenderedBounds {
+		bool valid = false;
+		bool has_pixels = false;
+		int left = 0;
+		int top = 0;
+		int right = 0;
+		int bottom = 0;
+		int bands = 0;
+	};
+
 	std::unique_ptr<SubtitlesProvider> Create(std::string const&, agi::BackgroundRunner *br);
 	void CacheFonts();
+	RenderedBounds GetRenderedBounds(AssFile *subs, int time_ms, int width, int height);
 }

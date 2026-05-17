@@ -245,6 +245,7 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 
 	// Calculate how much left
 	int64_t lenAvailable = std::min<int64_t>(player->end - player->current, framesPerBuffer);
+	const int bytes_per_frame = player->provider->GetChannels() * player->provider->GetBytesPerSample();
 
 	// Play something
 	if (lenAvailable > 0 && player->playback_speed == 1.0) {
@@ -252,6 +253,11 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 
 		// Set play position
 		player->current += lenAvailable;
+		if ((unsigned long)lenAvailable < framesPerBuffer) {
+			auto out = static_cast<char *>(outputBuffer);
+			memset(out + lenAvailable * bytes_per_frame, 0, (framesPerBuffer - lenAvailable) * bytes_per_frame);
+			return paComplete;
+		}
 
 		// Continue as normal
 		return paContinue;
@@ -266,7 +272,6 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 			return player->tempo_processor->IsFinished() ? paComplete : paContinue;
 		}
 #endif
-		const int bytes_per_frame = player->provider->GetChannels() * player->provider->GetBytesPerSample();
 		const auto source_frames = std::min<int64_t>(
 			player->end - player->current,
 			(int64_t)(framesPerBuffer * player->playback_speed) + 2);
