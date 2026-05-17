@@ -13,12 +13,18 @@
 #include "utils.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdio>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <utility>
 
+#include <wx/app.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
@@ -39,6 +45,7 @@
 namespace {
 std::string session_api_key;
 std::map<std::string, std::string> response_cache;
+std::mutex response_cache_mutex;
 
 struct ProviderPreset {
 	const char *name;
@@ -303,6 +310,8 @@ class DialogAIAnalysis final : public wxDialog {
 	std::string text;
 	wxTextCtrl *target_language;
 	wxTextCtrl *result;
+	wxButton *analyze_button = nullptr;
+	std::shared_ptr<std::atomic_bool> alive = std::make_shared<std::atomic_bool>(true);
 
 	void Analyze(wxCommandEvent&) {
 		if (!OPT_GET("Tool/AI Analysis/Enabled")->GetBool()) {
@@ -325,6 +334,7 @@ class DialogAIAnalysis final : public wxDialog {
 
 		std::string cache_key = base_url + "\n" + model + "\n" + target + "\n" + text + "\n" + (thinking ? "1" : "0");
 		if (OPT_GET("Tool/AI Analysis/Cache")->GetBool()) {
+			std::lock_guard<std::mutex> lock(response_cache_mutex);
 			auto it = response_cache.find(cache_key);
 			if (it != response_cache.end()) {
 				result->SetValue(to_wx(it->second));
@@ -332,8 +342,8 @@ class DialogAIAnalysis final : public wxDialog {
 			}
 		}
 
-		std::string system = "You are a professional subtitle grammar and translation assistant. Analyze only the provided subtitle line. Ignore ASS override tags if any are present. Return concise sections: Text analysis, Grammar analysis, Recommended translation.";
-		std::string user = "Target language: " + target + "\nSubtitle text:\n" + text;
+		std::string system = "You are a professional subtitle grammar and translation assistant. Analyze only the provided subtitle line. Ignore ASS override tags if any are present. Write every heading and every explanation in the requested target language. Be complete but practical for subtitle editing: include source meaning, grammar structure, word/phrase notes, particles or function words when relevant, nuance and tone, subtitle-localization notes, recommended translation, and optional alternatives.";
+		std::string user = "Target language for the entire analysis and translation: " + target + "\nSubtitle text:\n" + text;
 		std::ostringstream body;
 		body << "{\"model\":\"" << json_escape_ai(model) << "\",\"messages\":["
 			<< "{\"role\":\"system\",\"content\":\"" << json_escape_ai(system) << "\"},"
@@ -344,21 +354,43 @@ class DialogAIAnalysis final : public wxDialog {
 		if (thinking && base_url.find("deepseek") != std::string::npos)
 			body << ",\"thinking\":{\"type\":\"enabled\"}";
 		body << "}";
+		std::string request_body = body.str();
 
 #ifdef WITH_UPDATE_CHECKER
 		result->SetValue(_("Analyzing..."));
-		wxSafeYield(this);
-		std::string raw_response;
-		std::string error;
-		if (!call_ai(body.str(), base_url, session_api_key, raw_response, error)) {
-			result->SetValue(to_wx(error));
-			return;
-		}
-		std::string content = extract_message_content(raw_response);
-		if (content.empty())
-			content = raw_response;
-		response_cache[cache_key] = content;
-		result->SetValue(to_wx(content));
+		if (analyze_button)
+			analyze_button->Enable(false);
+		auto alive_token = alive;
+		std::string api_key = session_api_key;
+		bool cache_enabled = OPT_GET("Tool/AI Analysis/Cache")->GetBool();
+		wxTextCtrl *result_ctrl = result;
+		wxButton *button = analyze_button;
+		std::thread([alive_token, result_ctrl, button, cache_key, request_body, base_url, api_key, cache_enabled] {
+			std::string raw_response;
+			std::string error;
+			bool ok = call_ai(request_body, base_url, api_key, raw_response, error);
+			std::string content;
+			if (ok) {
+				content = extract_message_content(raw_response);
+				if (content.empty())
+					content = raw_response;
+				if (cache_enabled) {
+					std::lock_guard<std::mutex> lock(response_cache_mutex);
+					response_cache[cache_key] = content;
+				}
+			}
+			else {
+				content = error;
+			}
+
+			wxTheApp->CallAfter([alive_token, result_ctrl, button, content] {
+				if (!alive_token->load())
+					return;
+				result_ctrl->SetValue(to_wx(content));
+				if (button)
+					button->Enable(true);
+			});
+		}).detach();
 #else
 		result->SetValue(_("This build was compiled without libcurl/update-checker support, so AI requests are unavailable."));
 #endif
@@ -372,6 +404,10 @@ class DialogAIAnalysis final : public wxDialog {
 	}
 
 public:
+	~DialogAIAnalysis() {
+		alive->store(false);
+	}
+
 	DialogAIAnalysis(wxWindow *parent, std::string line_text)
 	: wxDialog(parent, -1, _("AI Grammar Analysis"), wxDefaultPosition, wxSize(720, 560))
 	, text(std::move(line_text))
@@ -386,10 +422,10 @@ public:
 		lang_sizer->Add(target_language, wxSizerFlags(1).Expand());
 
 		auto buttons = new wxBoxSizer(wxHORIZONTAL);
-		auto analyze = new wxButton(this, -1, _("Analyze"));
+		analyze_button = new wxButton(this, -1, _("Analyze"));
 		auto copy = new wxButton(this, -1, _("Copy All"));
 		auto settings = new wxButton(this, -1, _("Settings"));
-		buttons->Add(analyze, wxSizerFlags().Border(wxRIGHT));
+		buttons->Add(analyze_button, wxSizerFlags().Border(wxRIGHT));
 		buttons->Add(copy, wxSizerFlags().Border(wxRIGHT));
 		buttons->Add(settings, wxSizerFlags().Border(wxRIGHT));
 		buttons->AddStretchSpacer();
@@ -403,7 +439,7 @@ public:
 		SetSizer(main);
 		CenterOnParent();
 
-		analyze->Bind(wxEVT_BUTTON, &DialogAIAnalysis::Analyze, this);
+		analyze_button->Bind(wxEVT_BUTTON, &DialogAIAnalysis::Analyze, this);
 		copy->Bind(wxEVT_BUTTON, &DialogAIAnalysis::CopyAll, this);
 		settings->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { DialogAIAnalysisSettings(this).ShowModal(); });
 		Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { EndModal(wxID_CLOSE); }, wxID_CLOSE);

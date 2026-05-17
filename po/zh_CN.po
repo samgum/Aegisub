@@ -7618,3 +7618,19 @@ msgstr "正在分析..."
 #: ../src/dialog_ai_analysis.cpp:0
 msgid "This build was compiled without libcurl/update-checker support, so AI requests are unavailable."
 msgstr "此版本编译时未启用 libcurl/更新检查支持，因此无法发送 AI 请求。"
+
+#: ../src/preferences.cpp:0
+msgid "Rendered subtitle width"
+msgstr "渲染字幕宽度"
+
+#: ../src/preferences.cpp:0
+msgid "Plain text character count"
+msgstr "纯文本字符数"
+
+#: ../src/preferences.cpp:0
+msgid "Overflow highlight mode"
+msgstr "超宽高亮模式"
+
+#: ../src/preferences.cpp:0
+msgid "Overflow character limit"
+msgstr "超宽字符数限制"

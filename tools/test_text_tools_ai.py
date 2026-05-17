@@ -64,6 +64,27 @@ def test_ai_button_and_openai_compatible_request_are_present():
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
     ]:
         assert base_url in ai
+    config = CONFIG.read_text(encoding="utf-8")
+    assert '"Temperature" : 1.0' in config
+
+
+def test_ai_analysis_request_is_backgrounded_and_target_language_driven():
+    ai = AI.read_text(encoding="utf-8")
+    assert "#include <thread>" in ai
+    assert "std::thread([alive_token" in ai
+    assert "wxTheApp->CallAfter" in ai
+    assert "wxSafeYield" not in ai
+    assert "Write every heading and every explanation in the requested target language" in ai
+    for section in [
+        "source meaning",
+        "grammar structure",
+        "word/phrase notes",
+        "nuance and tone",
+        "subtitle-localization notes",
+        "recommended translation",
+        "optional alternatives",
+    ]:
+        assert section in ai
 
 
 def test_ai_cache_does_not_include_api_key():
@@ -80,6 +101,7 @@ def main():
         test_pair_check_ignores_tags_and_covers_common_cjk_pairs,
         test_tool_commands_and_menu_are_registered,
         test_ai_button_and_openai_compatible_request_are_present,
+        test_ai_analysis_request_is_backgrounded_and_target_language_driven,
         test_ai_cache_does_not_include_api_key,
     ]
     for test in tests:

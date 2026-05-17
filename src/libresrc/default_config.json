@@ -403,7 +403,9 @@
 			"Syntax" : true
 		},
 		"Overflow Highlight" : {
-			"Enabled" : true
+			"Enabled" : true,
+			"Mode" : 0,
+			"Character Limit" : 15
 		},
 		"Provider" : "libass",
 		"Show Original": false,
@@ -557,7 +559,7 @@
 			"Base URL" : "https://api.deepseek.com",
 			"Model" : "deepseek-v4-pro",
 			"Target Language" : "",
-			"Temperature" : 0.2,
+			"Temperature" : 1.0,
 			"Max Tokens" : 1200,
 			"Thinking" : false,
 			"Cache" : true

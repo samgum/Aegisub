@@ -159,6 +159,8 @@ SubsTextEditCtrl::SubsTextEditCtrl(wxWindow* parent, wxSize wsize, long style, a
 	BindConnection(OPT_SUB("Colour/Subtitle/Background", &SubsTextEditCtrl::SetStyles, this));
 	BindConnection(OPT_SUB("Subtitle/Highlight/Syntax", &SubsTextEditCtrl::UpdateStyle, this));
 	BindConnection(OPT_SUB("Subtitle/Overflow Highlight/Enabled", &SubsTextEditCtrl::UpdateStyle, this));
+	BindConnection(OPT_SUB("Subtitle/Overflow Highlight/Mode", &SubsTextEditCtrl::UpdateStyle, this));
+	BindConnection(OPT_SUB("Subtitle/Overflow Highlight/Character Limit", &SubsTextEditCtrl::UpdateStyle, this));
 	BindConnection(OPT_SUB("Colour/Subtitle/Overflow Highlight", &SubsTextEditCtrl::SetStyles, this));
 	BindConnection(OPT_SUB("App/Call Tips", &SubsTextEditCtrl::UpdateCallTip, this));
 

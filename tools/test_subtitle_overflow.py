@@ -6,6 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "src" / "subtitle_overflow.cpp"
 HEADER = ROOT / "src" / "subtitle_overflow.h"
 EDIT_CTRL = ROOT / "src" / "subs_edit_ctrl.cpp"
+CONFIG = ROOT / "src" / "libresrc" / "default_config.json"
+PREFERENCES = ROOT / "src" / "preferences.cpp"
 
 
 def simulated_overflow_indices(char_widths, anchor_x, alignment, wrap_left, wrap_right, video_width):
@@ -119,12 +121,34 @@ def test_cjk_without_spaces_still_overflows_video_edge():
     assert indices == [7, 8, 9]
 
 
-def test_long_cjk_runs_keep_dc_overflow_even_when_libass_clips():
+def test_old_rendered_width_mode_does_not_force_cjk_dc_fallback():
     source = SOURCE.read_text(encoding="utf-8")
-    assert "has_long_unbroken_cjk_run(text)" in source
-    assert "if (result.valid && !result.overflow && has_long_unbroken_cjk_run(text))" in source
-    assert "else if (!result.overflow || !has_long_unbroken_cjk_run(text))" in source
+    assert "has_long_unbroken_cjk_run" not in source
+    assert "is_cjk_or_kana" not in source
+    assert "decode_utf8(std::string const& text" not in source
+    assert "normal_w < nowrap_w * 0.92" in source
     assert "outside_video(nowrap, video_w, video_h) && !outside_video(normal, video_w, video_h)" in source
+
+
+def test_character_limit_mode_counts_plain_text_only():
+    source = SOURCE.read_text(encoding="utf-8")
+    config = CONFIG.read_text(encoding="utf-8")
+    preferences = PREFERENCES.read_text(encoding="utf-8")
+    edit = EDIT_CTRL.read_text(encoding="utf-8")
+    assert '"Mode" : 0' in config
+    assert '"Character Limit" : 15' in config
+    assert "Rendered subtitle width" in preferences
+    assert "Plain text character count" in preferences
+    assert "Overflow highlight mode" in preferences
+    assert "Overflow character limit" in preferences
+    assert "check_with_character_limit" in source
+    assert 'OPT_GET("Subtitle/Overflow Highlight/Mode")->GetInt() == 1' in source
+    assert "if (text[pos] == '{')" in source
+    assert "command == 'N' || command == 'n'" in source
+    assert "command == 'h'" in source
+    assert "add_plain_char(pos, len)" in source
+    assert 'OPT_SUB("Subtitle/Overflow Highlight/Mode"' in edit
+    assert 'OPT_SUB("Subtitle/Overflow Highlight/Character Limit"' in edit
 
 
 def test_positioned_lines_use_video_bounds_not_style_margins():
@@ -144,7 +168,8 @@ def main():
         test_public_check_text_api_exists,
         test_margin_overflow_marks_wrapped_english_tail,
         test_cjk_without_spaces_still_overflows_video_edge,
-        test_long_cjk_runs_keep_dc_overflow_even_when_libass_clips,
+        test_old_rendered_width_mode_does_not_force_cjk_dc_fallback,
+        test_character_limit_mode_counts_plain_text_only,
         test_positioned_lines_use_video_bounds_not_style_margins,
     ]
     for test in tests:

@@ -229,6 +229,10 @@ void Interface(wxTreebook *book, Preferences *parent) {
 	p->OptionAdd(character_count, _("Ignore whitespace"), "Subtitle/Character Counter/Ignore Whitespace");
 	p->OptionAdd(character_count, _("Ignore punctuation"), "Subtitle/Character Counter/Ignore Punctuation");
 	p->OptionAdd(character_count, _("Highlight lines wider than the video"), "Subtitle/Overflow Highlight/Enabled");
+	const wxString overflow_modes_arr[] = {_("Rendered subtitle width"), _("Plain text character count")};
+	wxArrayString overflow_modes(2, overflow_modes_arr);
+	p->OptionChoice(character_count, _("Overflow highlight mode"), overflow_modes, "Subtitle/Overflow Highlight/Mode");
+	p->OptionAdd(character_count, _("Overflow character limit"), "Subtitle/Overflow Highlight/Character Limit", 1, 1000);
 
 	auto grid = p->PageSizer(_("Grid"));
 	p->OptionAdd(grid, _("Focus grid on click"), "Subtitle/Grid/Focus Allow");
