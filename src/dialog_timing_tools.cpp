@@ -864,6 +864,12 @@ bool has_kanji(std::string const& text) {
 
 std::string format_ass_number(double value);
 
+struct FuriganaFormat {
+	std::string tags;
+	double base_size = 48.0;
+	double ruby_size = 18.0;
+};
+
 double furigana_display_units(std::string const& text) {
 	double units = 0.0;
 	for (size_t pos = 0; pos < text.size(); ) {
@@ -893,8 +899,7 @@ bool resets_style_tag(AssOverrideTag const& tag) {
 	return tag.Name == "\\r";
 }
 
-void append_sanitized_override_state(AssDialogueBlockOverride const& block, std::string& active_tags, std::string& output) {
-	std::string tags;
+void append_sanitized_override_state(AssDialogueBlockOverride const& block, std::string& active_tags) {
 	for (auto const& tag : block.Tags) {
 		if (is_karaoke_tag(tag))
 			continue;
@@ -904,31 +909,40 @@ void append_sanitized_override_state(AssDialogueBlockOverride const& block, std:
 			active_tags = tag_text;
 		else
 			active_tags += tag_text;
-		tags += tag_text;
 	}
-
-	if (!tags.empty())
-		output += "{" + tags + "\\alpha&HFF&}";
 }
 
-std::string hidden_state_tags(std::string const& active_tags) {
+std::string hidden_state_tags(std::string const& active_tags, FuriganaFormat const& format) {
 	if (active_tags.starts_with("\\r"))
-		return "{" + active_tags + "\\alpha&HFF&}";
-	return "{\\r" + active_tags + "\\alpha&HFF&}";
+		return "{" + active_tags + format.tags + "\\alpha&HFF&}";
+	return "{\\r" + active_tags + format.tags + "\\alpha&HFF&}";
 }
 
-std::string make_visible_furigana_segment(std::string const& target, std::string const& reading, std::string const& ruby_tags, int size_percent, std::string const& active_tags) {
-	double target_units = std::max(0.1, furigana_display_units(target));
-	double reading_units = std::max(0.1, furigana_display_units(reading));
-	double scale = target_units * 10000.0 / (reading_units * std::max(1, size_percent));
-	scale = std::clamp(scale, 25.0, 400.0);
+void append_ideographic_spaces(std::string& text, size_t count) {
+	for (size_t i = 0; i < count; ++i)
+		text += "\xE3\x80\x80";
+}
 
-	return "{\\alpha&H00&" + ruby_tags + "\\fscx" + format_ass_number(scale) + "}" +
+void append_hidden_space(std::string& text, double width, FuriganaFormat const& format) {
+	size_t count = static_cast<size_t>(std::max(0.0, std::round(width / std::max(1.0, format.ruby_size))));
+	append_ideographic_spaces(text, count);
+}
+
+std::string make_visible_furigana_segment(std::string const& target, std::string const& reading, FuriganaFormat const& format, std::string const& active_tags) {
+	double target_width = std::max(0.1, furigana_display_units(target)) * format.base_size;
+	double reading_width = std::max(0.1, furigana_display_units(reading)) * format.ruby_size;
+	double pad = std::max(0.0, (target_width - reading_width) / 2.0);
+
+	std::string result;
+	append_hidden_space(result, pad, format);
+	result += "{\\alpha&H00&" + format.tags + "}" +
 		reading +
-		hidden_state_tags(active_tags);
+		hidden_state_tags(active_tags, format);
+	append_hidden_space(result, pad, format);
+	return result;
 }
 
-std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<std::string, std::string> const& readings, std::string const& ruby_tags, int size_percent, std::string const& active_tags, bool& any_reading) {
+std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, std::string const& active_tags, bool& any_reading) {
 	std::vector<size_t> boundaries;
 	std::vector<uint32_t> codepoints;
 	for (size_t pos = 0; pos < run.size(); ) {
@@ -948,7 +962,7 @@ std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<st
 			auto term = run.substr(boundaries[i], boundaries[end] - boundaries[i]);
 			auto it = readings.find(term);
 			if (it != readings.end() && !it->second.empty()) {
-				result += make_visible_furigana_segment(term, it->second, ruby_tags, size_percent, active_tags);
+				result += make_visible_furigana_segment(term, it->second, format, active_tags);
 				i = end;
 				matched = true;
 				any_reading = true;
@@ -957,7 +971,7 @@ std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<st
 		}
 
 		if (!matched) {
-			result += run.substr(boundaries[i], boundaries[i + 1] - boundaries[i]);
+			append_hidden_space(result, furigana_display_units(run.substr(boundaries[i], boundaries[i + 1] - boundaries[i])) * format.base_size, format);
 			++i;
 		}
 	}
@@ -965,22 +979,27 @@ std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<st
 	return result;
 }
 
-std::string make_aligned_reading_line(std::string const& raw_text, std::map<std::string, std::string> const& readings, std::string const& ruby_tags, int size_percent, bool& any_reading) {
+void append_hidden_text_width(std::string& result, std::string const& text, FuriganaFormat const& format) {
+	append_hidden_space(result, furigana_display_units(text) * format.base_size, format);
+}
+
+std::string make_aligned_reading_line(std::string const& raw_text, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool& any_reading) {
 	bool had_furigana = false;
 	AssDialogue line;
 	line.Text = strip_existing_furigana(raw_text, had_furigana);
 
-	std::string result = "{\\alpha&HFF&}";
+	std::string result = hidden_state_tags("", format);
 	std::string active_tags;
 	auto blocks = line.ParseTags();
 	for (auto& block : blocks) {
 		if (block->GetType() == AssBlockType::OVERRIDE) {
-			append_sanitized_override_state(*static_cast<AssDialogueBlockOverride const *>(block.get()), active_tags, result);
+			append_sanitized_override_state(*static_cast<AssDialogueBlockOverride const *>(block.get()), active_tags);
+			result += hidden_state_tags(active_tags, format);
 			continue;
 		}
 
 		if (block->GetType() != AssBlockType::PLAIN) {
-			result += block->GetText();
+			append_hidden_text_width(result, block->GetText(), format);
 			continue;
 		}
 
@@ -991,7 +1010,7 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 			read_utf8_codepoint(text, pos, cp, len);
 
 			if (!is_cjk_ideograph(cp)) {
-				result += text.substr(pos, len);
+				append_hidden_text_width(result, text.substr(pos, len), format);
 				pos += len;
 				continue;
 			}
@@ -1004,7 +1023,7 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 				read_utf8_codepoint(text, pos, cp, len);
 			} while (is_cjk_ideograph(cp));
 
-			result += make_aligned_reading_for_cjk_run(text.substr(start, pos - start), readings, ruby_tags, size_percent, active_tags, any_reading);
+			result += make_aligned_reading_for_cjk_run(text.substr(start, pos - start), readings, format, active_tags, any_reading);
 		}
 	}
 
@@ -1024,7 +1043,7 @@ std::string format_ass_number(double value) {
 	return ret;
 }
 
-std::string make_furigana_tags(AssStyle const* style, int size_percent, int outline_percent, int shadow_percent) {
+FuriganaFormat make_furigana_format(AssStyle const* style, int size_percent, int outline_percent, int shadow_percent) {
 	double base_size = style ? style->fontsize : 48.0;
 	double base_outline = style ? style->outline_w : 2.0;
 	double base_shadow = style ? style->shadow_w : 2.0;
@@ -1033,18 +1052,23 @@ std::string make_furigana_tags(AssStyle const* style, int size_percent, int outl
 	double ruby_outline = std::max(0.0, base_outline * outline_percent / 100.0);
 	double ruby_shadow = std::max(0.0, base_shadow * shadow_percent / 100.0);
 
-	return "\\fs" + format_ass_number(ruby_size) +
+	return {
+		"\\fs" + format_ass_number(ruby_size) +
 		"\\bord" + format_ass_number(ruby_outline) +
-		"\\shad" + format_ass_number(ruby_shadow);
+		"\\shad" + format_ass_number(ruby_shadow) +
+		"\\fscx100\\fscy100\\fsp0\\p0",
+		base_size,
+		ruby_size
+	};
 }
 
-std::string compose_furigana_text(std::string const& base, std::map<std::string, std::string> const& readings, std::string const& ruby_tags, int size_percent, bool above, bool& any_reading) {
+std::string compose_furigana_text(std::string const& base, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool above, bool& any_reading) {
 	std::vector<std::string> output_lines;
 	any_reading = false;
 
 	for (auto const& base_line : split_ass_visual_lines(base)) {
 		bool line_has_reading = false;
-		auto reading_line = make_aligned_reading_line(base_line, readings, ruby_tags, size_percent, line_has_reading);
+		auto reading_line = make_aligned_reading_line(base_line, readings, format, line_has_reading);
 		if (line_has_reading) {
 			auto ruby = furigana_marker + reading_line;
 			if (above) {
@@ -1247,7 +1271,13 @@ DialogFuriganaAnnotator::DialogFuriganaAnnotator(agi::Context *context)
 	remove_empty_annotations = new wxCheckBox(this, -1, _("Remove existing annotations when readings are empty"));
 	remove_empty_annotations->SetValue(OPT_GET("Tool/Furigana Annotation/Remove Empty Annotations")->GetBool());
 
-	size_percent = new wxSpinCtrl(this, -1, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 20, 100, OPT_GET("Tool/Furigana Annotation/Size Percent")->GetInt());
+	int saved_size_percent = OPT_GET("Tool/Furigana Annotation/Size Percent")->GetInt();
+	if (!OPT_GET("Tool/Furigana Annotation/Size Default Migrated")->GetBool()) {
+		if (saved_size_percent == 50)
+			saved_size_percent = 35;
+		OPT_SET("Tool/Furigana Annotation/Size Default Migrated")->SetBool(true);
+	}
+	size_percent = new wxSpinCtrl(this, -1, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 10, 100, saved_size_percent);
 	outline_percent = new wxSpinCtrl(this, -1, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 100, OPT_GET("Tool/Furigana Annotation/Outline Percent")->GetInt());
 	shadow_percent = new wxSpinCtrl(this, -1, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 100, OPT_GET("Tool/Furigana Annotation/Shadow Percent")->GetInt());
 
@@ -1613,8 +1643,8 @@ void DialogFuriganaAnnotator::Process(wxCommandEvent&) {
 		std::string new_text = base_text;
 		bool has_reading = false;
 		auto style = context->ass->GetStyle(line->Style.get());
-		auto ruby_tags = make_furigana_tags(style, size_percent->GetValue(), outline_percent->GetValue(), shadow_percent->GetValue());
-		auto annotated_text = compose_furigana_text(base_text, readings, ruby_tags, size_percent->GetValue(), above, has_reading);
+		auto format = make_furigana_format(style, size_percent->GetValue(), outline_percent->GetValue(), shadow_percent->GetValue());
+		auto annotated_text = compose_furigana_text(base_text, readings, format, above, has_reading);
 		if (has_reading) {
 			new_text = annotated_text;
 			++annotated_lines;

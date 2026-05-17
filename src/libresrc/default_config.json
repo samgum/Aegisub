@@ -547,8 +547,9 @@
 			"Position" : 0,
 			"Remove Empty Annotations" : true,
 			"Selection Only" : false,
+			"Size Default Migrated" : false,
 			"Shadow Percent" : 0,
-			"Size Percent" : 50
+			"Size Percent" : 35
 		},
 		"Spell Checker" : {
 			"Backend" : "hunspell",
