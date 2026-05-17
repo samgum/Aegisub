@@ -37,7 +37,8 @@ def test_cache_is_guarded_by_text_content():
     assert "struct CachedResult" in source
     assert "std::string text;" in source
     assert "std::string signature;" in source
-    assert "cache_signature(context, *line)" in source
+    assert "cache_signature(context, *line, false)" in source
+    assert "cache_signature(context, *line, true)" in source
     assert "it->second.text == text && it->second.signature == signature" in source
     assert "result_cache[line->Id] = { text, signature, result };" in source
 
@@ -46,9 +47,18 @@ def test_wrap_bounds_use_margins_and_video_edges():
     source = SOURCE.read_text(encoding="utf-8")
     assert "line_wrap_left" in source
     assert "line_wrap_right" in source
-    assert "bound_left >= wrap_left && bound_right <= wrap_right" in source
-    assert "ch_left < wrap_left || ch_right > wrap_right" in source
-    assert "ch_left < 0. || ch_right > video_w" in source
+    assert "bool video_overflow = bound_left < 0. || bound_right > video_w;" in source
+    assert "bool wrap_overflow = detect_wrap_overflow" in source
+    assert "segment.width > wrap_width * 1.02" in source
+    assert "wrap_overflow && (ch_left < wrap_left || ch_right > wrap_right)" in source
+
+
+def test_grid_mode_uses_video_overflow_only():
+    source = SOURCE.read_text(encoding="utf-8")
+    assert "check_with_dc(context, line, text, *dc, false)" in source
+    assert "check_with_dc(context, line, text, mem_dc, false)" in source
+    assert "check_with_dc(context, line, text, *dc, true)" in source
+    assert "check_with_dc(context, line, text, mem_dc, true)" in source
 
 
 def test_public_check_text_api_exists():
@@ -95,6 +105,7 @@ def main():
         test_edit_box_checks_live_text_not_cached_line_text,
         test_cache_is_guarded_by_text_content,
         test_wrap_bounds_use_margins_and_video_edges,
+        test_grid_mode_uses_video_overflow_only,
         test_public_check_text_api_exists,
         test_margin_overflow_marks_wrapped_english_tail,
         test_cjk_without_spaces_still_overflows_video_edge,

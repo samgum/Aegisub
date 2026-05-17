@@ -178,7 +178,7 @@ TextState base_state(AssStyle const& style) {
 	return state;
 }
 
-std::string cache_signature(agi::Context *context, AssDialogue const& line) {
+std::string cache_signature(agi::Context *context, AssDialogue const& line, bool detect_wrap_overflow) {
 	if (!context)
 		return {};
 
@@ -199,7 +199,7 @@ std::string cache_signature(agi::Context *context, AssDialogue const& line) {
 		style = &default_style;
 
 	std::ostringstream ss;
-	ss << script_w << ',' << script_h << ',' << video_w << ',' << video_h << ','
+	ss << detect_wrap_overflow << ',' << script_w << ',' << script_h << ',' << video_w << ',' << video_h << ','
 		<< line.Style.get() << ',' << line.Margin[0] << ',' << line.Margin[1] << ',' << line.Margin[2] << ','
 		<< style->font << ',' << style->fontsize << ',' << style->scalex << ',' << style->scaley << ','
 		<< style->spacing << ',' << style->outline_w << ',' << style->shadow_w << ','
@@ -445,7 +445,7 @@ void add_range(subtitle_overflow::Result& result, int start, int length) {
 	result.ranges.push_back({ start, length });
 }
 
-subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const *line, std::string const& text, wxDC& dc) {
+subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const *line, std::string const& text, wxDC& dc, bool detect_wrap_overflow) {
 	subtitle_overflow::Result result;
 
 	if (!context || !line || line->Comment || !OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool())
@@ -499,13 +499,16 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 			double left = segment_left(anchor_x, layout.alignment, segment.width);
 			double wrap_left = line_wrap_left(layout, *line, *style, scale_x);
 			double wrap_right = line_wrap_right(layout, *line, *style, script_w, scale_x, video_w);
+			double wrap_width = std::max(0., wrap_right - wrap_left);
 			double bound_left = left;
 			double bound_right = left + segment.width;
 			for (auto const& ch : segment.chars) {
 				bound_left = std::min(bound_left, left + ch.left - ch.pad_left);
 				bound_right = std::max(bound_right, left + ch.right + ch.pad_right);
 			}
-			if (bound_left >= wrap_left && bound_right <= wrap_right && bound_left >= 0. && bound_right <= video_w)
+			bool video_overflow = bound_left < 0. || bound_right > video_w;
+			bool wrap_overflow = detect_wrap_overflow && !layout.positioned && wrap_width > 0. && segment.width > wrap_width * 1.02;
+			if (!video_overflow && !wrap_overflow)
 				return;
 
 			result.overflow = true;
@@ -513,7 +516,7 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 				auto const& ch = segment.chars[i];
 				double ch_left = left + ch.left - ch.pad_left;
 				double ch_right = left + ch.right + ch.pad_right;
-				if (ch_left < wrap_left || ch_right > wrap_right || ch_left < 0. || ch_right > video_w)
+				if (ch_left < 0. || ch_right > video_w || (wrap_overflow && (ch_left < wrap_left || ch_right > wrap_right)))
 					highlight[i] = true;
 			}
 		};
@@ -655,19 +658,19 @@ Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
 		return {};
 
 	auto const& text = line->Text.get();
-	auto signature = cache_signature(context, *line);
+	auto signature = cache_signature(context, *line, false);
 	auto it = result_cache.find(line->Id);
 	if (it != result_cache.end() && it->second.text == text && it->second.signature == signature && it->second.result.valid)
 		return it->second.result;
 
 	Result result;
 	if (dc) {
-		result = check_with_dc(context, line, text, *dc);
+		result = check_with_dc(context, line, text, *dc, false);
 	} else {
 		wxBitmap bmp(1, 1);
 		wxMemoryDC mem_dc;
 		mem_dc.SelectObject(bmp);
-		result = check_with_dc(context, line, text, mem_dc);
+		result = check_with_dc(context, line, text, mem_dc, false);
 		mem_dc.SelectObject(wxNullBitmap);
 	}
 
@@ -679,19 +682,19 @@ Result CheckText(agi::Context *context, AssDialogue const *line, std::string con
 	if (!context || !line || line->Comment || !OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool())
 		return {};
 
-	auto signature = cache_signature(context, *line);
+	auto signature = cache_signature(context, *line, true);
 	auto it = result_cache.find(line->Id);
 	if (it != result_cache.end() && it->second.text == text && it->second.signature == signature && it->second.result.valid)
 		return it->second.result;
 
 	Result result;
 	if (dc) {
-		result = check_with_dc(context, line, text, *dc);
+		result = check_with_dc(context, line, text, *dc, true);
 	} else {
 		wxBitmap bmp(1, 1);
 		wxMemoryDC mem_dc;
 		mem_dc.SelectObject(bmp);
-		result = check_with_dc(context, line, text, mem_dc);
+		result = check_with_dc(context, line, text, mem_dc, true);
 		mem_dc.SelectObject(wxNullBitmap);
 	}
 
