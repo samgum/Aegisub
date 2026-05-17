@@ -47,7 +47,9 @@
 #include <vector>
 
 #include <wx/button.h>
+#include <wx/arrstr.h>
 #include <wx/checkbox.h>
+#include <wx/choicdlg.h>
 #include <wx/dialog.h>
 #include <wx/filename.h>
 #include <wx/listbox.h>
@@ -151,7 +153,9 @@ class DialogFuriganaAnnotator final : public wxDialog {
 	void AutoFillReadings(wxCommandEvent&);
 	void RebuildReadingList(wxCommandEvent&);
 	void Process(wxCommandEvent&);
+	void ProcessByStyle(wxCommandEvent&);
 	void OnSelectedSetChanged();
+	void Apply(std::string const& style_filter = std::string());
 	std::vector<AssDialogue *> GetTargetLines() const;
 	std::map<std::string, std::string> ParseReadingText() const;
 	std::vector<std::string> CollectTerms() const;
@@ -1650,14 +1654,26 @@ DialogFuriganaAnnotator::DialogFuriganaAnnotator(agi::Context *context)
 	main_sizer->Add(top, wxSizerFlags().Expand());
 	main_sizer->Add(options, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 	main_sizer->Add(readings_box, wxSizerFlags(1).Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
-	main_sizer->Add(CreateButtonSizer(wxOK | wxCANCEL), wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+
+	auto button_sizer = new wxBoxSizer(wxHORIZONTAL);
+	auto apply_button = new wxButton(this, wxID_OK, _("Apply"));
+	auto apply_style_button = new wxButton(this, -1, _("Apply by Style..."));
+	auto cancel_button = new wxButton(this, wxID_CANCEL, _("Cancel"));
+	button_sizer->AddStretchSpacer(1);
+	button_sizer->Add(apply_button, wxSizerFlags().Border(wxRIGHT, 6));
+	button_sizer->Add(apply_style_button, wxSizerFlags().Border(wxRIGHT, 6));
+	button_sizer->Add(cancel_button);
+	main_sizer->Add(button_sizer, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 
 	SetSizer(main_sizer);
+	SetAffirmativeId(wxID_OK);
+	SetEscapeId(wxID_CANCEL);
 	SetMinSize(FromDIP(wxSize(720, 600)));
 	main_sizer->Fit(this);
 	CenterOnParent();
 
 	Bind(wxEVT_BUTTON, &DialogFuriganaAnnotator::Process, this, wxID_OK);
+	apply_style_button->Bind(wxEVT_BUTTON, &DialogFuriganaAnnotator::ProcessByStyle, this);
 	selection_mode->Bind(wxEVT_RADIOBOX, &DialogFuriganaAnnotator::RebuildReadingList, this);
 	auto_fill_button->Bind(wxEVT_BUTTON, &DialogFuriganaAnnotator::AutoFillReadings, this);
 	refresh_button->Bind(wxEVT_BUTTON, &DialogFuriganaAnnotator::RebuildReadingList, this);
@@ -1978,6 +1994,32 @@ void DialogFuriganaAnnotator::OnSelectedSetChanged() {
 }
 
 void DialogFuriganaAnnotator::Process(wxCommandEvent&) {
+	Apply();
+}
+
+void DialogFuriganaAnnotator::ProcessByStyle(wxCommandEvent&) {
+	auto styles = context->ass->GetStyles();
+	if (styles.empty()) {
+		wxMessageBox(_("No styles are available in the current subtitle file."), _("Japanese Furigana Annotation"), wxICON_INFORMATION);
+		return;
+	}
+
+	wxArrayString choices;
+	for (auto const& style : styles)
+		choices.Add(to_wx(style));
+
+	int choice = wxGetSingleChoiceIndex(
+		_("Choose a style to apply furigana annotations to:"),
+		_("Apply by Style"),
+		choices,
+		this);
+	if (choice == wxNOT_FOUND)
+		return;
+
+	Apply(styles[choice]);
+}
+
+void DialogFuriganaAnnotator::Apply(std::string const& style_filter) {
 	auto readings = NormalizeReadings(ParseReadingText());
 	size_t nonempty_readings = 0;
 	for (auto const& [kanji, reading] : readings) {
@@ -1994,11 +2036,17 @@ void DialogFuriganaAnnotator::Process(wxCommandEvent&) {
 	size_t changed_lines = 0;
 	size_t annotated_lines = 0;
 	size_t removed_lines = 0;
+	size_t skipped_style_lines = 0;
 	bool above = position_mode->GetSelection() == 0;
 
 	for (auto line : GetTargetLines()) {
 		if (line->Comment)
 			continue;
+
+		if (!style_filter.empty() && line->Style.get() != style_filter) {
+			++skipped_style_lines;
+			continue;
+		}
 
 		++checked_lines;
 		bool had_furigana = false;
@@ -2041,6 +2089,10 @@ void DialogFuriganaAnnotator::Process(wxCommandEvent&) {
 	report += wxString::Format("%s: %llu\n", _("Annotated lines").c_str(), static_cast<unsigned long long>(annotated_lines));
 	report += wxString::Format("%s: %llu\n", _("Removed annotation lines").c_str(), static_cast<unsigned long long>(removed_lines));
 	report += wxString::Format("%s: %llu\n", _("Reading entries").c_str(), static_cast<unsigned long long>(nonempty_readings));
+	if (!style_filter.empty()) {
+		report += wxString::Format("%s: %s\n", _("Style filter").c_str(), to_wx(style_filter).c_str());
+		report += wxString::Format("%s: %llu\n", _("Skipped by style").c_str(), static_cast<unsigned long long>(skipped_style_lines));
+	}
 
 	wxMessageBox(report, _("Japanese Furigana Annotation"), wxICON_INFORMATION);
 	Close();

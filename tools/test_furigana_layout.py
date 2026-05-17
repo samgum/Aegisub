@@ -143,6 +143,22 @@ def test_occurrence_reading_overrides_global_default():
     assert lookup_reading(readings, 8, 2, "今日") == "こんにち"
 
 
+def test_source_supports_style_scoped_apply_button():
+    source = SOURCE.read_text(encoding="utf-8")
+    required = [
+        "Apply by Style...",
+        "ProcessByStyle",
+        "wxGetSingleChoiceIndex",
+        "context->ass->GetStyles()",
+        "Apply(styles[choice])",
+        "line->Style.get() != style_filter",
+        "Style filter",
+        "Skipped by style",
+    ]
+    for token in required:
+        assert token in source
+
+
 def test_source_has_auto_wrap_support():
     source = SOURCE.read_text(encoding="utf-8")
     required = [
@@ -215,6 +231,7 @@ def main():
         test_source_uses_per_occurrence_reading_keys,
         test_sudachi_autofill_can_return_occurrence_readings,
         test_occurrence_reading_overrides_global_default,
+        test_source_supports_style_scoped_apply_button,
         test_source_has_auto_wrap_support,
         test_default_config_has_migrated_small_ruby_default,
         test_old_marker_lines_are_removed_for_regeneration,
