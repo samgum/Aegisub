@@ -253,7 +253,8 @@ public:
 		for (auto const& preset : provider_presets)
 			providers.push_back(preset.name);
 		provider = new wxChoice(this, -1, wxDefaultPosition, wxDefaultSize, providers);
-		provider->SetSelection(std::max(0, std::min(OPT_GET("Tool/AI Analysis/Provider")->GetInt(), static_cast<int>(providers.size()) - 1)));
+		int provider_selection = static_cast<int>(OPT_GET("Tool/AI Analysis/Provider")->GetInt());
+		provider->SetSelection(std::max(0, std::min(provider_selection, static_cast<int>(providers.size()) - 1)));
 
 		base_url = new wxTextCtrl(this, -1, to_wx(OPT_GET("Tool/AI Analysis/Base URL")->GetString()));
 		model = new wxTextCtrl(this, -1, to_wx(OPT_GET("Tool/AI Analysis/Model")->GetString()));
