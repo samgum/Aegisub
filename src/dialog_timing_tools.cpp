@@ -920,31 +920,17 @@ std::string hidden_state_tags(std::string const& active_tags, FuriganaFormat con
 
 void append_transparent_text(std::string& result, std::string const& text) {
 	// Append text as fully transparent - used for width-matching placeholders
-	result += "{\\alpha&HFF&}" + text;
+	result += "{\\alpha&HFF&\\fscy50}" + text + "{\\fscy100}";
 }
 
 std::string make_visible_furigana_segment(std::string const& target, std::string const& reading, FuriganaFormat const& format, std::string const& active_tags) {
-	// Place the reading centered over the kanji target.
-	// Use transparent copies of the kanji for left/right padding, with \fscx
-	// to scale the reading to fit within the target width.
-	double target_units = std::max(0.1, furigana_display_units(target));
-	double reading_units = std::max(0.1, furigana_display_units(reading));
-
-	// Calculate horizontal scale to make reading fill the target width
-	// reading_rendered_width = reading_units * ruby_size * (fscx/100)
-	// We want this to equal target_units * base_size
-	// So fscx = target_units * base_size / (reading_units * ruby_size) * 100
-	double fscx = 100.0;
-	if (reading_units > 0 && target_units > 0) {
-		fscx = (target_units * format.base_size) / (reading_units * format.ruby_size) * 100.0;
-		// Clamp to avoid extreme distortion
-		fscx = std::max(50.0, std::min(200.0, fscx));
-	}
-
+	// Place the reading directly without horizontal scaling.
+	// The transparent kanji text around it provides correct total line width.
+	// If the reading is shorter than the kanji, transparent kanji text fills the gap.
 	std::string result;
-	result += "{\\alpha&H00&" + format.tags + "\\fscx" + format_ass_number(fscx) + "}" +
+	result += "{lpha&H00&" + format.tags + "}" +
 		reading +
-		"{\\fscx100}" + hidden_state_tags(active_tags, format);
+		hidden_state_tags(active_tags, format);
 	return result;
 }
 
@@ -1017,7 +1003,7 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 
 		if (block->GetType() != AssBlockType::PLAIN) {
 			// Non-plain blocks (drawing etc.) - make transparent
-			result += "{\\alpha&HFF&}" + block->GetText();
+			result += "{\\alpha&HFF&\\fscy50}" + block->GetText() + "{\\fscy100}";
 			continue;
 		}
 
@@ -1029,7 +1015,7 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 
 			if (!is_cjk_ideograph(cp)) {
 				// Non-kanji: keep as transparent text for width matching
-				result += "{\\alpha&HFF&}" + text.substr(pos, len);
+				result += "{\\alpha&HFF&\\fscy50}" + text.substr(pos, len) + "{\\fscy100}";
 				pos += len;
 				continue;
 			}
