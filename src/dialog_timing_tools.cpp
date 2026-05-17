@@ -38,6 +38,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <map>
 #include <set>
 #include <sstream>
@@ -782,6 +784,11 @@ std::string join_ass_visual_lines(std::vector<std::string> const& lines) {
 	return joined;
 }
 
+bool starts_with_at(std::string const& text, size_t pos, char const *token) {
+	size_t len = std::strlen(token);
+	return pos + len <= text.size() && text.compare(pos, len, token) == 0;
+}
+
 bool is_cjk_ideograph(uint32_t cp) {
 	return (cp >= 0x3400 && cp <= 0x4DBF) ||
 		(cp >= 0x4E00 && cp <= 0x9FFF) ||
@@ -870,6 +877,22 @@ struct FuriganaFormat {
 	double ruby_size = 18.0;
 };
 
+struct FuriganaWrapState {
+	double fontsize = 48.0;
+	double scalex = 100.0;
+	double spacing = 0.0;
+	int drawing = 0;
+	int wrap_style = 0;
+};
+
+struct FuriganaWrapToken {
+	std::string raw;
+	double width = 0.0;
+	double spacing = 0.0;
+	bool visible = false;
+	bool allow_wrap = true;
+};
+
 double furigana_display_units(std::string const& text) {
 	double units = 0.0;
 	for (size_t pos = 0; pos < text.size(); ) {
@@ -889,6 +912,194 @@ double furigana_display_units(std::string const& text) {
 		pos += len;
 	}
 	return units;
+}
+
+double furigana_display_units(uint32_t cp) {
+	if (cp == ' ' || cp == '\t')
+		return 0.5;
+	if (cp < 0x80)
+		return 0.55;
+	if ((cp >= 0x3040 && cp <= 0x30FF) || is_cjk_ideograph(cp) || (cp >= 0xFF01 && cp <= 0xFF60))
+		return 1.0;
+	return 0.8;
+}
+
+double parse_override_number(std::string const& text, size_t& pos, double fallback) {
+	while (pos < text.size() && (text[pos] == ' ' || text[pos] == '\t'))
+		++pos;
+
+	char *end = nullptr;
+	double value = std::strtod(text.c_str() + pos, &end);
+	if (end == text.c_str() + pos)
+		return fallback;
+
+	pos = static_cast<size_t>(end - text.c_str());
+	return value;
+}
+
+void apply_furigana_wrap_override(std::string const& block, FuriganaWrapState& state, FuriganaWrapState const& base) {
+	for (size_t pos = 0; pos < block.size(); ++pos) {
+		if (block[pos] != '\\')
+			continue;
+		++pos;
+
+		if (starts_with_at(block, pos, "fscx")) {
+			pos += 4;
+			state.scalex = parse_override_number(block, pos, state.scalex);
+			--pos;
+		}
+		else if (starts_with_at(block, pos, "fsp")) {
+			pos += 3;
+			state.spacing = parse_override_number(block, pos, state.spacing);
+			--pos;
+		}
+		else if (starts_with_at(block, pos, "fs")) {
+			pos += 2;
+			state.fontsize = parse_override_number(block, pos, state.fontsize);
+			--pos;
+		}
+		else if (starts_with_at(block, pos, "p")) {
+			pos += 1;
+			state.drawing = static_cast<int>(parse_override_number(block, pos, state.drawing));
+			--pos;
+		}
+		else if (starts_with_at(block, pos, "q")) {
+			pos += 1;
+			state.wrap_style = static_cast<int>(parse_override_number(block, pos, state.wrap_style));
+			--pos;
+		}
+		else if (starts_with_at(block, pos, "r")) {
+			state = base;
+		}
+	}
+}
+
+double furigana_wrap_token_units(uint32_t cp, FuriganaWrapState const& state, FuriganaFormat const& format) {
+	if (state.drawing > 0)
+		return 0.0;
+
+	double size_scale = state.fontsize / std::max(1.0, format.base_size);
+	double scale_x = state.scalex / 100.0;
+	return furigana_display_units(cp) * size_scale * scale_x;
+}
+
+std::vector<FuriganaWrapToken> tokenize_for_furigana_wrap(std::string const& text, FuriganaFormat const& format, int wrap_style) {
+	FuriganaWrapState base;
+	base.fontsize = format.base_size;
+	base.wrap_style = wrap_style;
+
+	FuriganaWrapState state = base;
+	std::vector<FuriganaWrapToken> tokens;
+	std::string pending;
+
+	for (size_t pos = 0; pos < text.size(); ) {
+		if (text[pos] == '{') {
+			size_t end = text.find('}', pos + 1);
+			if (end == std::string::npos) {
+				pending += text.substr(pos);
+				break;
+			}
+
+			auto block = text.substr(pos + 1, end - pos - 1);
+			pending += text.substr(pos, end - pos + 1);
+			apply_furigana_wrap_override(block, state, base);
+			pos = end + 1;
+			continue;
+		}
+
+		if (text[pos] == '\\' && pos + 1 < text.size() && text[pos + 1] == 'h') {
+			FuriganaWrapToken token;
+			token.raw = pending + "\\h";
+			token.width = furigana_wrap_token_units(' ', state, format);
+			token.spacing = state.spacing / std::max(1.0, format.base_size);
+			token.visible = state.drawing == 0;
+			token.allow_wrap = state.wrap_style != 2;
+			tokens.push_back(std::move(token));
+			pending.clear();
+			pos += 2;
+			continue;
+		}
+
+		uint32_t cp = 0;
+		size_t len = 1;
+		read_utf8_codepoint(text, pos, cp, len);
+
+		FuriganaWrapToken token;
+		token.raw = pending + text.substr(pos, len);
+		token.width = furigana_wrap_token_units(cp, state, format);
+		token.spacing = state.spacing / std::max(1.0, format.base_size);
+		token.visible = state.drawing == 0;
+		token.allow_wrap = state.wrap_style != 2;
+		tokens.push_back(std::move(token));
+		pending.clear();
+		pos += len;
+	}
+
+	if (!pending.empty()) {
+		if (tokens.empty())
+			tokens.push_back({ pending, 0.0, 0.0, false, false });
+		else
+			tokens.back().raw += pending;
+	}
+
+	return tokens;
+}
+
+std::vector<std::string> auto_wrap_ass_visual_line_for_furigana(std::string const& text, FuriganaFormat const& format, double max_units, int wrap_style) {
+	if (max_units <= 0.0 || wrap_style == 2)
+		return { text };
+
+	auto tokens = tokenize_for_furigana_wrap(text, format, wrap_style);
+	std::vector<std::string> lines;
+	std::string current;
+	double current_width = 0.0;
+	bool current_has_visible = false;
+
+	for (auto const& token : tokens) {
+		double added_width = token.width + (current_has_visible && token.visible ? token.spacing : 0.0);
+		if (token.visible && token.allow_wrap && current_has_visible && current_width + added_width > max_units) {
+			lines.push_back(current);
+			current.clear();
+			current_width = 0.0;
+			current_has_visible = false;
+			added_width = token.width;
+		}
+
+		current += token.raw;
+		current_width += added_width;
+		if (token.visible)
+			current_has_visible = true;
+	}
+
+	lines.push_back(current);
+	return lines;
+}
+
+std::vector<std::string> split_and_auto_wrap_for_furigana(std::string const& text, FuriganaFormat const& format, double max_units, int wrap_style) {
+	std::vector<std::string> wrapped;
+	for (auto const& explicit_line : split_ass_visual_lines(text)) {
+		auto lines = auto_wrap_ass_visual_line_for_furigana(explicit_line, format, max_units, wrap_style);
+		wrapped.insert(wrapped.end(), lines.begin(), lines.end());
+	}
+	return wrapped;
+}
+
+double furigana_auto_wrap_units(AssDialogue const& line, AssStyle const* style, AssFile& ass, FuriganaFormat const& format) {
+	int script_w = 0;
+	int script_h = 0;
+	ass.GetResolution(script_w, script_h);
+	if (script_w <= 0)
+		return 0.0;
+
+	AssStyle default_style;
+	if (!style)
+		style = &default_style;
+
+	int margin_l = line.Margin[0] ? line.Margin[0] : style->Margin[0];
+	int margin_r = line.Margin[1] ? line.Margin[1] : style->Margin[1];
+	double available = std::max(1, script_w - margin_l - margin_r);
+	double scale_x = std::max(1.0, style->scalex) / 100.0;
+	return available / std::max(1.0, format.base_size * scale_x);
 }
 
 bool is_karaoke_tag(AssOverrideTag const& tag) {
@@ -1062,11 +1273,11 @@ FuriganaFormat make_furigana_format(AssStyle const* style, int size_percent, int
 	};
 }
 
-std::string compose_furigana_text(std::string const& base, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool above, bool& any_reading) {
+std::string compose_furigana_text(std::string const& base, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool above, bool& any_reading, double wrap_units, int wrap_style) {
 	std::vector<std::string> output_lines;
 	any_reading = false;
 
-	for (auto const& base_line : split_ass_visual_lines(base)) {
+	for (auto const& base_line : split_and_auto_wrap_for_furigana(base, format, wrap_units, wrap_style)) {
 		bool line_has_reading = false;
 		auto reading_line = make_aligned_reading_line(base_line, readings, format, line_has_reading);
 		if (line_has_reading) {
@@ -1644,7 +1855,9 @@ void DialogFuriganaAnnotator::Process(wxCommandEvent&) {
 		bool has_reading = false;
 		auto style = context->ass->GetStyle(line->Style.get());
 		auto format = make_furigana_format(style, size_percent->GetValue(), outline_percent->GetValue(), shadow_percent->GetValue());
-		auto annotated_text = compose_furigana_text(base_text, readings, format, above, has_reading);
+		double wrap_units = furigana_auto_wrap_units(*line, style, *context->ass, format);
+		int wrap_style = context->ass->GetScriptInfoAsInt("WrapStyle");
+		auto annotated_text = compose_furigana_text(base_text, readings, format, above, has_reading, wrap_units, wrap_style);
 		if (has_reading) {
 			new_text = annotated_text;
 			++annotated_lines;

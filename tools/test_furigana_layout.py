@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import json
-import re
 from pathlib import Path
 
 
@@ -40,9 +39,36 @@ def strip_existing_furigana(text):
     return join_ass_visual_lines(kept) if had else text, had
 
 
-def compose_multiline_order(base, lines_with_readings, above=False):
+def display_units(ch):
+    cp = ord(ch)
+    if ch in (" ", "\t"):
+        return 0.5
+    if cp < 0x80:
+        return 0.55
+    if 0x3040 <= cp <= 0x30FF or 0x3400 <= cp <= 0x9FFF or 0xFF01 <= cp <= 0xFF60:
+        return 1.0
+    return 0.8
+
+
+def auto_wrap_plain_text(text, max_units):
+    lines = []
+    current = ""
+    width = 0.0
+    for ch in text:
+        char_width = display_units(ch)
+        if current and width + char_width > max_units:
+            lines.append(current)
+            current = ""
+            width = 0.0
+        current += ch
+        width += char_width
+    lines.append(current)
+    return lines
+
+
+def compose_multiline_order(base_lines, lines_with_readings, above=False):
     output = []
-    for index, line in enumerate(split_ass_visual_lines(base)):
+    for index, line in enumerate(base_lines):
         if index in lines_with_readings:
             ruby = MARKER + "{\\r\\fs35\\alpha&HFF&}" + lines_with_readings[index] + "{\\r}"
             if above:
@@ -75,6 +101,18 @@ def test_source_uses_small_ruby_spacing_path():
     assert "ruby_tags" not in source
 
 
+def test_source_has_auto_wrap_support():
+    source = SOURCE.read_text(encoding="utf-8")
+    required = [
+        "auto_wrap_ass_visual_line_for_furigana",
+        "split_and_auto_wrap_for_furigana",
+        "furigana_auto_wrap_units",
+        "GetScriptInfoAsInt(\"WrapStyle\")",
+    ]
+    for token in required:
+        assert token in source
+
+
 def test_default_config_has_migrated_small_ruby_default():
     config = json.loads(CONFIG.read_text(encoding="utf-8"))
     furigana = config["Tool"]["Furigana Annotation"]
@@ -90,25 +128,41 @@ def test_old_marker_lines_are_removed_for_regeneration():
     assert stripped == "base1\\Nbase2"
 
 
-def test_multiline_below_keeps_each_ruby_line_adjacent():
-    base = "未来へ\\N努力して"
-    result = compose_multiline_order(base, {0: "みらい", 1: "どりょく"}, above=False)
+def test_explicit_multiline_below_keeps_each_ruby_line_adjacent():
+    base_lines = ["mirai", "doryoku"]
+    result = compose_multiline_order(base_lines, {0: "mirai-ruby", 1: "doryoku-ruby"}, above=False)
     assert split_ass_visual_lines(result) == [
-        "未来へ",
-        MARKER + "{\\r\\fs35\\alpha&HFF&}みらい{\\r}",
-        "努力して",
-        MARKER + "{\\r\\fs35\\alpha&HFF&}どりょく{\\r}",
+        "mirai",
+        MARKER + "{\\r\\fs35\\alpha&HFF&}mirai-ruby{\\r}",
+        "doryoku",
+        MARKER + "{\\r\\fs35\\alpha&HFF&}doryoku-ruby{\\r}",
     ]
 
 
-def test_multiline_above_keeps_each_ruby_line_adjacent():
-    base = "未来へ\\N努力して"
-    result = compose_multiline_order(base, {0: "みらい", 1: "どりょく"}, above=True)
+def test_explicit_multiline_above_keeps_each_ruby_line_adjacent():
+    base_lines = ["mirai", "doryoku"]
+    result = compose_multiline_order(base_lines, {0: "mirai-ruby", 1: "doryoku-ruby"}, above=True)
     assert split_ass_visual_lines(result) == [
-        MARKER + "{\\r\\fs35\\alpha&HFF&}みらい{\\r}",
-        "未来へ",
-        MARKER + "{\\r\\fs35\\alpha&HFF&}どりょく{\\r}",
-        "努力して",
+        MARKER + "{\\r\\fs35\\alpha&HFF&}mirai-ruby{\\r}",
+        "mirai",
+        MARKER + "{\\r\\fs35\\alpha&HFF&}doryoku-ruby{\\r}",
+        "doryoku",
+    ]
+
+
+def test_auto_wrapped_line_gets_per_visual_line_ruby():
+    base = "\u300c\u6b62\u307e\u306a\u3044\u96e8\u306f\u306a\u3044\u300d\u3088\u308a\u5148\u306b\u305d\u306e\u5098\u3092\u304f\u308c\u3088"
+    wrapped = auto_wrap_plain_text(base, 14.0)
+    result = compose_multiline_order(wrapped, {0: "line-1-ruby", 1: "line-2-ruby"}, above=False)
+    assert wrapped == [
+        "\u300c\u6b62\u307e\u306a\u3044\u96e8\u306f\u306a\u3044\u300d\u3088\u308a\u5148\u306b",
+        "\u305d\u306e\u5098\u3092\u304f\u308c\u3088",
+    ]
+    assert split_ass_visual_lines(result) == [
+        wrapped[0],
+        MARKER + "{\\r\\fs35\\alpha&HFF&}line-1-ruby{\\r}",
+        wrapped[1],
+        MARKER + "{\\r\\fs35\\alpha&HFF&}line-2-ruby{\\r}",
     ]
 
 
@@ -116,10 +170,12 @@ def main():
     tests = [
         test_source_does_not_scale_ruby_glyphs,
         test_source_uses_small_ruby_spacing_path,
+        test_source_has_auto_wrap_support,
         test_default_config_has_migrated_small_ruby_default,
         test_old_marker_lines_are_removed_for_regeneration,
-        test_multiline_below_keeps_each_ruby_line_adjacent,
-        test_multiline_above_keeps_each_ruby_line_adjacent,
+        test_explicit_multiline_below_keeps_each_ruby_line_adjacent,
+        test_explicit_multiline_above_keeps_each_ruby_line_adjacent,
+        test_auto_wrapped_line_gets_per_visual_line_ruby,
     ]
     for test in tests:
         test()

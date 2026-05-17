@@ -13,6 +13,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <functional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -61,6 +62,12 @@ struct MeasuredSegment {
 	double width = 0.;
 };
 
+struct CachedResult {
+	std::string text;
+	std::string signature;
+	subtitle_overflow::Result result;
+};
+
 struct FontKey {
 	std::string font;
 	int pixel_size;
@@ -86,8 +93,9 @@ struct FontKeyHash {
 // Maps (font state) -> (utf8 char) -> raw pixel width
 static std::unordered_map<FontKey, std::unordered_map<std::string, int>, FontKeyHash> char_width_cache;
 
-// Shared result cache: keyed by AssDialogue::Id, shared between grid and edit control
-static std::unordered_map<int, subtitle_overflow::Result> result_cache;
+// Shared result cache: keyed by AssDialogue::Id. Keep the source text with the
+// result so live edits or programmatic text changes cannot reuse stale ranges.
+static std::unordered_map<int, CachedResult> result_cache;
 
 size_t utf8_char_len(unsigned char c) {
 	if (c < 0x80) return 1;
@@ -168,6 +176,36 @@ TextState base_state(AssStyle const& style) {
 	state.bold = style.bold;
 	state.italic = style.italic;
 	return state;
+}
+
+std::string cache_signature(agi::Context *context, AssDialogue const& line) {
+	if (!context)
+		return {};
+
+	int script_w = 0;
+	int script_h = 0;
+	context->ass->GetResolution(script_w, script_h);
+
+	int video_w = 0;
+	int video_h = 0;
+	if (auto provider = context->project->VideoProvider()) {
+		video_w = provider->GetWidth();
+		video_h = provider->GetHeight();
+	}
+
+	AssStyle default_style;
+	AssStyle const *style = context->ass->GetStyle(line.Style);
+	if (!style)
+		style = &default_style;
+
+	std::ostringstream ss;
+	ss << script_w << ',' << script_h << ',' << video_w << ',' << video_h << ','
+		<< line.Style.get() << ',' << line.Margin[0] << ',' << line.Margin[1] << ',' << line.Margin[2] << ','
+		<< style->font << ',' << style->fontsize << ',' << style->scalex << ',' << style->scaley << ','
+		<< style->spacing << ',' << style->outline_w << ',' << style->shadow_w << ','
+		<< style->bold << ',' << style->italic << ',' << style->alignment << ','
+		<< style->Margin[0] << ',' << style->Margin[1] << ',' << style->Margin[2];
+	return ss.str();
 }
 
 void apply_override_block(std::string_view text, TextState& state, TextState const& base, LayoutState& layout, AssFile const& ass) {
@@ -370,6 +408,18 @@ double line_anchor_x(LayoutState const& layout, AssDialogue const& line, AssStyl
 	return (script_w - margin_r) * scale_x;
 }
 
+double line_wrap_left(LayoutState const& layout, AssDialogue const& line, AssStyle const& style, double scale_x) {
+	if (layout.positioned)
+		return 0.;
+	return line_margin(line, style, 0) * scale_x;
+}
+
+double line_wrap_right(LayoutState const& layout, AssDialogue const& line, AssStyle const& style, int script_w, double scale_x, int video_w) {
+	if (layout.positioned)
+		return video_w;
+	return (script_w - line_margin(line, style, 1)) * scale_x;
+}
+
 double segment_left(double anchor_x, int alignment, double width) {
 	int hor = (alignment - 1) % 3;
 	if (hor == 0)
@@ -395,7 +445,7 @@ void add_range(subtitle_overflow::Result& result, int start, int length) {
 	result.ranges.push_back({ start, length });
 }
 
-subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const *line, wxDC& dc) {
+subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const *line, std::string const& text, wxDC& dc) {
 	subtitle_overflow::Result result;
 
 	if (!context || !line || line->Comment || !OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool())
@@ -433,8 +483,6 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 	layout.alignment = style->alignment;
 
 	wxFont old_font = dc.GetFont();
-	auto const& text = line->Text.get();
-
 	// Single-pass: parse override blocks and process text inline
 	MeasuredSegment segment;
 	bool first_char = true;
@@ -449,13 +497,15 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 		std::vector<bool> highlight(segment.chars.size(), false);
 		auto check_anchor = [&](double anchor_x) {
 			double left = segment_left(anchor_x, layout.alignment, segment.width);
+			double wrap_left = line_wrap_left(layout, *line, *style, scale_x);
+			double wrap_right = line_wrap_right(layout, *line, *style, script_w, scale_x, video_w);
 			double bound_left = left;
 			double bound_right = left + segment.width;
 			for (auto const& ch : segment.chars) {
 				bound_left = std::min(bound_left, left + ch.left - ch.pad_left);
 				bound_right = std::max(bound_right, left + ch.right + ch.pad_right);
 			}
-			if (bound_left >= 0. && bound_right <= video_w)
+			if (bound_left >= wrap_left && bound_right <= wrap_right && bound_left >= 0. && bound_right <= video_w)
 				return;
 
 			result.overflow = true;
@@ -463,7 +513,7 @@ subtitle_overflow::Result check_with_dc(agi::Context *context, AssDialogue const
 				auto const& ch = segment.chars[i];
 				double ch_left = left + ch.left - ch.pad_left;
 				double ch_right = left + ch.right + ch.pad_right;
-				if (ch_left < 0. || ch_right > video_w)
+				if (ch_left < wrap_left || ch_right > wrap_right || ch_left < 0. || ch_right > video_w)
 					highlight[i] = true;
 			}
 		};
@@ -604,22 +654,48 @@ Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
 	if (!context || !line || line->Comment || !OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool())
 		return {};
 
+	auto const& text = line->Text.get();
+	auto signature = cache_signature(context, *line);
 	auto it = result_cache.find(line->Id);
-	if (it != result_cache.end() && it->second.valid)
-		return it->second;
+	if (it != result_cache.end() && it->second.text == text && it->second.signature == signature && it->second.result.valid)
+		return it->second.result;
 
 	Result result;
 	if (dc) {
-		result = check_with_dc(context, line, *dc);
+		result = check_with_dc(context, line, text, *dc);
 	} else {
 		wxBitmap bmp(1, 1);
 		wxMemoryDC mem_dc;
 		mem_dc.SelectObject(bmp);
-		result = check_with_dc(context, line, mem_dc);
+		result = check_with_dc(context, line, text, mem_dc);
 		mem_dc.SelectObject(wxNullBitmap);
 	}
 
-	result_cache[line->Id] = result;
+	result_cache[line->Id] = { text, signature, result };
+	return result;
+}
+
+Result CheckText(agi::Context *context, AssDialogue const *line, std::string const& text, wxDC *dc) {
+	if (!context || !line || line->Comment || !OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool())
+		return {};
+
+	auto signature = cache_signature(context, *line);
+	auto it = result_cache.find(line->Id);
+	if (it != result_cache.end() && it->second.text == text && it->second.signature == signature && it->second.result.valid)
+		return it->second.result;
+
+	Result result;
+	if (dc) {
+		result = check_with_dc(context, line, text, *dc);
+	} else {
+		wxBitmap bmp(1, 1);
+		wxMemoryDC mem_dc;
+		mem_dc.SelectObject(bmp);
+		result = check_with_dc(context, line, text, mem_dc);
+		mem_dc.SelectObject(wxNullBitmap);
+	}
+
+	result_cache[line->Id] = { text, signature, result };
 	return result;
 }
 

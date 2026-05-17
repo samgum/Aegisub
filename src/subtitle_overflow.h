@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 class AssDialogue;
@@ -21,6 +22,7 @@ struct Result {
 };
 
 Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc = nullptr);
+Result CheckText(agi::Context *context, AssDialogue const *line, std::string const& text, wxDC *dc = nullptr);
 
 void InvalidateLine(int id);
 void InvalidateAll();

@@ -290,7 +290,7 @@ void SubsTextEditCtrl::UpdateOverflowHighlight() {
 	IndicatorClearRange(0, GetTextLength());
 
 	AssDialogue *diag = context ? context->selectionController->GetActiveLine() : nullptr;
-	auto result = subtitle_overflow::Check(context, diag);
+	auto result = subtitle_overflow::CheckText(context, diag, line_text);
 	if (!result.overflow)
 		return;
 
