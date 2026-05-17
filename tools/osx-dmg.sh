@@ -19,6 +19,16 @@ SRC_DIR="${1}"
 BUILD_DIR="${2}"
 AEGI_VER="${3}"
 
+if test -f "${BUILD_DIR}/git_version.h"; then
+  GIT_VERSION=`sed -n 's/^#define BUILD_GIT_VERSION_STRING "\(.*\)"/\1/p' "${BUILD_DIR}/git_version.h" | head -n 1`
+  TAGGED_RELEASE=`sed -n 's/^#define TAGGED_RELEASE \([0-9][0-9]*\)/\1/p' "${BUILD_DIR}/git_version.h" | head -n 1`
+  if test "${TAGGED_RELEASE}" = "1" && test -n "${GIT_VERSION}"; then
+    AEGI_VER="${GIT_VERSION}"
+  fi
+fi
+
+AEGI_VER=`printf '%s' "${AEGI_VER}" | sed 's/[\/:]/-/g'`
+
 PKG_NAME="Aegisub-${AEGI_VER}"
 PKG_NAME_VOLUME="${PKG_NAME}"
 

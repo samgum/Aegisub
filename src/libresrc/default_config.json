@@ -540,6 +540,13 @@
 			"Replace Quotes" : true,
 			"Selection Only" : false
 		},
+		"Furigana Annotation" : {
+			"Outline Percent" : 50,
+			"Position" : 0,
+			"Selection Only" : false,
+			"Shadow Percent" : 0,
+			"Size Percent" : 50
+		},
 		"Spell Checker" : {
 			"Backend" : "hunspell",
 			"Language" : "en_US",

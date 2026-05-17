@@ -7322,3 +7322,95 @@ msgstr "发现连续空格组数"
 #: ../src/dialog_timing_tools.cpp:0
 msgid "Consecutive space groups replaced"
 msgstr "已替换连续空格组数"
+
+#: ../src/command/tool.cpp:0
+msgid "Japanese &Furigana Annotation..."
+msgstr "日语汉字假名标注(&F)..."
+
+#: ../src/command/tool.cpp:0 ../src/dialog_timing_tools.cpp:0
+msgid "Japanese Furigana Annotation"
+msgstr "日语汉字假名标注"
+
+#: ../src/command/tool.cpp:0
+msgid "Add editable furigana annotations above or below Japanese kanji"
+msgstr "在日语汉字上方或下方添加可编辑假名标注"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Above kanji"
+msgstr "汉字上方"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Below kanji"
+msgstr "汉字下方"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Annotation position"
+msgstr "标注位置"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Furigana size (% of style):"
+msgstr "假名大小（样式百分比）："
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Outline size (% of style):"
+msgstr "描边大小（样式百分比）："
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Shadow size (% of style):"
+msgstr "阴影大小（样式百分比）："
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Readings"
+msgstr "读音"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Edit one entry per line as kanji=reading. Empty readings are skipped."
+msgstr "每行按“汉字=读音”编辑。读音为空的项目会跳过。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Refresh kanji list"
+msgstr "刷新汉字列表"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No kanji readings are listed."
+msgstr "没有列出任何汉字读音。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "add furigana annotations"
+msgstr "添加假名标注"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Japanese furigana annotation"
+msgstr "日语汉字假名标注"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Annotated lines"
+msgstr "已标注行数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Removed annotation lines"
+msgstr "已移除标注行数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Reading entries"
+msgstr "读音条目数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Auto fill readings with SudachiPy"
+msgstr "使用 SudachiPy 自动填充读音"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No kanji terms were found in the current range."
+msgstr "当前范围内没有找到汉字词条。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "SudachiPy is not available or failed to generate readings."
+msgstr "SudachiPy 不可用，或生成读音失败。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Install it with:"
+msgstr "请使用以下命令安装："
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Auto-filled reading entries"
+msgstr "已自动填充读音条目数"

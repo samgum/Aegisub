@@ -127,7 +127,8 @@
     "main/tools" : [
         { "command" : "tool/time/stitch" },
         { "command" : "tool/style/overlap_check" },
-        { "command" : "tool/text/cleanup" }
+        { "command" : "tool/text/cleanup" },
+        { "command" : "tool/text/furigana" }
     ],
     "main/view" : [
         { "command" : "app/language" },

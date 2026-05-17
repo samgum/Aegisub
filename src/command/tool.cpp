@@ -202,6 +202,17 @@ struct tool_text_cleanup final : public Command {
 	}
 };
 
+struct tool_text_furigana final : public Command {
+	CMD_NAME("tool/text/furigana")
+	STR_MENU("Japanese &Furigana Annotation...")
+	STR_DISP("Japanese Furigana Annotation")
+	STR_HELP("Add editable furigana annotations above or below Japanese kanji")
+
+	void operator()(agi::Context *c) override {
+		ShowJapaneseFuriganaDialog(c);
+	}
+};
+
 struct tool_time_postprocess final : public Command {
 	CMD_NAME("tool/time/postprocess")
 	CMD_ICON(timing_processor_toolbutton)
@@ -310,6 +321,7 @@ namespace cmd {
 		reg(std::make_unique<tool_time_stitch>());
 		reg(std::make_unique<tool_style_overlap_check>());
 		reg(std::make_unique<tool_text_cleanup>());
+		reg(std::make_unique<tool_text_furigana>());
 		reg(std::make_unique<tool_time_postprocess>());
 		reg(std::make_unique<tool_translation_assistant>());
 		reg(std::make_unique<tool_translation_assistant_commit>());
