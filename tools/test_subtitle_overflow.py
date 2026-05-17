@@ -119,6 +119,14 @@ def test_cjk_without_spaces_still_overflows_video_edge():
     assert indices == [7, 8, 9]
 
 
+def test_long_cjk_runs_keep_dc_overflow_even_when_libass_clips():
+    source = SOURCE.read_text(encoding="utf-8")
+    assert "has_long_unbroken_cjk_run(text)" in source
+    assert "if (result.valid && !result.overflow && has_long_unbroken_cjk_run(text))" in source
+    assert "else if (!result.overflow || !has_long_unbroken_cjk_run(text))" in source
+    assert "outside_video(nowrap, video_w, video_h) && !outside_video(normal, video_w, video_h)" in source
+
+
 def test_positioned_lines_use_video_bounds_not_style_margins():
     source = SOURCE.read_text(encoding="utf-8")
     assert "if (layout.positioned)\n\t\treturn 0.;" in source
@@ -136,6 +144,7 @@ def main():
         test_public_check_text_api_exists,
         test_margin_overflow_marks_wrapped_english_tail,
         test_cjk_without_spaces_still_overflows_video_edge,
+        test_long_cjk_runs_keep_dc_overflow_even_when_libass_clips,
         test_positioned_lines_use_video_bounds_not_style_margins,
     ]
     for test in tests:

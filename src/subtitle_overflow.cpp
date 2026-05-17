@@ -505,9 +505,63 @@ bool appears_auto_wrapped(libass::RenderedBounds const& normal, libass::Rendered
 		return true;
 	if (nowrap_h > 0 && nowrap_w > 0 && normal_h > nowrap_h * 1.35 && normal_w < nowrap_w * 0.92)
 		return true;
-	if (outside_video(nowrap, video_w, video_h) && !outside_video(normal, video_w, video_h) && normal_w < nowrap_w * 0.92)
+	if (outside_video(nowrap, video_w, video_h) && !outside_video(normal, video_w, video_h))
 		return true;
 
+	return false;
+}
+
+uint32_t decode_utf8(std::string const& text, size_t pos, size_t& len) {
+	len = utf8_char_len(static_cast<unsigned char>(text[pos]));
+	if (len == 1)
+		return static_cast<unsigned char>(text[pos]);
+
+	uint32_t cp = static_cast<unsigned char>(text[pos]) & ((1 << (7 - len)) - 1);
+	for (size_t i = 1; i < len && pos + i < text.size(); ++i)
+		cp = (cp << 6) | (static_cast<unsigned char>(text[pos + i]) & 0x3F);
+	return cp;
+}
+
+bool is_cjk_or_kana(uint32_t cp) {
+	return (cp >= 0x3400 && cp <= 0x9FFF) ||
+		(cp >= 0xF900 && cp <= 0xFAFF) ||
+		(cp >= 0x3040 && cp <= 0x30FF) ||
+		(cp >= 0x31F0 && cp <= 0x31FF) ||
+		(cp >= 0xAC00 && cp <= 0xD7AF);
+}
+
+bool has_long_unbroken_cjk_run(std::string const& text) {
+	int run = 0;
+	bool in_override = false;
+	for (size_t pos = 0; pos < text.size();) {
+		if (text[pos] == '{') {
+			in_override = true;
+			++pos;
+			continue;
+		}
+		if (in_override) {
+			if (text[pos] == '}')
+				in_override = false;
+			++pos;
+			continue;
+		}
+		if (text[pos] == '\\' && pos + 1 < text.size() && (text[pos + 1] == 'N' || text[pos + 1] == 'n')) {
+			run = 0;
+			pos += 2;
+			continue;
+		}
+
+		size_t len = 1;
+		uint32_t cp = decode_utf8(text, pos, len);
+		if (is_cjk_or_kana(cp)) {
+			if (++run >= 8)
+				return true;
+		}
+		else if (cp <= 0x20 || cp == 0x3000 || cp == 0xFF0C || cp == 0x3002 || cp == 0x3001) {
+			run = 0;
+		}
+		pos += std::max<size_t>(1, len);
+	}
 	return false;
 }
 
@@ -777,6 +831,22 @@ Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
 
 	Result result;
 	result = check_with_libass(context, line, text);
+	if (result.valid && !result.overflow && has_long_unbroken_cjk_run(text)) {
+		if (dc) {
+			auto measured = check_with_dc(context, line, text, *dc, false);
+			if (measured.valid && measured.overflow)
+				result = measured;
+		}
+		else {
+			wxBitmap bmp(1, 1);
+			wxMemoryDC mem_dc;
+			mem_dc.SelectObject(bmp);
+			auto measured = check_with_dc(context, line, text, mem_dc, false);
+			mem_dc.SelectObject(wxNullBitmap);
+			if (measured.valid && measured.overflow)
+				result = measured;
+		}
+	}
 	if (!result.valid && dc) {
 		result = check_with_dc(context, line, text, *dc, false);
 	}
@@ -820,10 +890,13 @@ Result CheckText(agi::Context *context, AssDialogue const *line, std::string con
 			if (result.ranges.empty() && !text.empty())
 				result.ranges.push_back({ 0, static_cast<int>(text.size()) });
 		}
-		else {
+		else if (!result.overflow || !has_long_unbroken_cjk_run(text)) {
 			result.valid = true;
 			result.overflow = false;
 			result.ranges.clear();
+		}
+		else {
+			result.valid = true;
 		}
 	}
 

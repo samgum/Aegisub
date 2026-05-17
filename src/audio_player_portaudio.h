@@ -65,6 +65,7 @@ class PortAudioPlayer final : public AudioPlayer {
 	float volume = 1.f;  ///< Current volume level
 	double playback_speed = 1.0; ///< Current playback speed
 	double speed_position = 0.0; ///< Fractional source position for speed-adjusted playback
+	bool draining = false; ///< One silent callback after the last partial buffer
 	int64_t current = 0; ///< Current position
 	int64_t start = 0;   ///< Start position
 	int64_t end = 0;     ///< End position

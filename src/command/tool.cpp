@@ -202,6 +202,39 @@ struct tool_text_cleanup final : public Command {
 	}
 };
 
+struct tool_text_chinese_convert final : public Command {
+	CMD_NAME("tool/text/chinese_convert")
+	STR_MENU("Chinese &Simplified/Traditional Conversion...")
+	STR_DISP("Chinese Simplified/Traditional Conversion")
+	STR_HELP("Convert subtitle text between Simplified and Traditional Chinese")
+
+	void operator()(agi::Context *c) override {
+		ShowChineseConversionDialog(c);
+	}
+};
+
+struct tool_text_pair_check final : public Command {
+	CMD_NAME("tool/text/pair_check")
+	STR_MENU("Check Paired &Punctuation...")
+	STR_DISP("Check Paired Punctuation")
+	STR_HELP("Check quotes, brackets and book-title marks for pairing problems")
+
+	void operator()(agi::Context *c) override {
+		ShowPairCheckDialog(c);
+	}
+};
+
+struct tool_ai_analysis_settings final : public Command {
+	CMD_NAME("tool/ai/analysis_settings")
+	STR_MENU("AI Grammar Analysis &Settings...")
+	STR_DISP("AI Grammar Analysis Settings")
+	STR_HELP("Configure OpenAI-compatible AI grammar analysis")
+
+	void operator()(agi::Context *c) override {
+		ShowAIAnalysisSettingsDialog(c->parent);
+	}
+};
+
 struct tool_text_furigana final : public Command {
 	CMD_NAME("tool/text/furigana")
 	STR_MENU("Japanese &Furigana Annotation...")
@@ -321,6 +354,9 @@ namespace cmd {
 		reg(std::make_unique<tool_time_stitch>());
 		reg(std::make_unique<tool_style_overlap_check>());
 		reg(std::make_unique<tool_text_cleanup>());
+		reg(std::make_unique<tool_text_chinese_convert>());
+		reg(std::make_unique<tool_text_pair_check>());
+		reg(std::make_unique<tool_ai_analysis_settings>());
 		reg(std::make_unique<tool_text_furigana>());
 		reg(std::make_unique<tool_time_postprocess>());
 		reg(std::make_unique<tool_translation_assistant>());

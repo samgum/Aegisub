@@ -7438,3 +7438,183 @@ msgstr "已自动填充读音条目数"
 #: ../src/dialog_timing_tools.cpp:0
 msgid "Preserved existing reading entries"
 msgstr "已保留已有读音条目数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Edit one entry per line as row#occurrence kanji=reading. Old kanji=reading entries act as defaults."
+msgstr "每行按“行号#序号 汉字=读音”编辑。旧的“汉字=读音”条目会作为默认值。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Apply"
+msgstr "应用"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Apply by Style..."
+msgstr "按样式应用..."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Apply by Style"
+msgstr "按样式应用"
+
+#: ../src/command/tool.cpp:0 ../src/dialog_timing_tools.cpp:0
+msgid "Chinese Simplified/Traditional Conversion"
+msgstr "中文简繁转换"
+
+#: ../src/command/tool.cpp:0
+msgid "Chinese &Simplified/Traditional Conversion..."
+msgstr "中文简繁转换(&S)..."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Convert to Simplified Chinese"
+msgstr "转换为简体中文"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Convert to Traditional Chinese"
+msgstr "转换为繁体中文"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Direction"
+msgstr "方向"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Only apply to this style"
+msgstr "仅应用到此样式"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Changed plain text segments"
+msgstr "已更改纯文本片段"
+
+#: ../src/command/tool.cpp:0 ../src/dialog_timing_tools.cpp:0
+msgid "Check Paired Punctuation"
+msgstr "检查成对标点"
+
+#: ../src/command/tool.cpp:0
+msgid "Check Paired &Punctuation..."
+msgstr "检查成对标点(&P)..."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Only check this style"
+msgstr "仅检查此样式"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Lines with pairing problems"
+msgstr "存在成对问题的行数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No pairing problems were found."
+msgstr "未发现成对标点问题。"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "AI Grammar Analysis"
+msgstr "AI 语法分析"
+
+#: ../src/command/tool.cpp:0 ../src/dialog_ai_analysis.cpp:0
+msgid "AI Grammar Analysis Settings"
+msgstr "AI 语法分析设置"
+
+#: ../src/command/tool.cpp:0
+msgid "AI Grammar Analysis &Settings..."
+msgstr "AI 语法分析设置(&S)..."
+
+#: ../src/subs_edit_box.cpp:0
+msgid "Analyze the current subtitle line with AI"
+msgstr "使用 AI 分析当前字幕行"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Enable AI button beside the subtitle text box"
+msgstr "在字幕文本框旁启用 AI 按钮"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "API key (kept in memory only)"
+msgstr "API Key（仅保存在内存中）"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Target language"
+msgstr "目标语言"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Default target language"
+msgstr "默认目标语言"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Enable thinking/reasoning parameters"
+msgstr "启用思考/推理参数"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Analyze"
+msgstr "分析"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Copy All"
+msgstr "全部复制"
+
+#: ../src/command/tool.cpp:0
+msgid "Convert subtitle text between Simplified and Traditional Chinese"
+msgstr "在简体中文和繁体中文之间转换字幕文本"
+
+#: ../src/command/tool.cpp:0
+msgid "Check quotes, brackets and book-title marks for pairing problems"
+msgstr "检查引号、括号、书名号等是否成对"
+
+#: ../src/command/tool.cpp:0
+msgid "Configure OpenAI-compatible AI grammar analysis"
+msgstr "配置 OpenAI 兼容格式的 AI 语法分析"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "convert Chinese script"
+msgstr "转换中文简繁"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Unexpected closing %s at byte %llu"
+msgstr "第 %llu 字节出现未匹配的结束符 %s"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Unclosed %s at byte %llu"
+msgstr "第 %llu 字节的 %s 未闭合"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Unpaired ASCII double quote"
+msgstr "英文双引号未成对"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Unpaired ASCII single quote"
+msgstr "英文单引号未成对"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Line %llu"
+msgstr "第 %llu 行"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Only enable thinking when you know the selected model supports reasoning parameters. Unsupported models may reject the request."
+msgstr "只有在确认所选模型支持推理参数时才开启思考。否则模型可能会拒绝请求。"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Provider preset"
+msgstr "服务商预设"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Base URL"
+msgstr "调用链接"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Model"
+msgstr "模型"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Temperature"
+msgstr "温度"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Max tokens"
+msgstr "最大 tokens"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Cache identical analysis results in this session"
+msgstr "在本次会话中缓存相同分析结果"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Analyzing..."
+msgstr "正在分析..."
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "This build was compiled without libcurl/update-checker support, so AI requests are unavailable."
+msgstr "此版本编译时未启用 libcurl/更新检查支持，因此无法发送 AI 请求。"

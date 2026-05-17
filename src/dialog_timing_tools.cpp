@@ -34,6 +34,10 @@
 #include <libaegisub/cajun/reader.h>
 #include <libaegisub/cajun/writer.h>
 
+#include <unicode/errorcode.h>
+#include <unicode/translit.h>
+#include <unicode/unistr.h>
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -52,6 +56,7 @@
 #include <wx/choicdlg.h>
 #include <wx/dialog.h>
 #include <wx/filename.h>
+#include <wx/choice.h>
 #include <wx/listbox.h>
 #include <wx/msgdlg.h>
 #include <wx/radiobox.h>
@@ -131,6 +136,41 @@ class DialogTextCleaner final : public wxDialog {
 public:
 	DialogTextCleaner(agi::Context *context);
 	~DialogTextCleaner();
+};
+
+class DialogChineseConverter final : public wxDialog {
+	agi::Context *context;
+	agi::signal::Connection selected_set_changed_slot;
+
+	wxRadioBox *direction_mode;
+	wxRadioBox *selection_mode;
+	wxCheckBox *style_only;
+	wxChoice *style_choice;
+
+	void Process(wxCommandEvent&);
+	void OnSelectedSetChanged();
+	void OnStyleOnlyChanged(wxCommandEvent&);
+
+public:
+	DialogChineseConverter(agi::Context *context);
+	~DialogChineseConverter();
+};
+
+class DialogPairCheck final : public wxDialog {
+	agi::Context *context;
+	agi::signal::Connection selected_set_changed_slot;
+
+	wxRadioBox *selection_mode;
+	wxCheckBox *style_only;
+	wxChoice *style_choice;
+
+	void Process(wxCommandEvent&);
+	void OnSelectedSetChanged();
+	void OnStyleOnlyChanged(wxCommandEvent&);
+
+public:
+	DialogPairCheck(agi::Context *context);
+	~DialogPairCheck();
 };
 
 class DialogFuriganaAnnotator final : public wxDialog {
@@ -687,6 +727,322 @@ void DialogTextCleaner::Process(wxCommandEvent&) {
 	report += wxString::Format("%s: %llu (%s: %llu)\n", _("Consecutive space groups replaced").c_str(), static_cast<unsigned long long>(stats.double_space_runs_fixed), _("lines involved").c_str(), static_cast<unsigned long long>(stats.double_space_fixed_lines));
 
 	wxMessageBox(report, _("Subtitle Text Cleanup"), wxICON_INFORMATION);
+	Close();
+}
+
+std::vector<AssDialogue *> get_tool_target_lines(agi::Context *context, bool selection_only, std::string const& style_filter = std::string()) {
+	std::vector<AssDialogue *> lines;
+	if (selection_only)
+		lines = context->selectionController->GetSortedSelection();
+	else {
+		for (auto& line : context->ass->Events)
+			lines.push_back(&line);
+	}
+
+	lines.erase(std::remove_if(lines.begin(), lines.end(), [&](AssDialogue *line) {
+		return line->Comment || (!style_filter.empty() && line->Style.get() != style_filter);
+	}), lines.end());
+	return lines;
+}
+
+wxArrayString get_style_choices(AssFile *ass) {
+	wxArrayString choices;
+	for (auto const& style : ass->Styles)
+		choices.push_back(to_wx(style.name));
+	if (choices.empty())
+		choices.push_back("Default");
+	return choices;
+}
+
+bool convert_chinese_text(std::string& text, bool to_traditional) {
+	UErrorCode status = U_ZERO_ERROR;
+	icu::UnicodeString transform_id = icu::UnicodeString::fromUTF8(to_traditional ? "Simplified-Traditional" : "Traditional-Simplified");
+	std::unique_ptr<icu::Transliterator> transliterator(
+		icu::Transliterator::createInstance(transform_id, UTRANS_FORWARD, status));
+	if (U_FAILURE(status) || !transliterator)
+		return false;
+
+	icu::UnicodeString utext = icu::UnicodeString::fromUTF8(text);
+	icu::UnicodeString before = utext;
+	transliterator->transliterate(utext);
+	if (utext == before)
+		return false;
+
+	std::string out;
+	utext.toUTF8String(out);
+	text = out;
+	return true;
+}
+
+DialogChineseConverter::DialogChineseConverter(agi::Context *context)
+: wxDialog(context->parent, -1, _("Chinese Simplified/Traditional Conversion"))
+, context(context)
+, selected_set_changed_slot(context->selectionController->AddSelectionListener(&DialogChineseConverter::OnSelectedSetChanged, this))
+{
+	wxString direction_vals[] = { _("Convert to Simplified Chinese"), _("Convert to Traditional Chinese") };
+	direction_mode = new wxRadioBox(this, -1, _("Direction"), wxDefaultPosition, wxDefaultSize, 2, direction_vals);
+	direction_mode->SetSelection(OPT_GET("Tool/Chinese Conversion/Direction")->GetInt());
+
+	wxString selection_vals[] = { _("All rows"), _("Selected rows") };
+	selection_mode = new wxRadioBox(this, -1, _("Apply to"), wxDefaultPosition, wxDefaultSize, 2, selection_vals);
+	selection_mode->SetSelection(OPT_GET("Tool/Chinese Conversion/Selection Only")->GetBool() ? 1 : 0);
+
+	style_only = new wxCheckBox(this, -1, _("Only apply to this style"));
+	style_only->SetValue(OPT_GET("Tool/Chinese Conversion/Style Only")->GetBool());
+	style_choice = new wxChoice(this, -1, wxDefaultPosition, wxDefaultSize, get_style_choices(context->ass.get()));
+	style_choice->SetSelection(0);
+	wxString saved_style = to_wx(OPT_GET("Tool/Chinese Conversion/Style")->GetString());
+	if (!saved_style.empty()) {
+		int found = style_choice->FindString(saved_style);
+		if (found != wxNOT_FOUND)
+			style_choice->SetSelection(found);
+	}
+
+	auto style_sizer = new wxBoxSizer(wxHORIZONTAL);
+	style_sizer->Add(style_only, wxSizerFlags().Center().Border(wxRIGHT));
+	style_sizer->Add(style_choice, wxSizerFlags(1).Expand());
+
+	auto main_sizer = new wxBoxSizer(wxVERTICAL);
+	main_sizer->Add(direction_mode, wxSizerFlags().Expand().Border());
+	main_sizer->Add(selection_mode, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+	main_sizer->Add(style_sizer, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+	main_sizer->Add(CreateButtonSizer(wxOK | wxCANCEL), wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+
+	SetSizerAndFit(main_sizer);
+	CenterOnParent();
+
+	Bind(wxEVT_BUTTON, &DialogChineseConverter::Process, this, wxID_OK);
+	style_only->Bind(wxEVT_CHECKBOX, &DialogChineseConverter::OnStyleOnlyChanged, this);
+	wxCommandEvent evt;
+	OnStyleOnlyChanged(evt);
+	OnSelectedSetChanged();
+}
+
+DialogChineseConverter::~DialogChineseConverter() {
+	OPT_SET("Tool/Chinese Conversion/Direction")->SetInt(direction_mode->GetSelection());
+	OPT_SET("Tool/Chinese Conversion/Selection Only")->SetBool(selection_mode->GetSelection() == 1);
+	OPT_SET("Tool/Chinese Conversion/Style Only")->SetBool(style_only->GetValue());
+	OPT_SET("Tool/Chinese Conversion/Style")->SetString(from_wx(style_choice->GetStringSelection()));
+}
+
+void DialogChineseConverter::OnSelectedSetChanged() {
+	bool has_selection = !context->selectionController->GetSelectedSet().empty();
+	selection_mode->Enable(1, has_selection);
+	if (!has_selection)
+		selection_mode->SetSelection(0);
+}
+
+void DialogChineseConverter::OnStyleOnlyChanged(wxCommandEvent&) {
+	style_choice->Enable(style_only->GetValue());
+}
+
+void DialogChineseConverter::Process(wxCommandEvent&) {
+	std::string style_filter = style_only->GetValue() ? from_wx(style_choice->GetStringSelection()) : std::string();
+	auto lines = get_tool_target_lines(context, selection_mode->GetSelection() == 1, style_filter);
+	bool to_traditional = direction_mode->GetSelection() == 1;
+
+	size_t checked = 0;
+	size_t changed = 0;
+	size_t plain_blocks_changed = 0;
+	for (auto line : lines) {
+		++checked;
+		auto blocks = line->ParseTags();
+		bool line_changed = false;
+		for (auto& block : blocks) {
+			if (block->GetType() != AssBlockType::PLAIN)
+				continue;
+			auto& text = static_cast<AssDialogueBlockPlain *>(block.get())->text;
+			if (convert_chinese_text(text, to_traditional)) {
+				line_changed = true;
+				++plain_blocks_changed;
+			}
+		}
+		if (line_changed) {
+			line->UpdateText(blocks);
+			++changed;
+		}
+	}
+
+	if (changed)
+		context->ass->Commit(_("convert Chinese script"), AssFile::COMMIT_DIAG_TEXT);
+
+	wxString report;
+	report += _("Chinese Simplified/Traditional Conversion");
+	report += "\n\n";
+	report += wxString::Format("%s: %llu\n", _("Checked non-comment dialogue lines").c_str(), static_cast<unsigned long long>(checked));
+	report += wxString::Format("%s: %llu\n", _("Changed lines").c_str(), static_cast<unsigned long long>(changed));
+	report += wxString::Format("%s: %llu\n", _("Changed plain text segments").c_str(), static_cast<unsigned long long>(plain_blocks_changed));
+	wxMessageBox(report, _("Chinese Simplified/Traditional Conversion"), wxICON_INFORMATION);
+	Close();
+}
+
+struct PairToken {
+	const char *open;
+	const char *close;
+	const char *name;
+};
+
+static PairToken const pair_tokens[] = {
+	{ "(", ")", "()" },
+	{ "[", "]", "[]" },
+	{ "{", "}", "{}" },
+	{ "\xEF\xBC\x88", "\xEF\xBC\x89", "fullwidth parentheses" },
+	{ "\xE3\x80\x90", "\xE3\x80\x91", "lenticular brackets" },
+	{ "\xE3\x80\x8A", "\xE3\x80\x8B", "book-title brackets" },
+	{ "\xE3\x80\x88", "\xE3\x80\x89", "angle brackets" },
+	{ "\xE3\x80\x8C", "\xE3\x80\x8D", "corner brackets" },
+	{ "\xE3\x80\x8E", "\xE3\x80\x8F", "white corner brackets" },
+	{ "\xE2\x80\x9C", "\xE2\x80\x9D", "Chinese double quotes" },
+	{ "\xE2\x80\x98", "\xE2\x80\x99", "Chinese single quotes" }
+};
+
+bool starts_with_at(std::string const& text, size_t pos, char const *token) {
+	size_t len = std::strlen(token);
+	return pos + len <= text.size() && text.compare(pos, len, token) == 0;
+}
+
+wxString check_pairs_in_text(std::string const& text) {
+	std::vector<int> stack;
+	std::vector<size_t> positions;
+	bool ascii_double_quote_open = false;
+	bool ascii_single_quote_open = false;
+	wxString issues;
+
+	for (size_t pos = 0; pos < text.size();) {
+		bool matched = false;
+		if (text[pos] == '"') {
+			ascii_double_quote_open = !ascii_double_quote_open;
+			++pos;
+			continue;
+		}
+		if (text[pos] == '\'') {
+			ascii_single_quote_open = !ascii_single_quote_open;
+			++pos;
+			continue;
+		}
+
+		for (int i = 0; i < static_cast<int>(sizeof(pair_tokens) / sizeof(pair_tokens[0])); ++i) {
+			if (starts_with_at(text, pos, pair_tokens[i].open)) {
+				stack.push_back(i);
+				positions.push_back(pos);
+				pos += std::strlen(pair_tokens[i].open);
+				matched = true;
+				break;
+			}
+			if (starts_with_at(text, pos, pair_tokens[i].close)) {
+				if (stack.empty() || stack.back() != i) {
+					issues += wxString::Format(_("Unexpected closing %s at byte %llu").c_str(), to_wx(pair_tokens[i].close).c_str(), static_cast<unsigned long long>(pos));
+					issues += "\n";
+				}
+				else {
+					stack.pop_back();
+					positions.pop_back();
+				}
+				pos += std::strlen(pair_tokens[i].close);
+				matched = true;
+				break;
+			}
+		}
+		if (!matched) {
+			unsigned char c = static_cast<unsigned char>(text[pos]);
+			size_t len = c < 0x80 ? 1 : ((c & 0xE0) == 0xC0 ? 2 : ((c & 0xF0) == 0xE0 ? 3 : ((c & 0xF8) == 0xF0 ? 4 : 1)));
+			pos += std::min(len, text.size() - pos);
+		}
+	}
+
+	for (size_t i = 0; i < stack.size(); ++i) {
+		issues += wxString::Format(_("Unclosed %s at byte %llu").c_str(), to_wx(pair_tokens[stack[i]].open).c_str(), static_cast<unsigned long long>(positions[i]));
+		issues += "\n";
+	}
+	if (ascii_double_quote_open)
+		issues += _("Unpaired ASCII double quote") + wxString("\n");
+	if (ascii_single_quote_open)
+		issues += _("Unpaired ASCII single quote") + wxString("\n");
+	return issues;
+}
+
+DialogPairCheck::DialogPairCheck(agi::Context *context)
+: wxDialog(context->parent, -1, _("Check Paired Punctuation"))
+, context(context)
+, selected_set_changed_slot(context->selectionController->AddSelectionListener(&DialogPairCheck::OnSelectedSetChanged, this))
+{
+	wxString selection_vals[] = { _("All rows"), _("Selected rows") };
+	selection_mode = new wxRadioBox(this, -1, _("Check"), wxDefaultPosition, wxDefaultSize, 2, selection_vals);
+	selection_mode->SetSelection(OPT_GET("Tool/Pair Check/Selection Only")->GetBool() ? 1 : 0);
+
+	style_only = new wxCheckBox(this, -1, _("Only check this style"));
+	style_only->SetValue(OPT_GET("Tool/Pair Check/Style Only")->GetBool());
+	style_choice = new wxChoice(this, -1, wxDefaultPosition, wxDefaultSize, get_style_choices(context->ass.get()));
+	style_choice->SetSelection(0);
+	wxString saved_style = to_wx(OPT_GET("Tool/Pair Check/Style")->GetString());
+	if (!saved_style.empty()) {
+		int found = style_choice->FindString(saved_style);
+		if (found != wxNOT_FOUND)
+			style_choice->SetSelection(found);
+	}
+
+	auto style_sizer = new wxBoxSizer(wxHORIZONTAL);
+	style_sizer->Add(style_only, wxSizerFlags().Center().Border(wxRIGHT));
+	style_sizer->Add(style_choice, wxSizerFlags(1).Expand());
+
+	auto main_sizer = new wxBoxSizer(wxVERTICAL);
+	main_sizer->Add(selection_mode, wxSizerFlags().Expand().Border());
+	main_sizer->Add(style_sizer, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+	main_sizer->Add(CreateButtonSizer(wxOK | wxCANCEL), wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+	SetSizerAndFit(main_sizer);
+	CenterOnParent();
+
+	Bind(wxEVT_BUTTON, &DialogPairCheck::Process, this, wxID_OK);
+	style_only->Bind(wxEVT_CHECKBOX, &DialogPairCheck::OnStyleOnlyChanged, this);
+	wxCommandEvent evt;
+	OnStyleOnlyChanged(evt);
+	OnSelectedSetChanged();
+}
+
+DialogPairCheck::~DialogPairCheck() {
+	OPT_SET("Tool/Pair Check/Selection Only")->SetBool(selection_mode->GetSelection() == 1);
+	OPT_SET("Tool/Pair Check/Style Only")->SetBool(style_only->GetValue());
+	OPT_SET("Tool/Pair Check/Style")->SetString(from_wx(style_choice->GetStringSelection()));
+}
+
+void DialogPairCheck::OnSelectedSetChanged() {
+	bool has_selection = !context->selectionController->GetSelectedSet().empty();
+	selection_mode->Enable(1, has_selection);
+	if (!has_selection)
+		selection_mode->SetSelection(0);
+}
+
+void DialogPairCheck::OnStyleOnlyChanged(wxCommandEvent&) {
+	style_choice->Enable(style_only->GetValue());
+}
+
+void DialogPairCheck::Process(wxCommandEvent&) {
+	std::string style_filter = style_only->GetValue() ? from_wx(style_choice->GetStringSelection()) : std::string();
+	auto lines = get_tool_target_lines(context, selection_mode->GetSelection() == 1, style_filter);
+
+	size_t checked = 0;
+	size_t issue_lines = 0;
+	wxString report;
+	for (auto line : lines) {
+		++checked;
+		wxString issues = check_pairs_in_text(line->GetStrippedText());
+		if (!issues.empty()) {
+			++issue_lines;
+			report += wxString::Format(_("Line %llu").c_str(), static_cast<unsigned long long>(line->Row + 1));
+			report += ":\n";
+			report += issues;
+			report += "\n";
+		}
+	}
+
+	wxString header;
+	header += _("Check Paired Punctuation");
+	header += "\n\n";
+	header += wxString::Format("%s: %llu\n", _("Checked non-comment dialogue lines").c_str(), static_cast<unsigned long long>(checked));
+	header += wxString::Format("%s: %llu\n\n", _("Lines with pairing problems").c_str(), static_cast<unsigned long long>(issue_lines));
+	if (report.empty())
+		report = _("No pairing problems were found.");
+	wxMessageBox(header + report, _("Check Paired Punctuation"), wxICON_INFORMATION);
 	Close();
 }
 
@@ -2228,6 +2584,14 @@ void ShowStyleOverlapCheckDialog(agi::Context *c) {
 
 void ShowSubtitleTextCleanupDialog(agi::Context *c) {
 	DialogTextCleaner(c).ShowModal();
+}
+
+void ShowChineseConversionDialog(agi::Context *c) {
+	DialogChineseConverter(c).ShowModal();
+}
+
+void ShowPairCheckDialog(agi::Context *c) {
+	DialogPairCheck(c).ShowModal();
 }
 
 void ShowJapaneseFuriganaDialog(agi::Context *c) {

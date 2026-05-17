@@ -162,6 +162,11 @@ void PortAudioPlayer::OpenStream() {
 		pa_output_p.channelCount = provider->GetChannels();
 		pa_output_p.sampleFormat = paInt16;
 		pa_output_p.suggestedLatency = device_info->defaultLowOutputLatency;
+#ifdef __APPLE__
+		// CoreAudio is more sensitive to very small callback buffers on some
+		// Apple Silicon devices; use the high-latency default as a stable floor.
+		pa_output_p.suggestedLatency = std::max(pa_output_p.suggestedLatency, std::max(device_info->defaultHighOutputLatency, 0.12));
+#endif
 		pa_output_p.hostApiSpecificStreamInfo = nullptr;
 
 		LOG_D("audio/player/portaudio") << "OpenStream:"
@@ -170,7 +175,7 @@ void PortAudioPlayer::OpenStream() {
 			<< " sample rate: " << provider->GetSampleRate()
 			<< " sample format: " << pa_output_p.sampleFormat;
 
-		PaError err = Pa_OpenStream(&stream, nullptr, &pa_output_p, provider->GetSampleRate(), 0, paPrimeOutputBuffersUsingStreamCallback, paCallback, this);
+		PaError err = Pa_OpenStream(&stream, nullptr, &pa_output_p, provider->GetSampleRate(), 0, paPrimeOutputBuffersUsingStreamCallback | paDitherOff, paCallback, this);
 
 		if (err == paNoError) {
 			LOG_D("audo/player/portaudio") << "Using device " << pa_output_p.device << " " << device_info->name << " " << Pa_GetHostApiInfo(device_info->hostApi)->name;
@@ -197,6 +202,7 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 	start = start_sample;
 	end = start_sample + count;
 	speed_position = 0.0;
+	draining = false;
 
 #ifdef WITH_SOUNDTOUCH
 	if (tempo_processor)
@@ -246,6 +252,11 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 	// Calculate how much left
 	int64_t lenAvailable = std::min<int64_t>(player->end - player->current, framesPerBuffer);
 	const int bytes_per_frame = player->provider->GetChannels() * player->provider->GetBytesPerSample();
+	if (player->draining) {
+		memset(outputBuffer, 0, framesPerBuffer * bytes_per_frame);
+		player->draining = false;
+		return paComplete;
+	}
 
 	// Play something
 	if (lenAvailable > 0 && player->playback_speed == 1.0) {
@@ -256,7 +267,8 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 		if ((unsigned long)lenAvailable < framesPerBuffer) {
 			auto out = static_cast<char *>(outputBuffer);
 			memset(out + lenAvailable * bytes_per_frame, 0, (framesPerBuffer - lenAvailable) * bytes_per_frame);
-			return paComplete;
+			player->draining = true;
+			return paContinue;
 		}
 
 		// Continue as normal
@@ -269,15 +281,22 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 			auto out = static_cast<char *>(outputBuffer);
 			player->tempo_processor->Fill(out, framesPerBuffer);
 			player->current = player->tempo_processor->GetInputFrame();
-			return player->tempo_processor->IsFinished() ? paComplete : paContinue;
+			if (player->tempo_processor->IsFinished()) {
+				player->draining = true;
+				return paContinue;
+			}
+			return paContinue;
 		}
 #endif
 		const auto source_frames = std::min<int64_t>(
 			player->end - player->current,
 			(int64_t)(framesPerBuffer * player->playback_speed) + 2);
 
-		if (source_frames <= 0)
-			return paComplete;
+		if (source_frames <= 0) {
+			memset(outputBuffer, 0, framesPerBuffer * bytes_per_frame);
+			player->draining = true;
+			return paContinue;
+		}
 
 		player->speed_buffer.resize(source_frames * bytes_per_frame);
 		player->provider->GetAudioWithVolume(player->speed_buffer.data(), player->current, source_frames, player->GetVolume());
@@ -301,7 +320,10 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 		player->current += consumed;
 		player->speed_position = source_position - consumed;
 
-		return output_frame == framesPerBuffer ? paContinue : paComplete;
+		if (output_frame == framesPerBuffer)
+			return paContinue;
+		player->draining = true;
+		return paContinue;
 	}
 
 	// Abort stream and stop the callback.

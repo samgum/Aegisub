@@ -540,6 +540,28 @@
 			"Replace Quotes" : true,
 			"Selection Only" : false
 		},
+		"Chinese Conversion" : {
+			"Direction" : 0,
+			"Selection Only" : false,
+			"Style Only" : false,
+			"Style" : ""
+		},
+		"Pair Check" : {
+			"Selection Only" : false,
+			"Style Only" : false,
+			"Style" : ""
+		},
+		"AI Analysis" : {
+			"Enabled" : false,
+			"Provider" : 0,
+			"Base URL" : "https://api.deepseek.com",
+			"Model" : "deepseek-v4-pro",
+			"Target Language" : "",
+			"Temperature" : 0.2,
+			"Max Tokens" : 1200,
+			"Thinking" : false,
+			"Cache" : true
+		},
 		"Furigana Annotation" : {
 			"Kana Mode" : 0,
 			"Outline Percent" : 50,

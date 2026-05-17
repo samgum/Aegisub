@@ -22,7 +22,17 @@ def test_portaudio_normal_speed_zero_fills_last_buffer():
     source = PORTAUDIO.read_text(encoding="utf-8")
     assert "const int bytes_per_frame" in source
     assert "framesPerBuffer - lenAvailable" in source
+    assert "player->draining = true;" in source
     assert "return paComplete;" in source
+
+
+def test_portaudio_uses_safer_macos_latency_and_no_dither():
+    source = PORTAUDIO.read_text(encoding="utf-8")
+    header = PORTAUDIO_H.read_text(encoding="utf-8")
+    assert "bool draining = false" in header
+    assert "defaultHighOutputLatency" in source
+    assert "0.12" in source
+    assert "paPrimeOutputBuffersUsingStreamCallback | paDitherOff" in source
 
 
 def test_soundtouch_avoids_preclipping_and_output_clipping():
@@ -46,6 +56,7 @@ def main():
     tests = [
         test_openal_uses_provider_sample_format,
         test_portaudio_normal_speed_zero_fills_last_buffer,
+        test_portaudio_uses_safer_macos_latency_and_no_dither,
         test_soundtouch_avoids_preclipping_and_output_clipping,
         test_volume_changes_reach_soundtouch_processors,
     ]

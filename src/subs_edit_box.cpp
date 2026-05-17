@@ -39,6 +39,7 @@
 #include "base_grid.h"
 #include "command/command.h"
 #include "compat.h"
+#include "dialogs.h"
 #include "dialog_style_editor.h"
 #include "flyweight_hash.h"
 #include "include/aegisub/context.h"
@@ -200,11 +201,17 @@ SubsEditBox::SubsEditBox(wxWindow *parent, agi::Context *context)
 	// Text editor
 	edit_ctrl = new SubsTextEditCtrl(this, FromDIP(wxSize(300,50)), wxBORDER_SUNKEN, c);
 	edit_ctrl->Bind(wxEVT_CHAR_HOOK, &SubsEditBox::OnKeyDown, this);
+	ai_analyze_button = new wxButton(this, -1, "AI", wxDefaultPosition, wxSize(GetTextExtent("AI").GetWidth() + 24, -1));
+	ai_analyze_button->SetToolTip(_("Analyze the current subtitle line with AI"));
+	ai_analyze_button->Bind(wxEVT_BUTTON, &SubsEditBox::OnAIAnalyze, this);
 
 	secondary_editor = new wxTextCtrl(this, -1, "", wxDefaultPosition, FromDIP(wxSize(300,50)), wxBORDER_SUNKEN | wxTE_MULTILINE | wxTE_READONLY);
+	auto edit_row = new wxBoxSizer(wxHORIZONTAL);
+	edit_row->Add(edit_ctrl, wxSizerFlags(1).Expand().Border(wxRIGHT, 3));
+	edit_row->Add(ai_analyze_button, wxSizerFlags().Center());
 
 	main_sizer->Add(secondary_editor,1,wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,3);
-	main_sizer->Add(edit_ctrl,1,wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,3);
+	main_sizer->Add(edit_row,1,wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM,3);
 	main_sizer->Hide(secondary_editor);
 
 	bottom_sizer = new wxBoxSizer(wxHORIZONTAL);
@@ -585,6 +592,10 @@ void SubsEditBox::OnSplit(wxCommandEvent&) {
 	bool show_original = split_box->IsChecked();
 	DoOnSplit(show_original);
 	OPT_SET("Subtitle/Show Original")->SetBool(show_original);
+}
+
+void SubsEditBox::OnAIAnalyze(wxCommandEvent&) {
+	ShowAIAnalysisDialog(c, from_wx(edit_ctrl->GetText()));
 }
 
 void SubsEditBox::DoOnSplit(bool show_original) {

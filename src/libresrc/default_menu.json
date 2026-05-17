@@ -128,6 +128,9 @@
         { "command" : "tool/time/stitch" },
         { "command" : "tool/style/overlap_check" },
         { "command" : "tool/text/cleanup" },
+        { "command" : "tool/text/chinese_convert" },
+        { "command" : "tool/text/pair_check" },
+        { "command" : "tool/ai/analysis_settings" },
         { "command" : "tool/text/furigana" }
     ],
     "main/view" : [
