@@ -918,34 +918,27 @@ std::string hidden_state_tags(std::string const& active_tags, FuriganaFormat con
 	return "{\\r" + active_tags + format.tags + "\\alpha&HFF&}";
 }
 
+void append_ideographic_spaces(std::string& text, size_t count) {
+	for (size_t i = 0; i < count; ++i)
+		text += "\xE3\x80\x80";
+}
+
 void append_hidden_space(std::string& text, double width, FuriganaFormat const& format) {
-	if (width <= 0.0) return;
-	double spacing = std::round(width * 10.0) / 10.0;
-	if (spacing < 0.1) return;
-	text += "{\\fsp" + format_ass_number(spacing) + "\\alpha&HFF&} " + "{\\fsp0\\alpha&HFF&}";
+	size_t count = static_cast<size_t>(std::max(0.0, std::round(width / std::max(1.0, format.ruby_size))));
+	append_ideographic_spaces(text, count);
 }
 
 std::string make_visible_furigana_segment(std::string const& target, std::string const& reading, FuriganaFormat const& format, std::string const& active_tags) {
 	double target_width = std::max(0.1, furigana_display_units(target)) * format.base_size;
 	double reading_width = std::max(0.1, furigana_display_units(reading)) * format.ruby_size;
+	double pad = std::max(0.0, (target_width - reading_width) / 2.0);
 
 	std::string result;
-	// Left pad: center the reading over the target using fsp
-	if (reading_width < target_width) {
-		double pad = std::round(((target_width - reading_width) / 2.0) * 10.0) / 10.0;
-		if (pad >= 0.1)
-			result += "{\\fsp" + format_ass_number(pad) + "\\alpha&HFF&} " + "{\\fsp0\\alpha&HFF&}";
-	}
-
-	result += "{\\alpha&H00&" + format.tags + "}" + reading + hidden_state_tags(active_tags, format);
-
-	// Right pad
-	if (reading_width < target_width) {
-		double pad = std::round(((target_width - reading_width) / 2.0) * 10.0) / 10.0;
-		if (pad >= 0.1)
-			result += "{\\fsp" + format_ass_number(pad) + "\\alpha&HFF&} " + "{\\fsp0\\alpha&HFF&}";
-	}
-
+	append_hidden_space(result, pad, format);
+	result += "{\\alpha&H00&" + format.tags + "}" +
+		reading +
+		hidden_state_tags(active_tags, format);
+	append_hidden_space(result, pad, format);
 	return result;
 }
 
