@@ -918,19 +918,27 @@ std::string hidden_state_tags(std::string const& active_tags, FuriganaFormat con
 	return "{\\r" + active_tags + format.tags + "\\alpha&HFF&}";
 }
 
-void append_transparent_text(std::string& result, std::string const& text) {
-	// Append text as fully transparent - used for width-matching placeholders
-	result += "{\\alpha&HFF&\\fscy50}" + text + "{\\fscy100}";
+void append_ideographic_spaces(std::string& text, size_t count) {
+	for (size_t i = 0; i < count; ++i)
+		text += "\xE3\x80\x80";
+}
+
+void append_hidden_space(std::string& text, double width, FuriganaFormat const& format) {
+	size_t count = static_cast<size_t>(std::max(0.0, std::round(width / std::max(1.0, format.ruby_size))));
+	append_ideographic_spaces(text, count);
 }
 
 std::string make_visible_furigana_segment(std::string const& target, std::string const& reading, FuriganaFormat const& format, std::string const& active_tags) {
-	// Place the reading directly without horizontal scaling.
-	// The transparent kanji text around it provides correct total line width.
-	// If the reading is shorter than the kanji, transparent kanji text fills the gap.
+	double target_width = std::max(0.1, furigana_display_units(target)) * format.base_size;
+	double reading_width = std::max(0.1, furigana_display_units(reading)) * format.ruby_size;
+	double pad = std::max(0.0, (target_width - reading_width) / 2.0);
+
 	std::string result;
-	result += "{lpha&H00&" + format.tags + "}" +
+	append_hidden_space(result, pad, format);
+	result += "{\\alpha&H00&" + format.tags + "}" +
 		reading +
 		hidden_state_tags(active_tags, format);
+	append_hidden_space(result, pad, format);
 	return result;
 }
 
@@ -963,8 +971,7 @@ std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<st
 		}
 
 		if (!matched) {
-			// No reading for this kanji - keep it transparent for width matching
-			append_transparent_text(result, run.substr(boundaries[i], boundaries[i + 1] - boundaries[i]));
+			append_hidden_space(result, furigana_display_units(run.substr(boundaries[i], boundaries[i + 1] - boundaries[i])) * format.base_size, format);
 			++i;
 		}
 	}
@@ -972,38 +979,27 @@ std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<st
 	return result;
 }
 
-std::string make_aligned_reading_line(std::string const& raw_text, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool& any_reading, std::string const& initial_tags) {
+void append_hidden_text_width(std::string& result, std::string const& text, FuriganaFormat const& format) {
+	append_hidden_space(result, furigana_display_units(text) * format.base_size, format);
+}
+
+std::string make_aligned_reading_line(std::string const& raw_text, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool& any_reading) {
 	bool had_furigana = false;
 	AssDialogue line;
 	line.Text = strip_existing_furigana(raw_text, had_furigana);
 
-	// Strategy: copy the base text into the ruby line, keeping non-kanji text
-	// transparent for width matching, and replacing kanji with visible readings.
-	// The ruby line gets its own font size via format.tags but inherits base
-	// text structure for perfect width alignment.
-	std::string result = furigana_marker + "{\\r" + format.tags + "}";
-	std::string active_tags = initial_tags;
+	std::string result = hidden_state_tags("", format);
+	std::string active_tags;
 	auto blocks = line.ParseTags();
 	for (auto& block : blocks) {
 		if (block->GetType() == AssBlockType::OVERRIDE) {
-			// Copy override tags but filter out karaoke timing tags
-			auto& override_block = *static_cast<AssDialogueBlockOverride const *>(block.get());
-			std::string filtered;
-			for (auto const& tag : override_block.Tags) {
-				if (!is_karaoke_tag(tag))
-					filtered += static_cast<std::string>(tag);
-			}
-			if (!filtered.empty()) {
-				result += "{" + filtered + "}";
-				// Update active_tags for state tracking
-				append_sanitized_override_state(override_block, active_tags);
-			}
+			append_sanitized_override_state(*static_cast<AssDialogueBlockOverride const *>(block.get()), active_tags);
+			result += hidden_state_tags(active_tags, format);
 			continue;
 		}
 
 		if (block->GetType() != AssBlockType::PLAIN) {
-			// Non-plain blocks (drawing etc.) - make transparent
-			result += "{\\alpha&HFF&\\fscy50}" + block->GetText() + "{\\fscy100}";
+			append_hidden_text_width(result, block->GetText(), format);
 			continue;
 		}
 
@@ -1014,13 +1010,11 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 			read_utf8_codepoint(text, pos, cp, len);
 
 			if (!is_cjk_ideograph(cp)) {
-				// Non-kanji: keep as transparent text for width matching
-				result += "{\\alpha&HFF&\\fscy50}" + text.substr(pos, len) + "{\\fscy100}";
+				append_hidden_text_width(result, text.substr(pos, len), format);
 				pos += len;
 				continue;
 			}
 
-			// Collect consecutive kanji into a run
 			size_t start = pos;
 			do {
 				pos += len;
@@ -1029,24 +1023,11 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 				read_utf8_codepoint(text, pos, cp, len);
 			} while (is_cjk_ideograph(cp));
 
-			// Generate readings for this kanji run
-			// But first wrap in transparent version for width baseline
-			auto kanji_run = text.substr(start, pos - start);
-			bool run_has_reading = false;
-			auto reading_part = make_aligned_reading_for_cjk_run(kanji_run, readings, format, active_tags, run_has_reading);
-
-			if (run_has_reading) {
-				result += reading_part;
-				any_reading = true;
-			} else {
-				// No readings for this kanji run - keep transparent
-				append_transparent_text(result, kanji_run);
-			}
+			result += make_aligned_reading_for_cjk_run(text.substr(start, pos - start), readings, format, active_tags, any_reading);
 		}
 	}
 
-	result += "{\\r}";
-	return result;
+	return result + "{\\r}";
 }
 
 std::string format_ass_number(double value) {
@@ -1085,27 +1066,9 @@ std::string compose_furigana_text(std::string const& base, std::map<std::string,
 	std::vector<std::string> output_lines;
 	any_reading = false;
 
-	// Track accumulated override tags across visual lines so that
-	// split lines inherit the correct style state from their predecessors.
-	std::string inherited_tags;
-
 	for (auto const& base_line : split_ass_visual_lines(base)) {
 		bool line_has_reading = false;
-		auto reading_line = make_aligned_reading_line(base_line, readings, format, line_has_reading, inherited_tags);
-
-		// Re-parse the base_line to update inherited_tags for the next visual line
-		{
-			AssDialogue tmp;
-			bool tmp_had = false;
-			tmp.Text = strip_existing_furigana(base_line, tmp_had);
-			auto blocks = tmp.ParseTags();
-			for (auto& block : blocks) {
-				if (block->GetType() == AssBlockType::OVERRIDE) {
-					append_sanitized_override_state(*static_cast<AssDialogueBlockOverride const *>(block.get()), inherited_tags);
-				}
-			}
-		}
-
+		auto reading_line = make_aligned_reading_line(base_line, readings, format, line_has_reading);
 		if (line_has_reading) {
 			auto ruby = furigana_marker + reading_line;
 			if (above) {
