@@ -7348,6 +7348,26 @@ msgid "Annotation position"
 msgstr "标注位置"
 
 #: ../src/dialog_timing_tools.cpp:0
+msgid "Hiragana"
+msgstr "平假名"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Katakana"
+msgstr "片假名"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Reading script"
+msgstr "读音文字"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Overwrite existing readings when auto filling"
+msgstr "自动填充时覆盖已有读音"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Remove existing annotations when readings are empty"
+msgstr "读音为空时移除已有标注"
+
+#: ../src/dialog_timing_tools.cpp:0
 msgid "Furigana size (% of style):"
 msgstr "假名大小（样式百分比）："
 
@@ -7414,3 +7434,7 @@ msgstr "请使用以下命令安装："
 #: ../src/dialog_timing_tools.cpp:0
 msgid "Auto-filled reading entries"
 msgstr "已自动填充读音条目数"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Preserved existing reading entries"
+msgstr "已保留已有读音条目数"

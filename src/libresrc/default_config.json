@@ -541,8 +541,11 @@
 			"Selection Only" : false
 		},
 		"Furigana Annotation" : {
+			"Kana Mode" : 0,
 			"Outline Percent" : 50,
+			"Overwrite Auto Readings" : false,
 			"Position" : 0,
+			"Remove Empty Annotations" : true,
 			"Selection Only" : false,
 			"Shadow Percent" : 0,
 			"Size Percent" : 50
