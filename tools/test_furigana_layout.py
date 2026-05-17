@@ -101,6 +101,48 @@ def test_source_uses_small_ruby_spacing_path():
     assert "ruby_tags" not in source
 
 
+def test_source_uses_per_occurrence_reading_keys():
+    source = SOURCE.read_text(encoding="utf-8")
+    required = [
+        "make_furigana_occurrence_key",
+        "parse_furigana_occurrence_label",
+        "lookup_furigana_reading",
+        "row#occurrence kanji=reading",
+        "line->Row + 1, occurrence, term",
+    ]
+    for token in required:
+        assert token in source
+
+
+def test_sudachi_autofill_can_return_occurrence_readings():
+    source = SOURCE.read_text(encoding="utf-8")
+    required = [
+        "make_sudachi_text_array",
+        "cjk_runs(text)",
+        "readings[f\"@{row}#{occurrence}#{term}\"] = reading",
+        "auto_readings.find(key)",
+    ]
+    for token in required:
+        assert token in source
+
+
+def make_occurrence_key(row, occurrence, term):
+    return f"@{row}#{occurrence}#{term}"
+
+
+def lookup_reading(readings, row, occurrence, term):
+    return readings.get(make_occurrence_key(row, occurrence, term), readings.get(term, ""))
+
+
+def test_occurrence_reading_overrides_global_default():
+    readings = {
+        "今日": "きょう",
+        make_occurrence_key(8, 2, "今日"): "こんにち",
+    }
+    assert lookup_reading(readings, 8, 1, "今日") == "きょう"
+    assert lookup_reading(readings, 8, 2, "今日") == "こんにち"
+
+
 def test_source_has_auto_wrap_support():
     source = SOURCE.read_text(encoding="utf-8")
     required = [
@@ -170,6 +212,9 @@ def main():
     tests = [
         test_source_does_not_scale_ruby_glyphs,
         test_source_uses_small_ruby_spacing_path,
+        test_source_uses_per_occurrence_reading_keys,
+        test_sudachi_autofill_can_return_occurrence_readings,
+        test_occurrence_reading_overrides_global_default,
         test_source_has_auto_wrap_support,
         test_default_config_has_migrated_small_ruby_default,
         test_old_marker_lines_are_removed_for_regeneration,

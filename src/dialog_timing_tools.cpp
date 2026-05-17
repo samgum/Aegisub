@@ -799,6 +799,32 @@ bool is_cjk_ideograph(uint32_t cp) {
 		(cp >= 0x2B820 && cp <= 0x2CEAF);
 }
 
+std::string make_furigana_occurrence_key(int row, int occurrence, std::string const& term) {
+	return "@" + std::to_string(row) + "#" + std::to_string(occurrence) + "#" + term;
+}
+
+bool parse_furigana_occurrence_label(std::string const& label, int& row, int& occurrence, std::string& term) {
+	size_t hash = label.find('#');
+	size_t space = label.find(' ');
+	if (hash == std::string::npos || space == std::string::npos || hash > space)
+		return false;
+
+	try {
+		row = std::stoi(label.substr(0, hash));
+		occurrence = std::stoi(label.substr(hash + 1, space - hash - 1));
+	}
+	catch (...) {
+		return false;
+	}
+
+	term = label.substr(space + 1);
+	return row > 0 && occurrence > 0 && !term.empty();
+}
+
+std::string make_furigana_occurrence_label(int row, int occurrence, std::string const& term) {
+	return std::to_string(row) + "#" + std::to_string(occurrence) + " " + term;
+}
+
 std::string strip_existing_furigana(std::string const& text, bool& had_furigana) {
 	had_furigana = false;
 
@@ -972,6 +998,43 @@ void apply_furigana_wrap_override(std::string const& block, FuriganaWrapState& s
 			state = base;
 		}
 	}
+}
+
+std::vector<std::string> collect_kanji_occurrences_from_text(std::string const& raw_text) {
+	bool had_furigana = false;
+	AssDialogue line;
+	line.Text = strip_existing_furigana(raw_text, had_furigana);
+
+	std::vector<std::string> terms;
+	auto blocks = line.ParseTags();
+	for (auto& block : blocks) {
+		if (block->GetType() != AssBlockType::PLAIN)
+			continue;
+
+		auto const& text = static_cast<AssDialogueBlockPlain const *>(block.get())->text;
+		for (size_t pos = 0; pos < text.size(); ) {
+			uint32_t cp = 0;
+			size_t len = 1;
+			read_utf8_codepoint(text, pos, cp, len);
+
+			if (!is_cjk_ideograph(cp)) {
+				pos += len;
+				continue;
+			}
+
+			size_t start = pos;
+			do {
+				pos += len;
+				if (pos >= text.size())
+					break;
+				read_utf8_codepoint(text, pos, cp, len);
+			} while (is_cjk_ideograph(cp));
+
+			terms.push_back(text.substr(start, pos - start));
+		}
+	}
+
+	return terms;
 }
 
 double furigana_wrap_token_units(uint32_t cp, FuriganaWrapState const& state, FuriganaFormat const& format) {
@@ -1153,7 +1216,25 @@ std::string make_visible_furigana_segment(std::string const& target, std::string
 	return result;
 }
 
-std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, std::string const& active_tags, bool& any_reading) {
+std::string lookup_furigana_reading(std::map<std::string, std::string> const& readings, int row, int occurrence, std::string const& term) {
+	auto occurrence_it = readings.find(make_furigana_occurrence_key(row, occurrence, term));
+	if (occurrence_it != readings.end())
+		return occurrence_it->second;
+
+	auto global_it = readings.find(term);
+	if (global_it != readings.end())
+		return global_it->second;
+
+	return {};
+}
+
+std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, std::string const& active_tags, bool& any_reading, int row, int occurrence) {
+	auto run_reading = lookup_furigana_reading(readings, row, occurrence, run);
+	if (!run_reading.empty()) {
+		any_reading = true;
+		return make_visible_furigana_segment(run, run_reading, format, active_tags);
+	}
+
 	std::vector<size_t> boundaries;
 	std::vector<uint32_t> codepoints;
 	for (size_t pos = 0; pos < run.size(); ) {
@@ -1171,9 +1252,9 @@ std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<st
 		bool matched = false;
 		for (size_t end = codepoints.size(); end > i; --end) {
 			auto term = run.substr(boundaries[i], boundaries[end] - boundaries[i]);
-			auto it = readings.find(term);
-			if (it != readings.end() && !it->second.empty()) {
-				result += make_visible_furigana_segment(term, it->second, format, active_tags);
+			auto reading = lookup_furigana_reading(readings, row, occurrence, term);
+			if (!reading.empty()) {
+				result += make_visible_furigana_segment(term, reading, format, active_tags);
 				i = end;
 				matched = true;
 				any_reading = true;
@@ -1194,7 +1275,7 @@ void append_hidden_text_width(std::string& result, std::string const& text, Furi
 	append_hidden_space(result, furigana_display_units(text) * format.base_size, format);
 }
 
-std::string make_aligned_reading_line(std::string const& raw_text, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool& any_reading) {
+std::string make_aligned_reading_line(std::string const& raw_text, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool& any_reading, int row, int& occurrence) {
 	bool had_furigana = false;
 	AssDialogue line;
 	line.Text = strip_existing_furigana(raw_text, had_furigana);
@@ -1234,7 +1315,8 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 				read_utf8_codepoint(text, pos, cp, len);
 			} while (is_cjk_ideograph(cp));
 
-			result += make_aligned_reading_for_cjk_run(text.substr(start, pos - start), readings, format, active_tags, any_reading);
+			++occurrence;
+			result += make_aligned_reading_for_cjk_run(text.substr(start, pos - start), readings, format, active_tags, any_reading, row, occurrence);
 		}
 	}
 
@@ -1273,13 +1355,14 @@ FuriganaFormat make_furigana_format(AssStyle const* style, int size_percent, int
 	};
 }
 
-std::string compose_furigana_text(std::string const& base, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool above, bool& any_reading, double wrap_units, int wrap_style) {
+std::string compose_furigana_text(std::string const& base, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool above, bool& any_reading, double wrap_units, int wrap_style, int row) {
 	std::vector<std::string> output_lines;
 	any_reading = false;
+	int occurrence = 0;
 
 	for (auto const& base_line : split_and_auto_wrap_for_furigana(base, format, wrap_units, wrap_style)) {
 		bool line_has_reading = false;
-		auto reading_line = make_aligned_reading_line(base_line, readings, format, line_has_reading);
+		auto reading_line = make_aligned_reading_line(base_line, readings, format, line_has_reading, row, occurrence);
 		if (line_has_reading) {
 			auto ruby = furigana_marker + reading_line;
 			if (above) {
@@ -1349,8 +1432,19 @@ std::string plain_text_for_furigana(std::string const& raw_text) {
 	return plain;
 }
 
-std::string make_sudachi_input_json(std::vector<std::string> const& terms, std::vector<std::string> const& texts) {
-	return "{\"terms\":" + make_json_array(terms) + ",\"texts\":" + make_json_array(texts) + "}";
+std::string make_sudachi_text_array(std::vector<std::pair<int, std::string>> const& texts) {
+	std::string out = "[";
+	for (size_t i = 0; i < texts.size(); ++i) {
+		if (i)
+			out += ",";
+		out += "{\"row\":" + std::to_string(texts[i].first) + ",\"text\":\"" + json_escape(texts[i].second) + "\"}";
+	}
+	out += "]";
+	return out;
+}
+
+std::string make_sudachi_input_json(std::vector<std::string> const& terms, std::vector<std::pair<int, std::string>> const& texts) {
+	return "{\"terms\":" + make_json_array(terms) + ",\"texts\":" + make_sudachi_text_array(texts) + "}";
 }
 
 std::string sudachi_script() {
@@ -1424,6 +1518,25 @@ def add_surface_readings(surface, reading, readings):
         if ruby and ruby != kanji:
             readings.setdefault(kanji, ruby)
 
+def cjk_runs(text):
+    runs = []
+    pos = 0
+    while pos < len(text):
+        if not is_kanji(text[pos]):
+            pos += 1
+            continue
+        start = pos
+        while pos < len(text) and is_kanji(text[pos]):
+            pos += 1
+        runs.append(text[start:pos])
+    return runs
+
+def reading_for_term(term, tok, mode):
+    reading = "".join(m.reading_form() for m in tok.tokenize(term, mode))
+    if reading and reading != "*" and reading != term:
+        return kata_to_hira(reading)
+    return ""
+
 try:
     data = json.load(open(sys.argv[1], "r", encoding="utf-8-sig"))
     if isinstance(data, list):
@@ -1437,16 +1550,32 @@ try:
     mode = tokenizer.Tokenizer.SplitMode.A
     readings = {}
 
-    for text in texts:
+    for item in texts:
+        if isinstance(item, dict):
+            row = item.get("row", 0)
+            text = item.get("text", "")
+        else:
+            row = 0
+            text = item
+
+        local_readings = {}
         for morpheme in tok.tokenize(text, mode):
+            add_surface_readings(morpheme.surface(), morpheme.reading_form(), local_readings)
             add_surface_readings(morpheme.surface(), morpheme.reading_form(), readings)
+
+        occurrence = 0
+        for term in cjk_runs(text):
+            occurrence += 1
+            reading = local_readings.get(term) or reading_for_term(term, tok, mode)
+            if row and reading:
+                readings[f"@{row}#{occurrence}#{term}"] = reading
 
     for term in terms:
         if term in readings:
             continue
-        reading = "".join(m.reading_form() for m in tok.tokenize(term, mode))
-        if reading and reading != "*" and reading != term:
-            readings[term] = kata_to_hira(reading)
+        reading = reading_for_term(term, tok, mode)
+        if reading:
+            readings[term] = reading
 
     json.dump(readings, open(sys.argv[2], "w", encoding="utf-8"), ensure_ascii=False)
 except Exception as exc:
@@ -1505,7 +1634,7 @@ DialogFuriganaAnnotator::DialogFuriganaAnnotator(agi::Context *context)
 
 	auto readings_box = new wxStaticBoxSizer(wxVERTICAL, this, _("Readings"));
 	readings_text = new wxTextCtrl(readings_box->GetStaticBox(), -1, "", wxDefaultPosition, FromDIP(wxSize(700, 280)), wxTE_MULTILINE | wxTE_DONTWRAP);
-	readings_box->Add(new wxStaticText(readings_box->GetStaticBox(), -1, _("Edit one entry per line as kanji=reading. Empty readings are skipped.")), wxSizerFlags().Expand().Border(wxBOTTOM, 4));
+	readings_box->Add(new wxStaticText(readings_box->GetStaticBox(), -1, _("Edit one entry per line as row#occurrence kanji=reading. Old kanji=reading entries act as defaults.")), wxSizerFlags().Expand().Border(wxBOTTOM, 4));
 	readings_box->Add(readings_text, wxSizerFlags(1).Expand());
 	auto auto_fill_button = new wxButton(readings_box->GetStaticBox(), -1, _("Auto fill readings with SudachiPy"));
 	readings_box->Add(auto_fill_button, wxSizerFlags().Expand().Border(wxTOP, 4));
@@ -1613,8 +1742,17 @@ std::map<std::string, std::string> DialogFuriganaAnnotator::ParseReadingText() c
 		auto reading = trimmed.Mid(eq + 1);
 		kanji.Trim(true).Trim(false);
 		reading.Trim(true).Trim(false);
-		if (!kanji.empty())
-			readings[from_wx(kanji)] = from_wx(reading);
+		if (kanji.empty())
+			continue;
+
+		int row = 0;
+		int occurrence = 0;
+		std::string term;
+		auto label = from_wx(kanji);
+		if (parse_furigana_occurrence_label(label, row, occurrence, term))
+			readings[make_furigana_occurrence_key(row, occurrence, term)] = from_wx(reading);
+		else
+			readings[label] = from_wx(reading);
 	}
 	return readings;
 }
@@ -1633,39 +1771,28 @@ void DialogFuriganaAnnotator::RebuildReadingList(wxCommandEvent&) {
 	for (auto const& [kanji, reading] : edited_readings)
 		readings[kanji] = reading;
 
-	auto terms = CollectTerms();
-	std::vector<std::string> texts;
-	for (auto line : GetTargetLines()) {
-		if (!line->Comment) {
-			auto plain = plain_text_for_furigana(line->Text.get());
-			if (!plain.empty())
-				texts.push_back(plain);
-		}
-	}
-
 	wxString text;
-	std::set<std::string> displayed;
-	for (auto const& term : terms) {
-		displayed.insert(term);
-		text += to_wx(term);
-		text += "=";
-		auto it = readings.find(term);
-		if (it != readings.end())
-			text += to_wx(convert_kana(it->second, kana_mode->GetSelection() == 1));
-		text += "\n";
-	}
-	for (auto const& [term, reading] : readings) {
-		if (reading.empty() || !has_kanji(term) || displayed.count(term))
+	for (auto line : GetTargetLines()) {
+		if (line->Comment)
 			continue;
 
-		bool used = false;
-		for (auto const& text_line : texts) {
-			if (text_line.find(term) != std::string::npos) {
-				used = true;
-				break;
-			}
+		int occurrence = 0;
+		for (auto const& term : collect_kanji_occurrences_from_text(line->Text.get())) {
+			++occurrence;
+			auto key = make_furigana_occurrence_key(line->Row + 1, occurrence, term);
+
+			text += to_wx(make_furigana_occurrence_label(line->Row + 1, occurrence, term));
+			text += "=";
+			auto it = readings.find(key);
+			if (it != readings.end())
+				text += to_wx(convert_kana(it->second, kana_mode->GetSelection() == 1));
+			else if (auto global = readings.find(term); global != readings.end())
+				text += to_wx(convert_kana(global->second, kana_mode->GetSelection() == 1));
+			text += "\n";
 		}
-		if (!used)
+	}
+	for (auto const& [term, reading] : readings) {
+		if (term.starts_with("@") || reading.empty() || !has_kanji(term))
 			continue;
 
 		text += to_wx(term);
@@ -1689,12 +1816,12 @@ void DialogFuriganaAnnotator::AutoFillReadings(wxCommandEvent&) {
 	auto edited_readings = ParseReadingText();
 	for (auto const& [kanji, reading] : edited_readings)
 		readings[kanji] = reading;
-	std::vector<std::string> texts;
+	std::vector<std::pair<int, std::string>> texts;
 	for (auto line : GetTargetLines()) {
 		if (!line->Comment) {
 			auto plain = plain_text_for_furigana(line->Text.get());
 			if (!plain.empty())
-				texts.push_back(plain);
+				texts.emplace_back(line->Row + 1, plain);
 		}
 	}
 
@@ -1759,44 +1886,70 @@ void DialogFuriganaAnnotator::AutoFillReadings(wxCommandEvent&) {
 
 		json::UnknownElement root;
 		json::Reader::Read(root, *agi::io::Open(agi::fs::path(from_wx(output_path))));
-		size_t filled = 0;
-		size_t preserved = 0;
+		std::map<std::string, std::string> auto_readings;
 		bool overwrite = overwrite_auto_readings->GetValue();
 		bool katakana = kana_mode->GetSelection() == 1;
 		for (auto& entry : static_cast<json::Object&>(root)) {
 			auto reading = convert_kana(static_cast<std::string>(entry.second), katakana);
-			if (reading.empty())
+			if (!reading.empty())
+				auto_readings[entry.first] = reading;
+		}
+
+		size_t filled = 0;
+		size_t preserved = 0;
+		for (auto line : GetTargetLines()) {
+			if (line->Comment)
 				continue;
 
-			if (!overwrite && !readings[entry.first].empty()) {
-				++preserved;
-				continue;
-			}
+			int occurrence = 0;
+			for (auto const& term : collect_kanji_occurrences_from_text(line->Text.get())) {
+				++occurrence;
+				auto key = make_furigana_occurrence_key(line->Row + 1, occurrence, term);
+				auto auto_it = auto_readings.find(key);
+				if (auto_it == auto_readings.end())
+					auto_it = auto_readings.find(term);
+				if (auto_it == auto_readings.end() || auto_it->second.empty())
+					continue;
 
-			if (readings[entry.first] != reading) {
-				readings[entry.first] = reading;
-				++filled;
+				if (!overwrite && !readings[key].empty()) {
+					++preserved;
+					continue;
+				}
+
+				if (readings[key] != auto_it->second) {
+					readings[key] = auto_it->second;
+					++filled;
+				}
 			}
 		}
 
 		wxString text;
-		std::set<std::string> displayed;
-		for (auto const& term : terms) {
-			displayed.insert(term);
-			text += to_wx(term);
-			text += "=";
-			auto it = readings.find(term);
-			if (it != readings.end())
-				text += to_wx(convert_kana(it->second, katakana));
-			text += "\n";
-		}
-		for (auto const& [term, reading] : readings) {
-			if (!reading.empty() && has_kanji(term) && !displayed.count(term)) {
-				text += to_wx(term);
+		for (auto line : GetTargetLines()) {
+			if (line->Comment)
+				continue;
+
+			int occurrence = 0;
+			for (auto const& term : collect_kanji_occurrences_from_text(line->Text.get())) {
+				++occurrence;
+				auto key = make_furigana_occurrence_key(line->Row + 1, occurrence, term);
+				text += to_wx(make_furigana_occurrence_label(line->Row + 1, occurrence, term));
 				text += "=";
-				text += to_wx(convert_kana(reading, katakana));
+				auto it = readings.find(key);
+				if (it != readings.end())
+					text += to_wx(convert_kana(it->second, katakana));
+				else if (auto global = readings.find(term); global != readings.end())
+					text += to_wx(convert_kana(global->second, katakana));
 				text += "\n";
 			}
+		}
+		for (auto const& [term, reading] : readings) {
+			if (term.starts_with("@") || reading.empty() || !has_kanji(term))
+				continue;
+
+			text += to_wx(term);
+			text += "=";
+			text += to_wx(convert_kana(reading, katakana));
+			text += "\n";
 		}
 		readings_text->SetValue(text);
 		SaveReadings(readings);
@@ -1857,7 +2010,7 @@ void DialogFuriganaAnnotator::Process(wxCommandEvent&) {
 		auto format = make_furigana_format(style, size_percent->GetValue(), outline_percent->GetValue(), shadow_percent->GetValue());
 		double wrap_units = furigana_auto_wrap_units(*line, style, *context->ass, format);
 		int wrap_style = context->ass->GetScriptInfoAsInt("WrapStyle");
-		auto annotated_text = compose_furigana_text(base_text, readings, format, above, has_reading, wrap_units, wrap_style);
+		auto annotated_text = compose_furigana_text(base_text, readings, format, above, has_reading, wrap_units, wrap_style, line->Row + 1);
 		if (has_reading) {
 			new_text = annotated_text;
 			++annotated_lines;
