@@ -97,8 +97,12 @@ class SoundTouchTempoStream {
 
 		auto frames = (size_t)std::min<int64_t>(4096, end_frame - input_frame);
 		auto sample_count = frames * channels();
-		source_buffer.resize(sample_count);
-		process_buffer.resize(sample_count);
+
+		// Ensure buffers are large enough (pre-allocated in constructor, but grow if needed)
+		if (source_buffer.size() < sample_count)
+			source_buffer.resize(sample_count);
+		if (process_buffer.size() < sample_count)
+			process_buffer.resize(sample_count);
 
 		provider->GetAudioWithVolume(source_buffer.data(), input_frame, frames, volume);
 		input_frame += frames;
@@ -115,6 +119,11 @@ public:
 	{
 		processor.setSampleRate(provider->GetSampleRate());
 		processor.setChannels(provider->GetChannels());
+
+		// Pre-allocate buffers to avoid reallocation in audio hot path
+		source_buffer.resize(4096 * provider->GetChannels());
+		process_buffer.resize(4096 * provider->GetChannels());
+		output_buffer.resize(8192 * provider->GetChannels());
 	}
 
 	void Reset(int64_t start, int64_t end, double speed, double new_volume) {
