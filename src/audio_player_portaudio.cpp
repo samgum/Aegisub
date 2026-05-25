@@ -90,9 +90,15 @@ static size_t CalculateOptimalBufferSize(agi::AudioProvider *provider) {
     // Adjust buffer size based on quality
     size_t adjusted_frames = static_cast<size_t>(base_frames * quality_factor);
 
-    // Ensure min/max limits
-    adjusted_frames = std::max(adjusted_frames, size_t(100));   // Minimum buffer
-    adjusted_frames = std::min(adjusted_frames, size_t(8192));  // Maximum buffer
+    // Additional buffer for immersive audio formats (Atmos, DTS:X, etc.)
+    if (channels > 8) {
+        adjusted_frames = static_cast<size_t>(adjusted_frames * 1.5); // 50% more for immersive
+        LOG_D("audio/player/portaudio") << "Immersive audio detected: " << channels << " channels, increasing buffer size";
+    }
+
+    // Ensure min/max limits (extended for immersive audio)
+    adjusted_frames = std::max(adjusted_frames, size_t(100));    // Minimum buffer
+    adjusted_frames = std::min(adjusted_frames, size_t(16384));  // Maximum buffer (increased for immersive)
 
     // Calculate bytes
     size_t buffer_bytes = adjusted_frames * channels * bytes_per_sample;
@@ -108,6 +114,25 @@ static bool IsHighQualityAudio(agi::AudioProvider *provider) {
     const int bytes_per_sample = provider->GetBytesPerSample();
 
     return (sample_rate >= 48000) || (bytes_per_sample > 2);
+}
+
+// Detect immersive audio configurations (Atmos, DTS:X, Auro, etc.)
+static const char* DetectImmersiveConfig(int channels) {
+    switch (channels) {
+        case 8:  return "5.1.2";  // 5.1 bed + 2 height
+        case 10: return "5.1.4/7.1.2";  // Could be either configuration
+        case 12: return "7.1.4/Auro 11.1";  // Atmos or Auro
+        case 14: return "Auro 13.1";  // Auro max
+        case 16: return "9.1.6";  // High-end immersive
+        default: return nullptr;
+    }
+}
+
+// Check if audio is immersive/object-based format
+static bool IsImmersiveAudio(agi::AudioProvider *provider) {
+    if (!provider) return false;
+    const int channels = provider->GetChannels();
+    return channels > 8 || DetectImmersiveConfig(channels) != nullptr;
 }
 
 PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(provider) {
@@ -271,10 +296,16 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 		const int channels = provider->GetChannels();
 		const int bytes_per_sample = provider->GetBytesPerSample();
 		const bool is_hq = IsHighQualityAudio(provider);
+		const bool is_immersive = IsImmersiveAudio(provider);
+		const char* immersive_config = DetectImmersiveConfig(channels);
 
 		// Determine likely format based on characteristics
 		const char* likely_format = "unknown";
-		if (sample_rate == 44100 && bytes_per_sample == 2 && channels == 2)
+		if (is_immersive && immersive_config)
+			likely_format = immersive_config;
+		else if (channels > 8)
+			likely_format = "Object-based/Immersive";
+		else if (sample_rate == 44100 && bytes_per_sample == 2 && channels == 2)
 			likely_format = "MP3/AAC standard";
 		else if (sample_rate >= 48000 && bytes_per_sample >= 3)
 			likely_format = "FLAC/ALAC/High-res";
@@ -289,6 +320,7 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 			<< " bytes_per_sample=" << bytes_per_sample
 			<< " likely_format=" << likely_format
 			<< " high_quality=" << (is_hq ? "yes" : "no")
+			<< " immersive=" << (is_immersive ? "yes" : "no")
 			<< " buffer_size=" << CalculateOptimalBufferSize(provider) << "bytes";
 	}
 
