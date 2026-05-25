@@ -34,6 +34,8 @@ class CoreAudioPlayer final : public AudioPlayer {
 	static constexpr UInt32 output_channels = 2;
 	static constexpr UInt32 buffer_count = 4;
 	static constexpr double buffer_seconds = 0.08;
+	static constexpr float preview_headroom = 0.72f;
+	static constexpr float peak_ceiling = 0.90f;
 
 	AudioQueueRef queue = nullptr;
 	AudioQueueBufferRef buffers[buffer_count]{};
@@ -63,8 +65,21 @@ class CoreAudioPlayer final : public AudioPlayer {
 		static_cast<CoreAudioPlayer *>(user_data)->OnBuffer(buffer);
 	}
 
-	static float ClampFloat(float value) {
-		return std::max(-1.0f, std::min(1.0f, value));
+	static float ClampFloat(float value, float limit = 1.0f) {
+		return std::max(-limit, std::min(limit, value));
+	}
+
+	void ApplyPeakLimiter(float *out, UInt32 frames) {
+		float peak = 0.0f;
+		for (UInt32 i = 0; i < frames * output_channels; ++i)
+			peak = std::max(peak, std::abs(out[i]));
+
+		if (peak <= peak_ceiling)
+			return;
+
+		float scale = peak_ceiling / peak;
+		for (UInt32 i = 0; i < frames * output_channels; ++i)
+			out[i] = ClampFloat(out[i] * scale, peak_ceiling);
 	}
 
 	float MixFrameToFloat(std::vector<int16_t> const& samples, size_t frame, int channels, float gain) const {
@@ -72,7 +87,7 @@ class CoreAudioPlayer final : public AudioPlayer {
 		size_t base = frame * channels;
 		for (int ch = 0; ch < channels; ++ch)
 			sum += samples[base + ch];
-		return ClampFloat((float)sum * gain / (32768.0f * (float)channels));
+		return (float)sum * gain / (32768.0f * (float)channels);
 	}
 
 	void WriteStereo(float *out, UInt32 frame, float sample) {
@@ -86,7 +101,7 @@ class CoreAudioPlayer final : public AudioPlayer {
 
 	bool FillNormalSpeed(float *out, UInt32 frames) {
 		int64_t available = std::min<int64_t>(frames, end_frame - current_frame);
-		float gain = static_cast<float>(std::clamp(volume.load(), 0.0, 2.0) * 0.98);
+		float gain = static_cast<float>(std::clamp(volume.load(), 0.0, 1.0) * preview_headroom);
 
 		if (available > 0) {
 			size_t needed = (size_t)available * source_channels;
@@ -102,12 +117,13 @@ class CoreAudioPlayer final : public AudioPlayer {
 			FillSilence(out, (UInt32)available, frames - (UInt32)available);
 			draining = true;
 		}
+		ApplyPeakLimiter(out, frames);
 		return available > 0 || draining;
 	}
 
 	bool FillNearestSpeed(float *out, UInt32 frames) {
 		int64_t source_frames = std::min<int64_t>(end_frame - current_frame, (int64_t)(frames * playback_speed) + 2);
-		float gain = static_cast<float>(std::clamp(volume.load(), 0.0, 2.0) * 0.98);
+		float gain = static_cast<float>(std::clamp(volume.load(), 0.0, 1.0) * preview_headroom);
 
 		if (source_frames <= 0) {
 			FillSilence(out, 0, frames);
@@ -138,6 +154,7 @@ class CoreAudioPlayer final : public AudioPlayer {
 		int64_t consumed = std::min<int64_t>((int64_t)source_position, source_frames);
 		current_frame += consumed;
 		speed_position = source_position - consumed;
+		ApplyPeakLimiter(out, frames);
 		return true;
 	}
 
@@ -150,13 +167,14 @@ class CoreAudioPlayer final : public AudioPlayer {
 		if (tempo_buffer.size() < needed)
 			tempo_buffer.resize(needed);
 		tempo_processor->Fill(tempo_buffer.data(), frames);
-		float gain = 0.98f;
+		float gain = preview_headroom;
 		for (UInt32 i = 0; i < frames; ++i)
 			WriteStereo(out, i, MixFrameToFloat(tempo_buffer, i, source_channels, gain));
 
 		current_frame = tempo_processor->GetInputFrame();
 		if (tempo_processor->IsFinished())
 			draining = true;
+		ApplyPeakLimiter(out, frames);
 		return true;
 	}
 #endif
