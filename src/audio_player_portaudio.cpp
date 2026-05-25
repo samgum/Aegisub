@@ -70,6 +70,46 @@ static const PaHostApiTypeId pa_host_api_priority[] = {
 };
 static const size_t pa_host_api_priority_count = sizeof(pa_host_api_priority) / sizeof(pa_host_api_priority[0]);
 
+// Calculate optimal buffer size based on audio quality for different formats
+static size_t CalculateOptimalBufferSize(agi::AudioProvider *provider) {
+    if (!provider) return 0;
+
+    const int sample_rate = provider->GetSampleRate();
+    const int channels = provider->GetChannels();
+    const int bytes_per_sample = provider->GetBytesPerSample();
+
+    // Base buffer: supports 4x playback speed
+    const size_t base_frames = (sample_rate * 4) / 256 + 4;
+
+    // Quality adjustment factors for different audio formats
+    double rate_factor = sample_rate / 44100.0;    // CD quality baseline
+    double depth_factor = bytes_per_sample / 2.0;  // 16-bit baseline
+    double channel_factor = channels / 2.0;        // Stereo baseline
+    double quality_factor = rate_factor * depth_factor * channel_factor;
+
+    // Adjust buffer size based on quality
+    size_t adjusted_frames = static_cast<size_t>(base_frames * quality_factor);
+
+    // Ensure min/max limits
+    adjusted_frames = std::max(adjusted_frames, size_t(100));   // Minimum buffer
+    adjusted_frames = std::min(adjusted_frames, size_t(8192));  // Maximum buffer
+
+    // Calculate bytes
+    size_t buffer_bytes = adjusted_frames * channels * bytes_per_sample;
+
+    return buffer_bytes;
+}
+
+// Detect if audio is high quality (FLAC, ALAC, high-bitrate, etc.)
+static bool IsHighQualityAudio(agi::AudioProvider *provider) {
+    if (!provider) return false;
+
+    const int sample_rate = provider->GetSampleRate();
+    const int bytes_per_sample = provider->GetBytesPerSample();
+
+    return (sample_rate >= 48000) || (bytes_per_sample > 2);
+}
+
 PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(provider) {
 	PaError err = Pa_Initialize();
 
@@ -101,20 +141,31 @@ PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(pro
 		// SoundTouch init failed, fall back to nearest-neighbor resampling
 		// Pre-allocate speed_buffer to avoid reallocation in audio callback
 		if (provider) {
-			// For high-quality audio (FLAC, 48kHz, etc.), use larger buffer
-			size_t max_frames = (provider->GetSampleRate() * 4) / 256 + 4;
-			size_t max_bytes = max_frames * provider->GetChannels() * provider->GetBytesPerSample();
+			// Use intelligent buffer sizing for different audio formats (WAV, FLAC, ALAC, etc.)
+			size_t max_bytes = CalculateOptimalBufferSize(provider);
 			speed_buffer.reserve(max_bytes);
-			LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes for high-quality audio";
+
+			const bool is_hq = IsHighQualityAudio(provider);
+			LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes"
+				<< " (format: " << provider->GetSampleRate() << "Hz"
+				<< ", " << provider->GetChannels() << "ch"
+				<< ", " << provider->GetBytesPerSample() << "bytes/sample"
+				<< ", high_quality: " << (is_hq ? "yes" : "no") << ")";
 		}
 	}
 #else
 	// Pre-allocate speed_buffer to avoid reallocation in audio callback
 	if (provider) {
-		size_t max_frames = (provider->GetSampleRate() * 4) / 256 + 4;
-		size_t max_bytes = max_frames * provider->GetChannels() * provider->GetBytesPerSample();
+		// Use intelligent buffer sizing for different audio formats (WAV, FLAC, ALAC, etc.)
+		size_t max_bytes = CalculateOptimalBufferSize(provider);
 		speed_buffer.reserve(max_bytes);
-		LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes for high-quality audio";
+
+		const bool is_hq = IsHighQualityAudio(provider);
+		LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes"
+			<< " (format: " << provider->GetSampleRate() << "Hz"
+			<< ", " << provider->GetChannels() << "ch"
+			<< ", " << provider->GetBytesPerSample() << "bytes/sample"
+			<< ", high_quality: " << (is_hq ? "yes" : "no") << ")";
 	}
 #endif
 }
@@ -214,18 +265,31 @@ void PortAudioPlayer::paStreamFinishedCallback(void *) {
 }
 
 void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
-	// Detect audio quality for enhanced buffering
+	// Enhanced audio format detection for different codecs (WAV, FLAC, ALAC, AAC, etc.)
 	if (provider) {
 		const int sample_rate = provider->GetSampleRate();
+		const int channels = provider->GetChannels();
 		const int bytes_per_sample = provider->GetBytesPerSample();
-		const bool is_high_quality = (sample_rate >= 48000) || (bytes_per_sample > 2);
-		LOG_D("audio/player/portaudio") << "Audio quality detected:"
-			<< " sample_rate=" << sample_rate
-			<< " channels=" << provider->GetChannels()
+		const bool is_hq = IsHighQualityAudio(provider);
+
+		// Determine likely format based on characteristics
+		const char* likely_format = "unknown";
+		if (sample_rate == 44100 && bytes_per_sample == 2 && channels == 2)
+			likely_format = "MP3/AAC standard";
+		else if (sample_rate >= 48000 && bytes_per_sample >= 3)
+			likely_format = "FLAC/ALAC/High-res";
+		else if (bytes_per_sample == 4)
+			likely_format = "32-bit float/High-res";
+		else if (sample_rate == 48000 && bytes_per_sample == 2)
+			likely_format = "Video standard";
+
+		LOG_D("audio/player/portaudio") << "Audio format detected:"
+			<< " sample_rate=" << sample_rate << "Hz"
+			<< " channels=" << channels
 			<< " bytes_per_sample=" << bytes_per_sample
-			<< " is_high_quality=" << is_high_quality
-			<< " start_sample=" << start_sample
-			<< " count=" << count;
+			<< " likely_format=" << likely_format
+			<< " high_quality=" << (is_hq ? "yes" : "no")
+			<< " buffer_size=" << CalculateOptimalBufferSize(provider) << "bytes";
 	}
 
 	current = start_sample;
