@@ -96,6 +96,15 @@ static size_t CalculateOptimalBufferSize(agi::AudioProvider *provider) {
         LOG_D("audio/player/portaudio") << "Immersive audio detected: " << channels << " channels, increasing buffer size";
     }
 
+    // Additional optimization for Hi-Res audio (96kHz+, 24-bit+)
+    const bool is_hires = (sample_rate >= 96000) || (bytes_per_sample >= 3);
+    if (is_hires) {
+        // Hi-Res audio needs more consistent buffering to maintain quality
+        adjusted_frames = static_cast<size_t>(adjusted_frames * 1.2); // 20% more for Hi-Res
+        LOG_D("audio/player/portaudio") << "Hi-Res audio detected: " << sample_rate << "Hz/"
+            << (bytes_per_sample * 8) << "bit, optimizing buffer size";
+    }
+
     // Ensure min/max limits (extended for immersive audio)
     adjusted_frames = std::max(adjusted_frames, size_t(100));    // Minimum buffer
     adjusted_frames = std::min(adjusted_frames, size_t(16384));  // Maximum buffer (increased for immersive)
@@ -133,6 +142,32 @@ static bool IsImmersiveAudio(agi::AudioProvider *provider) {
     if (!provider) return false;
     const int channels = provider->GetChannels();
     return channels > 8 || DetectImmersiveConfig(channels) != nullptr;
+}
+
+// Detect high-resolution audio (96kHz+, 24-bit+)
+static bool IsHiResAudio(agi::AudioProvider *provider) {
+    if (!provider) return false;
+
+    const int sample_rate = provider->GetSampleRate();
+    const int bytes_per_sample = provider->GetBytesPerSample();
+
+    // Hi-Res Audio: typically 96kHz+ and/or 24-bit+
+    return (sample_rate >= 96000) || (bytes_per_sample >= 3);
+}
+
+// Get Hi-Res audio quality level
+static const char* GetHiResQualityLevel(agi::AudioProvider *provider) {
+    if (!provider) return "Standard";
+
+    const int sample_rate = provider->GetSampleRate();
+    const int bytes_per_sample = provider->GetBytesPerSample();
+
+    if (sample_rate >= 192000) return "Ultra Hi-Res (192kHz+)";
+    if (sample_rate >= 96000 && bytes_per_sample >= 3) return "Hi-Res (96kHz/24bit+)";
+    if (sample_rate >= 96000) return "Hi-Res (96kHz+)";
+    if (sample_rate >= 48000 && bytes_per_sample >= 3) return "High Quality (48kHz/24bit+)";
+    if (bytes_per_sample >= 4) return "Professional (32-bit)";
+    return "Standard";
 }
 
 PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(provider) {
@@ -297,20 +332,26 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 		const int bytes_per_sample = provider->GetBytesPerSample();
 		const bool is_hq = IsHighQualityAudio(provider);
 		const bool is_immersive = IsImmersiveAudio(provider);
+		const bool is_hires = IsHiResAudio(provider);
 		const char* immersive_config = DetectImmersiveConfig(channels);
+		const char* hires_level = GetHiResQualityLevel(provider);
 
 		// Determine likely format based on characteristics
 		const char* likely_format = "unknown";
 		if (is_immersive && immersive_config)
 			likely_format = immersive_config;
+		else if (is_hires && sample_rate >= 192000)
+			likely_format = "Ultra Hi-Res (192kHz+)";
+		else if (is_hires && sample_rate >= 96000)
+			likely_format = "Hi-Res (96kHz/24bit+)";
 		else if (channels > 8)
 			likely_format = "Object-based/Immersive";
+		else if (sample_rate >= 48000 && bytes_per_sample >= 3)
+			likely_format = "High Quality (48kHz/24bit+)";
+		else if (bytes_per_sample == 4)
+			likely_format = "Professional (32-bit)";
 		else if (sample_rate == 44100 && bytes_per_sample == 2 && channels == 2)
 			likely_format = "MP3/AAC standard";
-		else if (sample_rate >= 48000 && bytes_per_sample >= 3)
-			likely_format = "FLAC/ALAC/High-res";
-		else if (bytes_per_sample == 4)
-			likely_format = "32-bit float/High-res";
 		else if (sample_rate == 48000 && bytes_per_sample == 2)
 			likely_format = "Video standard";
 
@@ -319,7 +360,9 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 			<< " channels=" << channels
 			<< " bytes_per_sample=" << bytes_per_sample
 			<< " likely_format=" << likely_format
+			<< " hires_level=" << hires_level
 			<< " high_quality=" << (is_hq ? "yes" : "no")
+			<< " hires=" << (is_hires ? "yes" : "no")
 			<< " immersive=" << (is_immersive ? "yes" : "no")
 			<< " buffer_size=" << CalculateOptimalBufferSize(provider) << "bytes";
 	}
