@@ -226,7 +226,7 @@ public:
 	{
 		format.mSampleRate = provider->GetSampleRate();
 		format.mFormatID = kAudioFormatLinearPCM;
-		format.mFormatFlags = kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked;
+		format.mFormatFlags = kAudioFormatFlagsNativeFloatPacked;
 		format.mBytesPerPacket = output_channels * sizeof(float);
 		format.mFramesPerPacket = 1;
 		format.mBytesPerFrame = output_channels * sizeof(float);
@@ -288,14 +288,26 @@ public:
 			if (!filled)
 				break;
 			buffer->mAudioDataByteSize = bytes_per_buffer;
-			AudioQueueEnqueueBuffer(queue, buffer, 0, nullptr);
+			auto enqueue_err = AudioQueueEnqueueBuffer(queue, buffer, 0, nullptr);
+			if (enqueue_err != noErr) {
+				LOG_E("audio/player/coreaudio") << "CoreAudio: failed to enqueue buffer: " << enqueue_err;
+				playing.store(false);
+				break;
+			}
 			if (draining)
 				break;
 		}
 
+		UInt32 prime_frames = 0;
+		auto prime_err = AudioQueuePrime(queue, 0, &prime_frames);
+		if (prime_err != noErr)
+			LOG_D("audio/player/coreaudio") << "CoreAudio: AudioQueuePrime failed: " << prime_err;
+
 		auto err = AudioQueueStart(queue, nullptr);
-		if (err != noErr)
+		if (err != noErr) {
+			LOG_E("audio/player/coreaudio") << "CoreAudio: failed to start queue: " << err;
 			playing.store(false);
+		}
 	}
 
 	void Stop() override {

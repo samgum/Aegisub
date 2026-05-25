@@ -68,7 +68,7 @@ def test_macos_coreaudio_backend_is_native_float_stereo_default():
     assert "CreateCoreAudioPlayer" in audio_player
     assert '{"CoreAudio", CreateCoreAudioPlayer, false}' in audio_player
     assert "AudioQueueNewOutput" in coreaudio
-    assert "kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked" in coreaudio
+    assert "kAudioFormatFlagsNativeFloatPacked" in coreaudio
     assert "static constexpr UInt32 output_channels = 2" in coreaudio
     assert "preview_headroom = 0.72f" in coreaudio
     assert "peak_ceiling = 0.90f" in coreaudio
@@ -77,6 +77,9 @@ def test_macos_coreaudio_backend_is_native_float_stereo_default():
     assert "peak_ceiling / peak" in coreaudio
     assert "std::clamp(volume.load(), 0.0, 1.0) * preview_headroom" in coreaudio
     assert "provider->GetAudio(source_buffer.data()" in coreaudio
+    assert "AudioQueuePrime" in coreaudio
+    assert "failed to enqueue buffer" in coreaudio
+    assert "failed to start queue" in coreaudio
 
 
 def main():
