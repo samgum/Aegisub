@@ -39,6 +39,7 @@
 std::unique_ptr<AudioPlayer> CreateAlsaPlayer(agi::AudioProvider *providers, wxWindow *window);
 std::unique_ptr<AudioPlayer> CreateDirectSoundPlayer(agi::AudioProvider *providers, wxWindow *window);
 std::unique_ptr<AudioPlayer> CreateDirectSound2Player(agi::AudioProvider *providers, wxWindow *window);
+std::unique_ptr<AudioPlayer> CreateCoreAudioPlayer(agi::AudioProvider *providers, wxWindow *window);
 std::unique_ptr<AudioPlayer> CreateOpenALPlayer(agi::AudioProvider *providers, wxWindow *window);
 std::unique_ptr<AudioPlayer> CreatePortAudioPlayer(agi::AudioProvider *providers, wxWindow *window);
 std::unique_ptr<AudioPlayer> CreatePulseAudioPlayer(agi::AudioProvider *providers, wxWindow *window);
@@ -58,6 +59,9 @@ namespace {
 #ifdef WITH_DIRECTSOUND
 		{"DirectSound-old", CreateDirectSoundPlayer, false},
 		{"DirectSound", CreateDirectSound2Player, false},
+#endif
+#ifdef WITH_COREAUDIO
+		{"CoreAudio", CreateCoreAudioPlayer, false},
 #endif
 #ifdef WITH_OPENAL
 		{"OpenAL", CreateOpenALPlayer, false},

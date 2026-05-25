@@ -7,6 +7,10 @@ OPENAL = ROOT / "src" / "audio_player_openal.cpp"
 PORTAUDIO = ROOT / "src" / "audio_player_portaudio.cpp"
 PORTAUDIO_H = ROOT / "src" / "audio_player_portaudio.h"
 SOUNDTOUCH = ROOT / "src" / "audio_player_soundtouch.cpp"
+COREAUDIO = ROOT / "src" / "audio_player_coreaudio.cpp"
+AUDIO_PLAYER = ROOT / "src" / "audio_player.cpp"
+MESON = ROOT / "meson.build"
+SRC_MESON = ROOT / "src" / "meson.build"
 
 
 def test_openal_uses_provider_sample_format():
@@ -52,6 +56,25 @@ def test_volume_changes_reach_soundtouch_processors():
     assert "tempo_processor->SetVolume(vol);" in portaudio_h
 
 
+def test_macos_coreaudio_backend_is_native_float_stereo_default():
+    coreaudio = COREAUDIO.read_text(encoding="utf-8")
+    audio_player = AUDIO_PLAYER.read_text(encoding="utf-8")
+    meson = MESON.read_text(encoding="utf-8")
+    src_meson = SRC_MESON.read_text(encoding="utf-8")
+    assert "AudioToolbox" in meson
+    assert "WITH_COREAUDIO" in meson
+    assert "dep_avail = ['CoreAudio'] + dep_avail" in meson
+    assert "'audio_player_coreaudio.cpp'" in src_meson
+    assert "CreateCoreAudioPlayer" in audio_player
+    assert '{"CoreAudio", CreateCoreAudioPlayer, false}' in audio_player
+    assert "AudioQueueNewOutput" in coreaudio
+    assert "kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked" in coreaudio
+    assert "static constexpr UInt32 output_channels = 2" in coreaudio
+    assert "ClampFloat" in coreaudio
+    assert "std::clamp(volume.load(), 0.0, 2.0) * 0.98" in coreaudio
+    assert "provider->GetAudio(source_buffer.data()" in coreaudio
+
+
 def main():
     tests = [
         test_openal_uses_provider_sample_format,
@@ -59,6 +82,7 @@ def main():
         test_portaudio_uses_safer_macos_latency_and_no_dither,
         test_soundtouch_avoids_preclipping_and_output_clipping,
         test_volume_changes_reach_soundtouch_processors,
+        test_macos_coreaudio_backend_is_native_float_stereo_default,
     ]
     for test in tests:
         test()
