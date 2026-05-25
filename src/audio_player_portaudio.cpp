@@ -374,12 +374,8 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 	draining = false;
 
 #ifdef WITH_SOUNDTOUCH
-	// EMERGENCY FIX: Temporarily disable SoundTouch to test if it's causing crackling
-	// This will cause pitch changes during speed adjustment but eliminates crackling
-	if (tempo_processor) {
-		LOG_D("audio/player/portaudio") << "SoundTouch temporarily disabled for crackling testing";
-		tempo_processor.reset(); // Disable SoundTouch processor
-	}
+	if (tempo_processor)
+		tempo_processor->Reset(start_sample, start_sample + count, playback_speed, volume);
 #endif
 
 	// Start playing
@@ -579,12 +575,8 @@ void PortAudioPlayer::SetPlaybackSpeed(double speed) {
 	playback_speed = std::max(0.25, std::min(speed, 4.0));
 
 #ifdef WITH_SOUNDTOUCH
-	// EMERGENCY FIX: Disabled SoundTouch to eliminate crackling
-	// SoundTouch processor is released in Play(), so this branch won't execute
-	if (false && tempo_processor) {
+	if (tempo_processor)
 		tempo_processor->SetPlaybackSpeed(playback_speed);
-		LOG_D("audio/player/portaudio") << "SoundTouch SetPlaybackSpeed (currently disabled)";
-	}
 #endif
 }
 
