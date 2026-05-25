@@ -101,20 +101,20 @@ PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(pro
 		// SoundTouch init failed, fall back to nearest-neighbor resampling
 		// Pre-allocate speed_buffer to avoid reallocation in audio callback
 		if (provider) {
-			// Pre-allocate sufficient buffer size to support 4x playback speed
-			size_t max_frames = (provider->GetSampleRate() * 4) / 512 + 2;
+			// For high-quality audio (FLAC, 48kHz, etc.), use larger buffer
+			size_t max_frames = (provider->GetSampleRate() * 4) / 256 + 4;
 			size_t max_bytes = max_frames * provider->GetChannels() * provider->GetBytesPerSample();
 			speed_buffer.reserve(max_bytes);
-			LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes";
+			LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes for high-quality audio";
 		}
 	}
 #else
 	// Pre-allocate speed_buffer to avoid reallocation in audio callback
 	if (provider) {
-		size_t max_frames = (provider->GetSampleRate() * 4) / 512 + 2;
+		size_t max_frames = (provider->GetSampleRate() * 4) / 256 + 4;
 		size_t max_bytes = max_frames * provider->GetChannels() * provider->GetBytesPerSample();
 		speed_buffer.reserve(max_bytes);
-		LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes";
+		LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes for high-quality audio";
 	}
 #endif
 }
@@ -214,6 +214,20 @@ void PortAudioPlayer::paStreamFinishedCallback(void *) {
 }
 
 void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
+	// Detect audio quality for enhanced buffering
+	if (provider) {
+		const int sample_rate = provider->GetSampleRate();
+		const int bytes_per_sample = provider->GetBytesPerSample();
+		const bool is_high_quality = (sample_rate >= 48000) || (bytes_per_sample > 2);
+		LOG_D("audio/player/portaudio") << "Audio quality detected:"
+			<< " sample_rate=" << sample_rate
+			<< " channels=" << provider->GetChannels()
+			<< " bytes_per_sample=" << bytes_per_sample
+			<< " is_high_quality=" << is_high_quality
+			<< " start_sample=" << start_sample
+			<< " count=" << count;
+	}
+
 	current = start_sample;
 	start = start_sample;
 	end = start_sample + count;
@@ -316,13 +330,17 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 
 		// Use pre-allocated buffer when possible to avoid audio crackling
 		// Buffer was pre-allocated in constructor to support max playback speed
-		if (player->speed_buffer.capacity() < source_frames * bytes_per_frame) {
-			// Only reallocate if absolutely necessary (should rarely happen)
-			LOG_W("audio/player/portaudio") << "speed_buffer reallocation needed: "
-				<< source_frames * bytes_per_frame << " > " << player->speed_buffer.capacity();
-			player->speed_buffer.resize(source_frames * bytes_per_frame);
+		const size_t required_bytes = source_frames * bytes_per_frame;
+		if (player->speed_buffer.capacity() < required_bytes) {
+			// Emergency reallocation with detailed debugging
+			LOG_W("audio/player/portaudio") << "Buffer reallocation: needed=" << required_bytes
+				<< " available=" << player->speed_buffer.capacity()
+				<< " sample_rate=" << player->provider->GetSampleRate()
+				<< " speed=" << player->playback_speed;
+			player->speed_buffer.resize(required_bytes);
 		} else {
-			player->speed_buffer.resize(source_frames * bytes_per_frame);
+			// Use pre-allocated memory - this is the normal case
+			player->speed_buffer.resize(required_bytes);
 		}
 		player->provider->GetAudioWithVolume(player->speed_buffer.data(), player->current, source_frames, player->GetVolume());
 
