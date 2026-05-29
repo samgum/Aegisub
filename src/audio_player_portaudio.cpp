@@ -70,106 +70,6 @@ static const PaHostApiTypeId pa_host_api_priority[] = {
 };
 static const size_t pa_host_api_priority_count = sizeof(pa_host_api_priority) / sizeof(pa_host_api_priority[0]);
 
-// Calculate optimal buffer size based on audio quality for different formats
-static size_t CalculateOptimalBufferSize(agi::AudioProvider *provider) {
-    if (!provider) return 0;
-
-    const int sample_rate = provider->GetSampleRate();
-    const int channels = provider->GetChannels();
-    const int bytes_per_sample = provider->GetBytesPerSample();
-
-    // Base buffer: supports 4x playback speed
-    const size_t base_frames = (sample_rate * 4) / 256 + 4;
-
-    // Quality adjustment factors for different audio formats
-    double rate_factor = sample_rate / 44100.0;    // CD quality baseline
-    double depth_factor = bytes_per_sample / 2.0;  // 16-bit baseline
-    double channel_factor = channels / 2.0;        // Stereo baseline
-    double quality_factor = rate_factor * depth_factor * channel_factor;
-
-    // Adjust buffer size based on quality
-    size_t adjusted_frames = static_cast<size_t>(base_frames * quality_factor);
-
-    // Additional buffer for immersive audio formats (Atmos, DTS:X, etc.)
-    if (channels > 8) {
-        adjusted_frames = static_cast<size_t>(adjusted_frames * 1.5); // 50% more for immersive
-        LOG_D("audio/player/portaudio") << "Immersive audio detected: " << channels << " channels, increasing buffer size";
-    }
-
-    // Additional optimization for Hi-Res audio (96kHz+, 24-bit+)
-    const bool is_hires = (sample_rate >= 96000) || (bytes_per_sample >= 3);
-    if (is_hires) {
-        // Hi-Res audio needs more consistent buffering to maintain quality
-        adjusted_frames = static_cast<size_t>(adjusted_frames * 1.2); // 20% more for Hi-Res
-        LOG_D("audio/player/portaudio") << "Hi-Res audio detected: " << sample_rate << "Hz/"
-            << (bytes_per_sample * 8) << "bit, optimizing buffer size";
-    }
-
-    // Ensure min/max limits (extended for immersive audio)
-    adjusted_frames = std::max(adjusted_frames, size_t(100));    // Minimum buffer
-    adjusted_frames = std::min(adjusted_frames, size_t(16384));  // Maximum buffer (increased for immersive)
-
-    // Calculate bytes
-    size_t buffer_bytes = adjusted_frames * channels * bytes_per_sample;
-
-    return buffer_bytes;
-}
-
-// Detect if audio is high quality (FLAC, ALAC, high-bitrate, etc.)
-static bool IsHighQualityAudio(agi::AudioProvider *provider) {
-    if (!provider) return false;
-
-    const int sample_rate = provider->GetSampleRate();
-    const int bytes_per_sample = provider->GetBytesPerSample();
-
-    return (sample_rate >= 48000) || (bytes_per_sample > 2);
-}
-
-// Detect immersive audio configurations (Atmos, DTS:X, Auro, etc.)
-static const char* DetectImmersiveConfig(int channels) {
-    switch (channels) {
-        case 8:  return "5.1.2";  // 5.1 bed + 2 height
-        case 10: return "5.1.4/7.1.2";  // Could be either configuration
-        case 12: return "7.1.4/Auro 11.1";  // Atmos or Auro
-        case 14: return "Auro 13.1";  // Auro max
-        case 16: return "9.1.6";  // High-end immersive
-        default: return nullptr;
-    }
-}
-
-// Check if audio is immersive/object-based format
-static bool IsImmersiveAudio(agi::AudioProvider *provider) {
-    if (!provider) return false;
-    const int channels = provider->GetChannels();
-    return channels > 8 || DetectImmersiveConfig(channels) != nullptr;
-}
-
-// Detect high-resolution audio (96kHz+, 24-bit+)
-static bool IsHiResAudio(agi::AudioProvider *provider) {
-    if (!provider) return false;
-
-    const int sample_rate = provider->GetSampleRate();
-    const int bytes_per_sample = provider->GetBytesPerSample();
-
-    // Hi-Res Audio: typically 96kHz+ and/or 24-bit+
-    return (sample_rate >= 96000) || (bytes_per_sample >= 3);
-}
-
-// Get Hi-Res audio quality level
-static const char* GetHiResQualityLevel(agi::AudioProvider *provider) {
-    if (!provider) return "Standard";
-
-    const int sample_rate = provider->GetSampleRate();
-    const int bytes_per_sample = provider->GetBytesPerSample();
-
-    if (sample_rate >= 192000) return "Ultra Hi-Res (192kHz+)";
-    if (sample_rate >= 96000 && bytes_per_sample >= 3) return "Hi-Res (96kHz/24bit+)";
-    if (sample_rate >= 96000) return "Hi-Res (96kHz+)";
-    if (sample_rate >= 48000 && bytes_per_sample >= 3) return "High Quality (48kHz/24bit+)";
-    if (bytes_per_sample >= 4) return "Professional (32-bit)";
-    return "Standard";
-}
-
 PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(provider) {
 	PaError err = Pa_Initialize();
 
@@ -199,33 +99,6 @@ PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(pro
 	}
 	catch (...) {
 		// SoundTouch init failed, fall back to nearest-neighbor resampling
-		// Pre-allocate speed_buffer to avoid reallocation in audio callback
-		if (provider) {
-			// Use intelligent buffer sizing for different audio formats (WAV, FLAC, ALAC, etc.)
-			size_t max_bytes = CalculateOptimalBufferSize(provider);
-			speed_buffer.reserve(max_bytes);
-
-			const bool is_hq = IsHighQualityAudio(provider);
-			LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes"
-				<< " (format: " << provider->GetSampleRate() << "Hz"
-				<< ", " << provider->GetChannels() << "ch"
-				<< ", " << provider->GetBytesPerSample() << "bytes/sample"
-				<< ", high_quality: " << (is_hq ? "yes" : "no") << ")";
-		}
-	}
-#else
-	// Pre-allocate speed_buffer to avoid reallocation in audio callback
-	if (provider) {
-		// Use intelligent buffer sizing for different audio formats (WAV, FLAC, ALAC, etc.)
-		size_t max_bytes = CalculateOptimalBufferSize(provider);
-		speed_buffer.reserve(max_bytes);
-
-		const bool is_hq = IsHighQualityAudio(provider);
-		LOG_D("audio/player/portaudio") << "Pre-allocated speed_buffer: " << max_bytes << " bytes"
-			<< " (format: " << provider->GetSampleRate() << "Hz"
-			<< ", " << provider->GetChannels() << "ch"
-			<< ", " << provider->GetBytesPerSample() << "bytes/sample"
-			<< ", high_quality: " << (is_hq ? "yes" : "no") << ")";
 	}
 #endif
 }
@@ -325,48 +198,6 @@ void PortAudioPlayer::paStreamFinishedCallback(void *) {
 }
 
 void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
-	// Enhanced audio format detection for different codecs (WAV, FLAC, ALAC, AAC, etc.)
-	if (provider) {
-		const int sample_rate = provider->GetSampleRate();
-		const int channels = provider->GetChannels();
-		const int bytes_per_sample = provider->GetBytesPerSample();
-		const bool is_hq = IsHighQualityAudio(provider);
-		const bool is_immersive = IsImmersiveAudio(provider);
-		const bool is_hires = IsHiResAudio(provider);
-		const char* immersive_config = DetectImmersiveConfig(channels);
-		const char* hires_level = GetHiResQualityLevel(provider);
-
-		// Determine likely format based on characteristics
-		const char* likely_format = "unknown";
-		if (is_immersive && immersive_config)
-			likely_format = immersive_config;
-		else if (is_hires && sample_rate >= 192000)
-			likely_format = "Ultra Hi-Res (192kHz+)";
-		else if (is_hires && sample_rate >= 96000)
-			likely_format = "Hi-Res (96kHz/24bit+)";
-		else if (channels > 8)
-			likely_format = "Object-based/Immersive";
-		else if (sample_rate >= 48000 && bytes_per_sample >= 3)
-			likely_format = "High Quality (48kHz/24bit+)";
-		else if (bytes_per_sample == 4)
-			likely_format = "Professional (32-bit)";
-		else if (sample_rate == 44100 && bytes_per_sample == 2 && channels == 2)
-			likely_format = "MP3/AAC standard";
-		else if (sample_rate == 48000 && bytes_per_sample == 2)
-			likely_format = "Video standard";
-
-		LOG_D("audio/player/portaudio") << "Audio format detected:"
-			<< " sample_rate=" << sample_rate << "Hz"
-			<< " channels=" << channels
-			<< " bytes_per_sample=" << bytes_per_sample
-			<< " likely_format=" << likely_format
-			<< " hires_level=" << hires_level
-			<< " high_quality=" << (is_hq ? "yes" : "no")
-			<< " hires=" << (is_hires ? "yes" : "no")
-			<< " immersive=" << (is_immersive ? "yes" : "no")
-			<< " buffer_size=" << CalculateOptimalBufferSize(provider) << "bytes";
-	}
-
 	current = start_sample;
 	start = start_sample;
 	end = start_sample + count;
@@ -467,20 +298,7 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 			return paContinue;
 		}
 
-		// Use pre-allocated buffer when possible to avoid audio crackling
-		// Buffer was pre-allocated in constructor to support max playback speed
-		const size_t required_bytes = source_frames * bytes_per_frame;
-		if (player->speed_buffer.capacity() < required_bytes) {
-			// Emergency reallocation with detailed debugging
-			LOG_W("audio/player/portaudio") << "Buffer reallocation: needed=" << required_bytes
-				<< " available=" << player->speed_buffer.capacity()
-				<< " sample_rate=" << player->provider->GetSampleRate()
-				<< " speed=" << player->playback_speed;
-			player->speed_buffer.resize(required_bytes);
-		} else {
-			// Use pre-allocated memory - this is the normal case
-			player->speed_buffer.resize(required_bytes);
-		}
+		player->speed_buffer.resize(source_frames * bytes_per_frame);
 		player->provider->GetAudioWithVolume(player->speed_buffer.data(), player->current, source_frames, player->GetVolume());
 
 		auto out = static_cast<char *>(outputBuffer);

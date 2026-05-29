@@ -286,14 +286,10 @@ void OpenALPlayer::FillBuffers(ALsizei count)
 	InitContext();
 	// Do the actual filling/queueing
 	for (count = mid(1, count, buffers_free); count > 0; --count) {
-		ALsizei actual_buffer_size = 0; // Track actual audio data size
-
 #ifdef WITH_SOUNDTOUCH
 		if (tempo_processor) {
-			actual_buffer_size = tempo_processor->Fill(&decode_buffer[0], decode_buffer.size() / bpf);
+			tempo_processor->Fill(&decode_buffer[0], decode_buffer.size() / bpf);
 			cur_frame = tempo_processor->GetInputFrame();
-			// Use actual size returned by SoundTouch
-			alBufferData(buffers[buf_first_free], audio_format, &decode_buffer[0], actual_buffer_size * bpf, samplerate);
 		} else
 #endif
 		{
@@ -307,10 +303,9 @@ void OpenALPlayer::FillBuffers(ALsizei count)
 				memset(&decode_buffer[fill_len * bpf], 0, decode_buffer.size() - fill_len * bpf);
 
 			cur_frame += fill_len;
-			actual_buffer_size = fill_len;
-			alBufferData(buffers[buf_first_free], audio_format, &decode_buffer[0], actual_buffer_size * bpf, samplerate);
 		}
 
+		alBufferData(buffers[buf_first_free], audio_format, &decode_buffer[0], decode_buffer.size(), samplerate);
 		alSourceQueueBuffers(source, 1, &buffers[buf_first_free]); // FIXME: collect buffer handles and queue all at once instead of one at a time?
 		buf_first_free = (buf_first_free + 1) % num_buffers;
 		--buffers_free;

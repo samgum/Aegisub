@@ -165,7 +165,6 @@ aegisub_src = files(
 
 if host_machine.system() == 'darwin'
     aegisub_src += files(
-        'audio_player_coreaudio.cpp',
         'font_file_lister_coretext.mm',
         'osx/osx_utils.mm',
         'osx/screenpicker.mm',
