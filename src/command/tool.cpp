@@ -346,7 +346,7 @@ class DialogLyricScroll final : public wxDialog {
 
 public:
 	DialogLyricScroll(wxWindow *parent, agi::Context *c)
-	: wxDialog(parent, -1, _("滚动歌词生成器"))
+	: wxDialog(parent, -1, _("Music Lyrics Scroll Generator"))
 	, settings(load_lyric_scroll_settings())
 	{
 		int res_x = 0;
@@ -359,21 +359,21 @@ public:
 		auto common_page = new wxPanel(notebook);
 		auto advanced_page = new wxPanel(notebook);
 
-		wxString scope_choices[] = { _("仅选中行"), _("全部对白行") };
-		scope = new wxRadioBox(common_page, -1, _("作用范围"), wxDefaultPosition, wxDefaultSize, 2, scope_choices, 1, wxRA_SPECIFY_COLS);
+		wxString scope_choices[] = { _("Selected lines only"), _("All dialogue lines") };
+		scope = new wxRadioBox(common_page, -1, _("Scope"), wxDefaultPosition, wxDefaultSize, 2, scope_choices, 1, wxRA_SPECIFY_COLS);
 		scope->SetSelection(settings.scope);
 
 		source_action = new wxChoice(common_page, -1);
-		source_action->Append(_("保留原字幕"));
-		source_action->Append(_("注释隐藏原字幕（推荐）"));
-		source_action->Append(_("删除原字幕"));
+		source_action->Append(_("Keep original subtitles"));
+		source_action->Append(_("Comment-hide originals (recommended)"));
+		source_action->Append(_("Delete original subtitles"));
 		source_action->SetSelection(settings.source_action);
 
-		clear_previous = new wxCheckBox(advanced_page, -1, _("重新生成前清理上一轮滚动歌词"));
+		clear_previous = new wxCheckBox(advanced_page, -1, _("Clear previous scroll results before regenerating"));
 		clear_previous->SetValue(settings.clear_previous);
-		strip_tags = new wxCheckBox(advanced_page, -1, _("清理原字幕里的特效标签"));
+		strip_tags = new wxCheckBox(advanced_page, -1, _("Strip override tags from source subtitles"));
 		strip_tags->SetValue(settings.strip_tags);
-		animate = new wxCheckBox(advanced_page, -1, _("启用平滑滚动"));
+		animate = new wxCheckBox(advanced_page, -1, _("Enable smooth scrolling animation"));
 		animate->SetValue(settings.animate);
 
 		center_x = spin(advanced_page, settings.center_x, 0, 10000);
@@ -393,14 +393,14 @@ public:
 
 		auto common_grid = new wxFlexGridSizer(2, 8, 8);
 		common_grid->AddGrowableCol(1, 1);
-		add_row(common_page, common_grid, _("原字幕处理"), source_action);
-		add_row(common_page, common_grid, _("当前歌词 Y 位置"), center_y);
-		add_row(common_page, common_grid, _("当前行字号"), active_size);
-		add_row(common_page, common_grid, _("上下行字号"), inactive_size);
-		add_row(common_page, common_grid, _("行距"), line_gap);
-		add_row(common_page, common_grid, _("上下显示行数"), visible_lines);
-		add_row(common_page, common_grid, _("滚动时长（毫秒）"), transition_ms);
-		add_row(common_page, common_grid, _("长歌词换行字数"), wrap_after);
+		add_row(common_page, common_grid, _("Source subtitle handling"), source_action);
+		add_row(common_page, common_grid, _("Current lyric Y position"), center_y);
+		add_row(common_page, common_grid, _("Active line font size"), active_size);
+		add_row(common_page, common_grid, _("Inactive line font size"), inactive_size);
+		add_row(common_page, common_grid, _("Line gap"), line_gap);
+		add_row(common_page, common_grid, _("Visible surrounding lines"), visible_lines);
+		add_row(common_page, common_grid, _("Scroll transition (ms)"), transition_ms);
+		add_row(common_page, common_grid, _("Wrap lyrics after N chars"), wrap_after);
 
 		auto common_sizer = new wxBoxSizer(wxVERTICAL);
 		common_sizer->Add(scope, wxSizerFlags().Expand().Border());
@@ -409,13 +409,13 @@ public:
 
 		auto advanced_grid = new wxFlexGridSizer(2, 8, 8);
 		advanced_grid->AddGrowableCol(1, 1);
-		add_row(advanced_page, advanced_grid, _("中心 X 位置"), center_x);
-		add_row(advanced_page, advanced_grid, _("左右边距"), margin_lr);
-		add_row(advanced_page, advanced_grid, _("当前行透明度"), active_alpha);
-		add_row(advanced_page, advanced_grid, _("上下行透明度"), inactive_alpha);
-		add_row(advanced_page, advanced_grid, _("图层"), layer);
-		add_row(advanced_page, advanced_grid, _("当前行颜色"), active_color);
-		add_row(advanced_page, advanced_grid, _("上下行颜色"), inactive_color);
+		add_row(advanced_page, advanced_grid, _("Center X position"), center_x);
+		add_row(advanced_page, advanced_grid, _("Left/right margin"), margin_lr);
+		add_row(advanced_page, advanced_grid, _("Active line alpha"), active_alpha);
+		add_row(advanced_page, advanced_grid, _("Inactive line alpha"), inactive_alpha);
+		add_row(advanced_page, advanced_grid, _("Layer"), layer);
+		add_row(advanced_page, advanced_grid, _("Active line color"), active_color);
+		add_row(advanced_page, advanced_grid, _("Inactive line color"), inactive_color);
 
 		auto advanced_sizer = new wxBoxSizer(wxVERTICAL);
 		advanced_sizer->Add(advanced_grid, wxSizerFlags(1).Expand().Border());
@@ -424,8 +424,8 @@ public:
 		advanced_sizer->Add(animate, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 		advanced_page->SetSizer(advanced_sizer);
 
-		notebook->AddPage(common_page, _("常用设置"), true);
-		notebook->AddPage(advanced_page, _("高级设置"));
+		notebook->AddPage(common_page, _("Common"), true);
+		notebook->AddPage(advanced_page, _("Advanced"));
 
 		auto main = new wxBoxSizer(wxVERTICAL);
 		main->Add(notebook, wxSizerFlags(1).Expand().Border());
@@ -878,9 +878,9 @@ void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
 struct tool_lyric_scroll final : public Command {
 	CMD_NAME("tool/lyrics_scroll")
 	CMD_ICON(timing_processor_toolbutton)
-	STR_MENU("滚动歌词生成器(&L)...")
-	STR_DISP("滚动歌词生成器")
-	STR_HELP("生成音乐软件式逐行滚动歌词字幕")
+	STR_MENU("Music Lyrics Scroll(&L)...")
+	STR_DISP("Music Lyrics Scroll")
+	STR_HELP("Generate music-player-style scrolling lyric subtitles")
 
 	void operator()(agi::Context *c) override {
 		DialogLyricScroll dialog(c->parent, c);

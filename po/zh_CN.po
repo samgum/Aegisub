@@ -7634,3 +7634,140 @@ msgstr "超宽高亮模式"
 #: ../src/preferences.cpp:0
 msgid "Overflow character limit"
 msgstr "超宽字符数限制"
+
+
+#: ../src/command/tool.cpp:0
+msgid "Music Lyrics Scroll Generator"
+msgstr "滚动歌词生成器"
+
+#: ../src/command/tool.cpp:0
+msgid "Selected lines only"
+msgstr "仅选中行"
+
+#: ../src/command/tool.cpp:0
+msgid "All dialogue lines"
+msgstr "全部对白行"
+
+#: ../src/command/tool.cpp:0
+msgid "Scope"
+msgstr "作用范围"
+
+#: ../src/command/tool.cpp:0
+msgid "Keep original subtitles"
+msgstr "保留原字幕"
+
+#: ../src/command/tool.cpp:0
+msgid "Comment-hide originals (recommended)"
+msgstr "注释隐藏原字幕（推荐）"
+
+#: ../src/command/tool.cpp:0
+msgid "Delete original subtitles"
+msgstr "删除原字幕"
+
+#: ../src/command/tool.cpp:0
+msgid "Clear previous scroll results before regenerating"
+msgstr "重新生成前清理上一轮滚动歌词"
+
+#: ../src/command/tool.cpp:0
+msgid "Strip override tags from source subtitles"
+msgstr "清理原字幕里的特效标签"
+
+#: ../src/command/tool.cpp:0
+msgid "Enable smooth scrolling animation"
+msgstr "启用平滑滚动"
+
+#: ../src/command/tool.cpp:0
+msgid "Source subtitle handling"
+msgstr "原字幕处理"
+
+#: ../src/command/tool.cpp:0
+msgid "Current lyric Y position"
+msgstr "当前歌词 Y 位置"
+
+#: ../src/command/tool.cpp:0
+msgid "Active line font size"
+msgstr "当前行字号"
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive line font size"
+msgstr "上下行字号"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap"
+msgstr "行距"
+
+#: ../src/command/tool.cpp:0
+msgid "Visible surrounding lines"
+msgstr "上下显示行数"
+
+#: ../src/command/tool.cpp:0
+msgid "Scroll transition (ms)"
+msgstr "滚动时长（毫秒）"
+
+#: ../src/command/tool.cpp:0
+msgid "Wrap lyrics after N chars"
+msgstr "长歌词换行字数"
+
+#: ../src/command/tool.cpp:0
+msgid "Common"
+msgstr "常用设置"
+
+#: ../src/command/tool.cpp:0
+msgid "Advanced"
+msgstr "高级设置"
+
+#: ../src/command/tool.cpp:0
+msgid "Center X position"
+msgstr "中心 X 位置"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin"
+msgstr "左右边距"
+
+#: ../src/command/tool.cpp:0
+msgid "Active line alpha"
+msgstr "当前行透明度"
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive line alpha"
+msgstr "上下行透明度"
+
+#: ../src/command/tool.cpp:0
+msgid "Layer"
+msgstr "图层"
+
+#: ../src/command/tool.cpp:0
+msgid "Active line color"
+msgstr "当前行颜色"
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive line color"
+msgstr "上下行颜色"
+
+#: ../src/command/tool.cpp:0
+msgid "Music Lyrics Scroll(&L)..."
+msgstr "滚动歌词生成器(&L)..."
+
+#: ../src/command/tool.cpp:0
+msgid "Music Lyrics Scroll"
+msgstr "滚动歌词生成器"
+
+#: ../src/command/tool.cpp:0
+msgid "Generate music-player-style scrolling lyric subtitles"
+msgstr "生成音乐软件式逐行滚动歌词字幕"
+
+#: ../src/command/tool.cpp:0
+msgid "No subtitle lines were available for lyric scrolling."
+msgstr "没有可用于歌词滚动的字幕行。"
+
+#: ../src/command/tool.cpp:0
+msgid "No lyric rows were available after grouping source subtitles."
+msgstr "分组源字幕后没有可用的歌词行。"
+
+#: ../src/command/tool.cpp:0
+msgid "clear music lyric scroll"
+msgstr "清理音乐歌词滚动"
+
+#: ../src/command/tool.cpp:0
+msgid "music lyric scroll"
+msgstr "音乐歌词滚动"

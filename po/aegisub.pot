@@ -6992,3 +6992,139 @@ msgstr ""
 msgid "This will install Aegisub {#BUILD_GIT_VERSION_STRING} on your computer.%n%nAegisub is covered by the GNU General Public License version 2. This means you may use the application for any purpose without charge, but that no warranties of any kind are given either.%n%nSee the Aegisub website for information on obtaining the source code."
 msgstr ""
 
+
+#: ../src/command/tool.cpp:0
+msgid "Music Lyrics Scroll Generator"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Selected lines only"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "All dialogue lines"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Scope"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Keep original subtitles"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Comment-hide originals (recommended)"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Delete original subtitles"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Clear previous scroll results before regenerating"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Strip override tags from source subtitles"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Enable smooth scrolling animation"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Source subtitle handling"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Current lyric Y position"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Active line font size"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive line font size"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Visible surrounding lines"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Scroll transition (ms)"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Wrap lyrics after N chars"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Common"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Advanced"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Center X position"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Active line alpha"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive line alpha"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Layer"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Active line color"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive line color"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Music Lyrics Scroll(&L)..."
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Music Lyrics Scroll"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Generate music-player-style scrolling lyric subtitles"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "No subtitle lines were available for lyric scrolling."
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "No lyric rows were available after grouping source subtitles."
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "clear music lyric scroll"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "music lyric scroll"
+msgstr ""
