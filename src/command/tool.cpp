@@ -33,6 +33,7 @@
 
 #include "../ass_dialogue.h"
 #include "../ass_file.h"
+#include "../ass_style.h"
 #include "../compat.h"
 #include "../dialog_manager.h"
 #include "../dialog_styling_assistant.h"
@@ -50,8 +51,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
+#include <map>
+#include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -80,20 +85,20 @@ struct LyricScrollSettings {
 	bool clear_previous = true;
 	bool strip_tags = true;
 	bool animate = true;
-	int center_x = 1920;
-	int center_y = 1120;
-	int line_gap = 150;
-	int active_size = 88;
-	int inactive_size = 62;
-	int visible_lines = 2;
-	int transition_ms = 360;
-	int margin_lr = 220;
+	int center_x = 0;
+	int center_y = 0;
+	int line_gap = 0;
+	int active_size = 165;
+	int inactive_size = 128;
+	int visible_lines = 3;
+	int transition_ms = 700;
+	int margin_lr = 120;
 	int active_alpha = 0;
-	int inactive_alpha = 96;
-	int layer = 20;
-	int wrap_after = 46;
+	int inactive_alpha = 88;
+	int layer = 4;
+	int wrap_after = 0;
 	std::string active_color = "&HFFFFFF&";
-	std::string inactive_color = "&HA8A8A8&";
+	std::string inactive_color = "&HD8D8D8&";
 };
 
 int opt_int(char const *name, int min_value, int max_value) {
@@ -137,12 +142,6 @@ void set_opt_ass_color(char const *name, std::string const& value) {
 		opt->SetColor(agi::Color(value));
 	else
 		opt->SetString(value);
-}
-
-std::string alpha_tag(int alpha) {
-	char buffer[16];
-	std::snprintf(buffer, sizeof buffer, "\\alpha&H%02X&", std::max(0, std::min(255, alpha)));
-	return buffer;
 }
 
 std::string remove_parenthesized_tag(std::string text, std::string const& tag) {
@@ -224,25 +223,6 @@ std::string wrap_text(std::string text, int wrap_after) {
 	return text;
 }
 
-std::string make_position_tag(int x, int y, int line_gap, int transition_ms, int duration_ms, bool animate) {
-	if (!animate || transition_ms <= 0 || duration_ms <= 0)
-		return "\\pos(" + std::to_string(x) + "," + std::to_string(y) + ")";
-
-	int move_ms = std::min(transition_ms, duration_ms);
-	return "\\move(" + std::to_string(x) + "," + std::to_string(y + line_gap) + "," +
-		std::to_string(x) + "," + std::to_string(y) + ",0," + std::to_string(move_ms) + ")";
-}
-
-std::string lyric_tag(LyricScrollSettings const& settings, int offset, int y, int duration_ms) {
-	bool active = offset == 0;
-	int size = active ? settings.active_size : settings.inactive_size;
-	int alpha = active ? settings.active_alpha : settings.inactive_alpha;
-	std::string color = active ? settings.active_color : settings.inactive_color;
-	return "{\\an5\\q2\\bord0\\shad0\\blur0.6\\fscx100\\fscy100\\fs" + std::to_string(size) +
-		"\\1c" + color + alpha_tag(alpha) +
-		make_position_tag(settings.center_x, y, settings.line_gap, settings.transition_ms, duration_ms, settings.animate) + "}";
-}
-
 LyricScrollSettings load_lyric_scroll_settings() {
 	LyricScrollSettings settings;
 	settings.scope = opt_int("Tool/Lyric Scroll/Scope", 0, 1);
@@ -252,7 +232,7 @@ LyricScrollSettings load_lyric_scroll_settings() {
 	settings.animate = OPT_GET("Tool/Lyric Scroll/Animate")->GetBool();
 	settings.center_x = opt_int("Tool/Lyric Scroll/Center X", 0, 10000);
 	settings.center_y = opt_int("Tool/Lyric Scroll/Center Y", 0, 10000);
-	settings.line_gap = opt_int("Tool/Lyric Scroll/Line Gap", 10, 1000);
+	settings.line_gap = opt_int("Tool/Lyric Scroll/Line Gap", 0, 1000);
 	settings.active_size = opt_int("Tool/Lyric Scroll/Active Size", 6, 400);
 	settings.inactive_size = opt_int("Tool/Lyric Scroll/Inactive Size", 6, 400);
 	settings.visible_lines = opt_int("Tool/Lyric Scroll/Visible Lines", 0, 8);
@@ -263,7 +243,27 @@ LyricScrollSettings load_lyric_scroll_settings() {
 	settings.layer = opt_int("Tool/Lyric Scroll/Layer", 0, 999);
 	settings.wrap_after = opt_int("Tool/Lyric Scroll/Wrap After", 0, 200);
 	settings.active_color = opt_ass_color("Tool/Lyric Scroll/Active Color", "&HFFFFFF&");
-	settings.inactive_color = opt_ass_color("Tool/Lyric Scroll/Inactive Color", "&HA8A8A8&");
+	settings.inactive_color = opt_ass_color("Tool/Lyric Scroll/Inactive Color", "&HD8D8D8&");
+
+	if (settings.center_x == 1920 && settings.center_y == 1120 && settings.line_gap == 150 &&
+		settings.active_size == 88 && settings.inactive_size == 62 && settings.visible_lines == 2 &&
+		settings.transition_ms == 360 && settings.margin_lr == 220 && settings.layer == 20 &&
+		settings.wrap_after == 46 && settings.inactive_color == "&HA8A8A8&")
+	{
+		settings.center_x = 0;
+		settings.center_y = 0;
+		settings.line_gap = 0;
+		settings.active_size = 165;
+		settings.inactive_size = 128;
+		settings.visible_lines = 3;
+		settings.transition_ms = 700;
+		settings.margin_lr = 120;
+		settings.inactive_alpha = 88;
+		settings.layer = 4;
+		settings.wrap_after = 0;
+		settings.inactive_color = "&HD8D8D8&";
+	}
+
 	return settings;
 }
 
@@ -378,7 +378,7 @@ public:
 
 		center_x = spin(advanced_page, settings.center_x, 0, 10000);
 		center_y = spin(common_page, settings.center_y, 0, 10000);
-		line_gap = spin(common_page, settings.line_gap, 10, 1000);
+		line_gap = spin(common_page, settings.line_gap, 0, 1000);
 		active_size = spin(common_page, settings.active_size, 6, 400);
 		inactive_size = spin(common_page, settings.inactive_size, 6, 400);
 		visible_lines = spin(common_page, settings.visible_lines, 0, 8);
@@ -457,9 +457,355 @@ std::vector<AssDialogue *> collect_lyric_sources(agi::Context *c, LyricScrollSet
 	return lines;
 }
 
-std::string lyric_text(AssDialogue *line, LyricScrollSettings const& settings) {
-	std::string text = settings.strip_tags ? line->GetStrippedText() : line->Text.get();
-	return wrap_text(clean_motion_conflicts(std::move(text)), settings.wrap_after);
+std::string replace_all(std::string text, std::string const& from, std::string const& to) {
+	size_t pos = 0;
+	while ((pos = text.find(from, pos)) != std::string::npos) {
+		text.replace(pos, from.size(), to);
+		pos += to.size();
+	}
+	return text;
+}
+
+std::string collapse_spaces(std::string text) {
+	std::string out;
+	bool had_space = false;
+	for (unsigned char c : text) {
+		if (std::isspace(c)) {
+			if (!had_space && !out.empty())
+				out += ' ';
+			had_space = true;
+		}
+		else {
+			out += c;
+			had_space = false;
+		}
+	}
+	return trim_copy(out);
+}
+
+std::string plain_lyric_text(AssDialogue *line, LyricScrollSettings const& settings) {
+	std::string text = settings.strip_tags ? line->GetStrippedText() : clean_motion_conflicts(line->Text.get());
+	text = replace_all(std::move(text), "\\N", " ");
+	text = replace_all(std::move(text), "\\n", " ");
+	return wrap_text(collapse_spaces(std::move(text)), settings.wrap_after);
+}
+
+std::string escape_ass_text(std::string text) {
+	text.erase(std::remove(text.begin(), text.end(), '{'), text.end());
+	text.erase(std::remove(text.begin(), text.end(), '}'), text.end());
+	text = replace_all(std::move(text), "\r\n", "\\N");
+	text = replace_all(std::move(text), "\n", "\\N");
+	return text;
+}
+
+struct LyricRow {
+	int start = 0;
+	int end = 0;
+	std::string primary;
+	std::string secondary;
+	AssDialogue *line = nullptr;
+};
+
+struct CreditRow {
+	int start = 0;
+	int end = 0;
+	std::string text;
+	AssDialogue *line = nullptr;
+};
+
+std::string most_common_style(std::map<std::string, int> const& counts) {
+	return std::max_element(counts.begin(), counts.end(), [](auto const& a, auto const& b) {
+		return a.second < b.second;
+	})->first;
+}
+
+void normalize_row_end_times(std::vector<LyricRow>& rows, int default_duration_ms) {
+	for (size_t i = 0; i < rows.size(); ++i) {
+		int next_start = i + 1 < rows.size() ? rows[i + 1].start : rows[i].start + default_duration_ms;
+		if (rows[i].end <= rows[i].start)
+			rows[i].end = next_start;
+		rows[i].end = std::min(std::max(rows[i].end, rows[i].start + 250), next_start);
+	}
+}
+
+void build_lyric_rows(std::vector<AssDialogue *> const& sources, LyricScrollSettings const& settings, std::vector<LyricRow>& rows, std::vector<CreditRow>& credits, std::string& primary_style, std::string& secondary_style, std::string& credit_style) {
+	std::set<std::string> styles_seen;
+	std::map<std::string, int> style_counts;
+	std::map<std::pair<int, int>, std::map<std::string, std::pair<std::string, AssDialogue *>>> grouped;
+	credit_style = "制作人员";
+
+	for (auto line : sources) {
+		std::string text = plain_lyric_text(line, settings);
+		if (text.empty())
+			continue;
+
+		std::string style = line->Style.get();
+		styles_seen.insert(style);
+		if (style == credit_style) {
+			credits.push_back({static_cast<int>(line->Start), static_cast<int>(line->End), text, line});
+			continue;
+		}
+
+		++style_counts[style];
+		grouped[{static_cast<int>(line->Start), static_cast<int>(line->End)}][style] = {text, line};
+	}
+
+	if (styles_seen.count("中"))
+		primary_style = "中";
+	else if (!style_counts.empty())
+		primary_style = most_common_style(style_counts);
+
+	if (styles_seen.count("英") && primary_style != "英")
+		secondary_style = "英";
+
+	for (auto const& group : grouped) {
+		auto const& by_style = group.second;
+		auto primary_it = by_style.find(primary_style);
+		if (primary_it == by_style.end()) {
+			if (primary_style.empty() && !by_style.empty())
+				primary_it = by_style.begin();
+			else
+				continue;
+		}
+
+		std::string secondary;
+		if (!secondary_style.empty()) {
+			auto secondary_it = by_style.find(secondary_style);
+			if (secondary_it != by_style.end())
+				secondary = secondary_it->second.first;
+		}
+
+		rows.push_back({
+			group.first.first,
+			group.first.second,
+			primary_it->second.first,
+			secondary,
+			primary_it->second.second
+		});
+	}
+
+	normalize_row_end_times(rows, 3500);
+}
+
+double lerp(double left, double right, double progress) {
+	return left + (right - left) * progress;
+}
+
+double ease_out_cubic(double value) {
+	value = std::max(0.0, std::min(1.0, value));
+	return 1.0 - std::pow(1.0 - value, 3.0);
+}
+
+double interpolate_points(std::vector<std::pair<double, double>> const& points, double value) {
+	value = std::abs(value);
+	if (value <= points.front().first)
+		return points.front().second;
+
+	for (size_t i = 1; i < points.size(); ++i) {
+		double x0 = points[i - 1].first;
+		double y0 = points[i - 1].second;
+		double x1 = points[i].first;
+		double y1 = points[i].second;
+		if (value <= x1)
+			return lerp(y0, y1, (value - x0) / (x1 - x0));
+	}
+	return points.back().second;
+}
+
+int alpha_for_offset(double offset, LyricScrollSettings const& settings) {
+	return static_cast<int>(std::lround(interpolate_points({{0, static_cast<double>(settings.active_alpha)}, {1, static_cast<double>(settings.inactive_alpha)}, {2, 0x92}, {3, 0xC0}, {4, 0xE0}}, offset)));
+}
+
+double scale_for_offset(double offset) {
+	return interpolate_points({{0, 100}, {1, 78}, {2, 64}, {3, 54}, {4, 50}}, offset);
+}
+
+std::string color_for_offset(double offset) {
+	int gray = static_cast<int>(std::lround(interpolate_points({{0, 255}, {1, 216}, {4, 190}}, offset)));
+	char buffer[16];
+	std::snprintf(buffer, sizeof buffer, "&H00%02X%02X%02X", gray, gray, gray);
+	return buffer;
+}
+
+std::vector<std::tuple<int, int, double>> split_transition(int start, int end, int motion_steps) {
+	int duration = end - start;
+	if (duration <= 0)
+		return {};
+
+	int steps = std::max(1, std::min(motion_steps, std::max(1, duration / 15)));
+	std::vector<std::tuple<int, int, double>> spans;
+	int previous = start;
+	for (int i = 0; i < steps; ++i) {
+		int current = start + static_cast<int>(std::lround(duration * (i + 1.0) / steps));
+		if (current <= previous)
+			continue;
+
+		double progress = ease_out_cubic((i + 0.5) / steps);
+		spans.emplace_back(previous, current, progress);
+		previous = current;
+	}
+	return spans;
+}
+
+void upsert_scroll_style(AssFile *ass, std::string const& name, std::string const& font, int size, std::string const& primary, int margin, int outline, int shadow) {
+	AssStyle *style = ass->GetStyle(name);
+	if (!style) {
+		style = new AssStyle;
+		style->name = name;
+		ass->Styles.push_back(*style);
+	}
+
+	style->font = font.empty() ? "Arial" : font;
+	style->fontsize = size;
+	style->primary = agi::Color(primary);
+	style->secondary = agi::Color("&H000000FF");
+	style->outline = outline ? agi::Color("&H00111111") : agi::Color("&H00000000");
+	style->shadow = agi::Color("&H00000000");
+	style->bold = false;
+	style->italic = false;
+	style->underline = false;
+	style->strikeout = false;
+	style->scalex = 100;
+	style->scaley = 100;
+	style->spacing = 0;
+	style->angle = 0;
+	style->borderstyle = 1;
+	style->outline_w = outline;
+	style->shadow_w = shadow;
+	style->alignment = 5;
+	style->Margin[0] = margin;
+	style->Margin[1] = margin;
+	style->Margin[2] = 0;
+	style->encoding = 1;
+	style->UpdateData();
+}
+
+std::string style_font(AssFile *ass, std::string const& style_name, char const *fallback) {
+	if (auto style = ass->GetStyle(style_name))
+		return style->font;
+	return fallback;
+}
+
+std::string build_body(LyricRow const& row, bool current, LyricScrollSettings const& settings) {
+	std::string primary = escape_ass_text(row.primary);
+	std::string secondary = escape_ass_text(row.secondary);
+	if (current) {
+		std::string body = "{\\an5\\blur0.5\\bord0\\shad0\\fsp0}" + primary;
+		if (!secondary.empty()) {
+			int secondary_size = std::max(6, static_cast<int>(std::lround(settings.active_size * 72.0 / 165.0)));
+			body += "\\N{\\fs" + std::to_string(secondary_size) + "\\alpha&H42&\\bord0\\shad0}" + secondary;
+		}
+		return body;
+	}
+
+	std::string body = "{\\an5\\blur1\\bord0\\shad0\\fsp0}" + primary;
+	if (!secondary.empty()) {
+		int secondary_size = std::max(6, static_cast<int>(std::lround(settings.inactive_size * 58.0 / 128.0)));
+		body += "\\N{\\fs" + std::to_string(secondary_size) + "\\alpha&H78&\\bord0\\shad0}" + secondary;
+	}
+	return body;
+}
+
+AssDialogue *add_scroll_dialogue(agi::Context *c, AssDialogue *base, int layer, int start, int end, std::string const& style, std::string const& text) {
+	if (end <= start)
+		return nullptr;
+
+	auto generated = new AssDialogue(*base);
+	generated->Comment = false;
+	generated->Layer = layer;
+	generated->Start = start;
+	generated->End = end;
+	generated->Style = style;
+	generated->Effect = LYRIC_SCROLL_GENERATED;
+	generated->Margin[0] = 0;
+	generated->Margin[1] = 0;
+	generated->Margin[2] = 0;
+	generated->Text = text;
+	c->ass->Events.push_back(*generated);
+	return generated;
+}
+
+AssDialogue *add_position_dialogue(agi::Context *c, LyricRow const& row, int layer, int start, int end, double y, double scale, int alpha, std::string const& color, bool current, int x, LyricScrollSettings const& settings) {
+	char buffer[256];
+	std::snprintf(buffer, sizeof buffer, "{\\an5\\pos(%d,%d)\\alpha&H%02X&\\1c%s\\fscx%.1f\\fscy%.1f}",
+		x, static_cast<int>(std::lround(y)), std::max(0, std::min(255, alpha)), color.c_str(), scale, scale);
+	return add_scroll_dialogue(c, row.line, layer, start, end, current ? "ScrollCurrent" : "ScrollDim", std::string(buffer) + build_body(row, current, settings));
+}
+
+void generate_scroll_events(agi::Context *c, std::vector<LyricRow> const& rows, std::vector<CreditRow> const& credits, LyricScrollSettings const& settings, Selection& new_selection, AssDialogue *&new_active) {
+	int width = 0;
+	int height = 0;
+	c->ass->GetResolution(width, height);
+	if (width <= 0) width = 3840;
+	if (height <= 0) height = 2160;
+
+	int x = settings.center_x > 0 ? settings.center_x : width / 2;
+	int center = settings.center_y > 0 ? settings.center_y : height / 2;
+	int gap = settings.line_gap > 0 ? settings.line_gap : static_cast<int>(std::lround(height * 0.118));
+	int window = settings.visible_lines;
+	int motion_steps = 28;
+
+	for (auto const& credit : credits) {
+		std::string text = escape_ass_text(replace_all(credit.text, "\\N", " / "));
+		auto generated = add_scroll_dialogue(c, credit.line, settings.layer + 2, credit.start, credit.end, "ScrollCredit",
+			"{\\an5\\pos(" + std::to_string(x) + "," + std::to_string(static_cast<int>(std::lround(height * 0.176))) + ")\\alpha&H20&}" + text);
+		if (generated) {
+			new_selection.insert(generated);
+			if (!new_active) new_active = generated;
+		}
+	}
+
+	for (size_t active_index = 0; active_index < rows.size(); ++active_index) {
+		auto const& row = rows[active_index];
+		int start = row.start;
+		int end = active_index + 1 < rows.size() ? rows[active_index + 1].start : row.end;
+		end = std::max(end, start + 250);
+		int transition_end = settings.animate && active_index > 0 ? std::min(end, start + settings.transition_ms) : start;
+
+		int transition_start_row = std::max(0, static_cast<int>(active_index) - window - 1);
+		int transition_end_row = std::min(static_cast<int>(rows.size()), static_cast<int>(active_index) + window + 1);
+		for (auto const& span : split_transition(start, transition_end, motion_steps)) {
+			int span_start;
+			int span_end;
+			double progress;
+			std::tie(span_start, span_end, progress) = span;
+			for (int row_index = transition_start_row; row_index < transition_end_row; ++row_index) {
+				int target_offset = row_index - static_cast<int>(active_index);
+				int previous_offset = row_index - (static_cast<int>(active_index) - 1);
+				if (std::abs(target_offset) > window)
+					continue;
+
+				int start_offset = std::abs(previous_offset) <= window ? previous_offset : target_offset + 1;
+				double float_offset = lerp(start_offset, target_offset, progress);
+				bool current = target_offset == 0;
+				auto generated = add_position_dialogue(c, rows[row_index], current ? settings.layer : std::max(0, settings.layer - 1),
+					span_start, span_end, center + float_offset * gap, scale_for_offset(float_offset),
+					alpha_for_offset(float_offset, settings), color_for_offset(float_offset), current, x, settings);
+				if (generated) {
+					new_selection.insert(generated);
+					if (!new_active) new_active = generated;
+				}
+			}
+		}
+
+		int hold_start = transition_end > start ? transition_end : start;
+		if (hold_start >= end)
+			continue;
+
+		int visible_start = std::max(0, static_cast<int>(active_index) - window);
+		int visible_end = std::min(static_cast<int>(rows.size()), static_cast<int>(active_index) + window + 1);
+		for (int row_index = visible_start; row_index < visible_end; ++row_index) {
+			int offset = row_index - static_cast<int>(active_index);
+			bool current = offset == 0;
+			auto generated = add_position_dialogue(c, rows[row_index], current ? settings.layer : std::max(0, settings.layer - 1),
+				hold_start, end, center + offset * gap, scale_for_offset(offset),
+				alpha_for_offset(offset, settings), color_for_offset(offset), current, x, settings);
+			if (generated) {
+				new_selection.insert(generated);
+				if (!new_active) new_active = generated;
+			}
+		}
+	}
 }
 
 void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
@@ -483,40 +829,24 @@ void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
 
 	Selection new_selection;
 	AssDialogue *new_active = nullptr;
+	std::vector<LyricRow> rows;
+	std::vector<CreditRow> credits;
+	std::string primary_style;
+	std::string secondary_style;
+	std::string credit_style;
+	build_lyric_rows(sources, settings, rows, credits, primary_style, secondary_style, credit_style);
 
-	for (size_t i = 0; i < sources.size(); ++i) {
-		int start = static_cast<int>(sources[i]->Start);
-		int end = static_cast<int>(sources[i]->End);
-		if (i + 1 < sources.size()) {
-			int next_start = static_cast<int>(sources[i + 1]->Start);
-			if (next_start > start)
-				end = next_start;
-		}
-		if (end <= start)
-			end = start + 1000;
-		int duration = end - start;
-
-		int first = std::max<int>(0, static_cast<int>(i) - settings.visible_lines);
-		int last = std::min<int>(static_cast<int>(sources.size()) - 1, static_cast<int>(i) + settings.visible_lines);
-		for (int j = first; j <= last; ++j) {
-			int offset = j - static_cast<int>(i);
-			int y = settings.center_y + offset * settings.line_gap;
-
-			auto generated = new AssDialogue(*sources[j]);
-			generated->Comment = false;
-			generated->Layer = settings.layer;
-			generated->Start = start;
-			generated->End = end;
-			generated->Effect = LYRIC_SCROLL_GENERATED;
-			generated->Margin[0] = settings.margin_lr;
-			generated->Margin[1] = settings.margin_lr;
-			generated->Text = lyric_tag(settings, offset, y, duration) + lyric_text(sources[j], settings);
-			c->ass->Events.push_back(*generated);
-			new_selection.insert(generated);
-			if (!new_active)
-				new_active = generated;
-		}
+	if (rows.empty() && credits.empty()) {
+		wxMessageBox(_("No lyric rows were available after grouping source subtitles."), _("Music Lyrics Scroll"), wxOK | wxICON_INFORMATION, c->parent);
+		return;
 	}
+
+	std::string primary_font = style_font(c->ass.get(), primary_style, "思源黑体 CN Heavy");
+	std::string secondary_font = style_font(c->ass.get(), secondary_style, "思源黑体 CN Medium");
+	upsert_scroll_style(c->ass.get(), "ScrollCurrent", primary_font, settings.active_size, settings.active_color, settings.margin_lr, 0, 0);
+	upsert_scroll_style(c->ass.get(), "ScrollDim", secondary_font.empty() ? primary_font : secondary_font, settings.inactive_size, settings.inactive_color, settings.margin_lr, 0, 0);
+	upsert_scroll_style(c->ass.get(), "ScrollCredit", primary_font, 120, settings.active_color, settings.margin_lr, 2, 2);
+	generate_scroll_events(c, rows, credits, settings, new_selection, new_active);
 
 	if (settings.source_action == 1) {
 		for (auto line : sources) {
