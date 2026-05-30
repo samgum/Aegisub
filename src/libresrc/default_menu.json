@@ -125,6 +125,8 @@
         { "command" : "audio/open/noise" }
     ],
     "main/tools" : [
+        { "command" : "tool/lyrics_scroll" },
+        {},
         { "command" : "tool/time/stitch" },
         { "command" : "tool/style/overlap_check" },
         { "command" : "tool/text/cleanup" },
