@@ -184,28 +184,28 @@ msgid ""
 "A script in the Automation autoload directory failed to load.\n"
 "Please review the errors, fix them and use the Rescan Autoload Dir button in "
 "Automation Manager to load the scripts again."
-msgstr "Automation 自动加载目录中的脚本加载失败。\n请查看错误信息，修复后使用自动化管理器中的"重新扫描自动加载目录"按钮重新加载脚本。"
+msgstr "Automation 自动加载目录中的脚本加载失败。\n请查看错误信息，修复后使用自动化管理器中的「重新扫描自动加载目录」按钮重新加载脚本。"
 
 #: ../src/auto4_base.cpp:347
 msgid ""
 "Multiple scripts in the Automation autoload directory failed to load.\n"
 "Please review the errors, fix them and use the Rescan Autoload Dir button in "
 "Automation Manager to load the scripts again."
-msgstr "Automation 自动加载目录中有多个脚本加载失败。\n请查看错误信息，修复后使用自动化管理器中的"重新扫描自动加载目录"按钮重新加载脚本。"
+msgstr "Automation 自动加载目录中有多个脚本加载失败。\n请查看错误信息，修复后使用自动化管理器中的「重新扫描自动加载目录」按钮重新加载脚本。"
 
 #: ../src/auto4_base.cpp:350
 msgid ""
 "A script in the Automation autoload directory loaded with warnings.\n"
 "Please review the warnings, fix them and use the Rescan Autoload Dir button "
 "in Automation Manager to load the scripts again."
-msgstr "Automation 自动加载目录中的脚本加载时出现警告。\n请查看警告信息，修复后使用自动化管理器中的"重新扫描自动加载目录"按钮重新加载脚本。"
+msgstr "Automation 自动加载目录中的脚本加载时出现警告。\n请查看警告信息，修复后使用自动化管理器中的「重新扫描自动加载目录」按钮重新加载脚本。"
 
 #: ../src/auto4_base.cpp:353
 msgid ""
 "Multiple scripts in the Automation autoload directory loaded with warnings.\n"
 "Please review the warnings, fix them and use the Rescan Autoload Dir button "
 "in Automation Manager to load the scripts again."
-msgstr "Automation 自动加载目录中有多个脚本加载时出现警告。\n请查看警告信息，修复后使用自动化管理器中的"重新扫描自动加载目录"按钮重新加载脚本。"
+msgstr "Automation 自动加载目录中有多个脚本加载时出现警告。\n请查看警告信息，修复后使用自动化管理器中的「重新扫描自动加载目录」按钮重新加载脚本。"
 
 #: ../src/auto4_base.cpp:393
 #, c-format
@@ -213,13 +213,10 @@ msgid ""
 "Automation Script referenced with unknown location specifier character.\n"
 "Location specifier found: %c\n"
 "Filename specified: %s"
-msgstr "Automation 脚本引用了未知的位置标识符。
-位置标识符是以已识别的位置标识字符开头后跟其他字符串数据的字符或字符串。
-当前已识别的位置标识字符：
-   ~  -  用户主目录
-   $  -  数据目录
-   |  -  用户配置目录
-脚本中的位置标识符将被替换为实际引用的路径。"
+msgstr ""
+"Automation 脚本引用了未知的位置标识符。\n"
+"发现的位置标识符： %c\n"
+"指定文件名： %s"
 
 #: ../src/auto4_base.cpp:401
 #, c-format
@@ -229,12 +226,9 @@ msgid ""
 "Searched relative to: %s\n"
 "Resolved filename: %s"
 msgstr ""
-"无法找到引用的 Automation 脚本。
-"
-"指定文件名：%c%s
-"
-"搜索相对路径：%s
-"
+"无法找到引用的 Automation 脚本。\n"
+"指定文件名：%c%s\n"
+"搜索相对路径：%s\n"
 "解析后文件名：%s"
 
 #: ../src/auto4_base.cpp:462
@@ -243,8 +237,6 @@ msgid ""
 "Failed to load Automation script '%s':\n"
 "%s"
 msgstr "加载 Automation 脚本 '%s' 失败：\n%s"
-"一个自动化脚本载入失败，文件名： '%s'，错误报告：\n"
-" %s"
 
 #: ../src/auto4_base.cpp:465
 #, c-format
@@ -290,9 +282,10 @@ msgid ""
 "Error initialising Lua script \"%s\":\n"
 "\n"
 "%s"
-msgstr "初始化 Lua 脚本 "%s" 时出错：
-
-%s"
+msgstr ""
+"初始化 Lua 脚本 \"%s\" 时出错：\n"
+"\n"
+"%s"
 
 #: ../src/auto4_lua.cpp:553
 msgid ""
@@ -3013,14 +3006,10 @@ msgid ""
 "Total scripts loaded: %d\n"
 "Global scripts loaded: %d\n"
 "Local scripts loaded: %d\n"
-msgstr "已加载脚本总数：%d
-已加载全局脚本：%d
-已加载本地脚本：%d
-
-"
-"加载的全部脚本： %d\n"
-"加载的全局脚本： %d\n"
-"加载的本地脚本： %d\n"
+msgstr ""
+"已加载脚本总数：%d\n"
+"已加载全局脚本：%d\n"
+"已加载本地脚本：%d\n"
 
 #: ../src/dialog_automation.cpp:284
 msgid "Scripting engines installed:"
@@ -3038,22 +3027,14 @@ msgid ""
 "Full path: %s\n"
 "State: %s\n"
 msgstr ""
-"
-"
-"脚本信息：
-"
-"名称：%s
-"
-"描述：%s
-"
-"作者：%s
-"
-"版本：%s
-"
-"完整路径：%s
-"
-"状态：%s
-"
+"\n"
+"脚本信息：\n"
+"名称：%s\n"
+"描述：%s\n"
+"作者：%s\n"
+"版本：%s\n"
+"完整路径：%s\n"
+"状态：%s\n"
 
 #: ../src/dialog_automation.cpp:297
 msgid "Correctly loaded"
@@ -4579,10 +4560,9 @@ msgid ""
 "The specified catalog name contains one or more illegal characters. They "
 "have been replaced with underscores instead.\n"
 "The catalog has been renamed to \"%s\"."
-msgstr "指定的目录名称包含一个或多个非法字符，已替换为下划线。
-您的目录名称现在是：%s"
-"指定目录名包含一个或多个非法字符，它们已经被下划线所替代。\n"
-"该目录被重命名为“%s”。"
+msgstr ""
+"指定的目录名称包含一个或多个非法字符，已替换为下划线。\n"
+"您的目录名称现在是：\"%s\""
 
 #: ../src/dialog_style_manager.cpp:483
 msgid "Invalid characters"
@@ -4989,14 +4969,11 @@ msgid ""
 "\n"
 "If other applications can access the Internet fine, this is probably a "
 "temporary server problem on our end."
-msgstr "Aegisub 检查更新时出错：
-%s
-
-如果其他应用程序可以正常访问互联网，可能是服务器出了问题。"
-"Aegisub检查更新时出错：\n"
+msgstr ""
+"Aegisub 检查更新时出错：\n"
 "%s\n"
 "\n"
-"如果其他程序可以正常访问互联网，可能是我们的服务器暂时出了问题。"
+"如果其他应用程序可以正常访问互联网，可能是服务器出了问题。"
 
 #: ../src/dialog_version_check.cpp:381
 msgid "An unknown error occurred while checking for updates to Aegisub."
@@ -5051,18 +5028,13 @@ msgid ""
 "Script resolution:\t%d × %d\n"
 "\n"
 "Change subtitles resolution to match video?"
-msgstr "加载的视频分辨率与字幕脚本指定的分辨率不匹配。
-
-视频分辨率：	%d x %d
-脚本分辨率：	%d x %d
-
-是否将字幕脚本分辨率更改为与视频匹配？"
-"载入视频的分辨率与脚本指定的分辨率不匹配\n"
+msgstr ""
+"加载的视频分辨率与字幕脚本指定的分辨率不匹配。\n"
 "\n"
 "视频分辨率：\t%d × %d\n"
 "脚本分辨率：\t%d × %d\n"
 "\n"
-"是否更改脚本分辨率以匹配视频？"
+"是否将字幕脚本分辨率更改为与视频匹配？"
 
 #: ../src/dialog_video_properties.cpp:58 ../src/dialog_video_properties.cpp:67
 msgid "Set to video resolution"
@@ -5313,12 +5285,6 @@ msgid ""
 "\n"
 "Aegisub will now close."
 msgstr "糟糕，Aegisub 崩溃了！\n\n已尝试将您的文件副本保存到：\n\n%s\n\nAegisub 现在将关闭。"
-"喔唷，Aegisub娘崩溃啦！\n"
-"\n"
-"已经将你的文件的副本保存到了：\n"
-"\n"
-"%s\n"
-"Aegisub被迫立即关闭。"
 
 #: ../src/main.cpp:288
 msgid "Check for updates?"
@@ -5352,12 +5318,10 @@ msgid ""
 "Aegisub has crashed while starting up!\n"
 "\n"
 "The last startup step attempted was: %s."
-msgstr "Aegisub 在启动时崩溃了！
-
-最后尝试的启动步骤是：
-%s
-
-Aegisub 现在将关闭。"
+msgstr ""
+"Aegisub 在启动时崩溃了！\n"
+"\n"
+"最后尝试的启动步骤是：%s"
 
 #: ../src/main.cpp:424
 #, c-format
@@ -5366,12 +5330,10 @@ msgid ""
 "Aegisub.\n"
 "\n"
 "Error Message: %s"
-msgstr "发生了意外错误。请保存您的工作并重启 Aegisub。
-
-错误信息：%s"
-"发生了一个意外的错误。请保存您的文件并重启Aegisub。\n"
+msgstr ""
+"发生了意外错误。请保存您的工作并重启 Aegisub。\n"
 "\n"
-"错误信息： %s"
+"错误信息：%s"
 
 #: ../src/main.cpp:425
 msgid "Exception in event handler"
@@ -5715,8 +5677,7 @@ msgstr "时间框内覆盖写入"
 
 #: ../src/preferences.cpp:220
 msgid "Shift+Enter adds \\n"
-msgstr "Shift+Enter 添加 
-"
+msgstr "Shift+Enter 添加 \\n"
 
 #: ../src/preferences.cpp:221
 msgid "Enable syntax highlighting"
@@ -6621,8 +6582,7 @@ msgstr "禁用"
 msgid ""
 "Could not get any subtitles provider for the preview box. Make sure that you "
 "have a provider installed."
-msgstr "无法为预览框获取字幕提供者。请确保已安装字幕提供者。
-"
+msgstr "无法为预览框获取字幕提供者。请确保已安装字幕提供者。"
 
 #: ../src/subs_preview.cpp:143
 msgid "No subtitles provider"
@@ -6942,12 +6902,10 @@ msgid ""
 "Apply karaoke effect templates to the subtitles.\n"
 "\n"
 "See the help file for information on how to use this."
-msgstr "将卡拉OK特效模板应用到字幕。
-
-有关如何使用模板语言的信息，请参阅帮助文件。"
-"为字幕应用卡拉OK特效模版。\n"
+msgstr ""
+"将卡拉OK特效模板应用到字幕。\n"
 "\n"
-"请阅读帮助文件来了解如何使用它。"
+"有关如何使用模板语言的信息，请参阅帮助文件。"
 
 #: ../automation/autoload/karaoke-auto-leadin.lua:32
 msgid "Automatic karaoke lead-in"
@@ -6977,8 +6935,9 @@ msgstr "将文本转为全角"
 msgid ""
 "Shows how to use the unicode include to iterate over characters and a lookup "
 "table to convert those characters to something else."
-msgstr "演示如何使用 unicode 头文件遍历字符并使用查找表识别字符。
-这是 Unicode 头文件功能的简单演示。"
+msgstr ""
+"演示如何使用 unicode 头文件遍历字符并使用查找表识别字符。\n"
+"这是 Unicode 头文件功能的简单演示。"
 
 #: ../automation/autoload/macro-2-mkfullwitdh.lua:77
 msgid "Make fullwidth"
