@@ -7070,10 +7070,6 @@ msgid "Common"
 msgstr ""
 
 #: ../src/command/tool.cpp:0
-msgid "Advanced"
-msgstr ""
-
-#: ../src/command/tool.cpp:0
 msgid "Center X position"
 msgstr ""
 
@@ -7087,10 +7083,6 @@ msgstr ""
 
 #: ../src/command/tool.cpp:0
 msgid "Inactive line alpha"
-msgstr ""
-
-#: ../src/command/tool.cpp:0
-msgid "Layer"
 msgstr ""
 
 #: ../src/command/tool.cpp:0

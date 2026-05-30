@@ -7713,10 +7713,6 @@ msgid "Common"
 msgstr "常用设置"
 
 #: ../src/command/tool.cpp:0
-msgid "Advanced"
-msgstr "高级设置"
-
-#: ../src/command/tool.cpp:0
 msgid "Center X position"
 msgstr "中心 X 位置"
 
@@ -7731,10 +7727,6 @@ msgstr "当前行透明度"
 #: ../src/command/tool.cpp:0
 msgid "Inactive line alpha"
 msgstr "上下行透明度"
-
-#: ../src/command/tool.cpp:0
-msgid "Layer"
-msgstr "图层"
 
 #: ../src/command/tool.cpp:0
 msgid "Active line color"
