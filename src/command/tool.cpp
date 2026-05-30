@@ -122,6 +122,21 @@ std::string normalize_ass_color(std::string value, char const *fallback) {
 	return fallback;
 }
 
+std::string opt_ass_color(char const *name, char const *fallback) {
+	auto opt = OPT_GET(name);
+	if (opt->GetType() == agi::OptionType::Color)
+		return opt->GetColor().GetAssOverrideFormatted();
+	return normalize_ass_color(opt->GetString(), fallback);
+}
+
+void set_opt_ass_color(char const *name, std::string const& value) {
+	auto opt = OPT_SET(name);
+	if (opt->GetType() == agi::OptionType::Color)
+		opt->SetColor(agi::Color(value));
+	else
+		opt->SetString(value);
+}
+
 std::string alpha_tag(int alpha) {
 	char buffer[16];
 	std::snprintf(buffer, sizeof buffer, "\\alpha&H%02X&", std::max(0, std::min(255, alpha)));
@@ -245,8 +260,8 @@ LyricScrollSettings load_lyric_scroll_settings() {
 	settings.inactive_alpha = opt_int("Tool/Lyric Scroll/Inactive Alpha", 0, 255);
 	settings.layer = opt_int("Tool/Lyric Scroll/Layer", 0, 999);
 	settings.wrap_after = opt_int("Tool/Lyric Scroll/Wrap After", 0, 200);
-	settings.active_color = normalize_ass_color(OPT_GET("Tool/Lyric Scroll/Active Color")->GetString(), "&HFFFFFF&");
-	settings.inactive_color = normalize_ass_color(OPT_GET("Tool/Lyric Scroll/Inactive Color")->GetString(), "&HA8A8A8&");
+	settings.active_color = opt_ass_color("Tool/Lyric Scroll/Active Color", "&HFFFFFF&");
+	settings.inactive_color = opt_ass_color("Tool/Lyric Scroll/Inactive Color", "&HA8A8A8&");
 	return settings;
 }
 
@@ -268,8 +283,8 @@ void save_lyric_scroll_settings(LyricScrollSettings const& settings) {
 	OPT_SET("Tool/Lyric Scroll/Inactive Alpha")->SetInt(settings.inactive_alpha);
 	OPT_SET("Tool/Lyric Scroll/Layer")->SetInt(settings.layer);
 	OPT_SET("Tool/Lyric Scroll/Wrap After")->SetInt(settings.wrap_after);
-	OPT_SET("Tool/Lyric Scroll/Active Color")->SetString(settings.active_color);
-	OPT_SET("Tool/Lyric Scroll/Inactive Color")->SetString(settings.inactive_color);
+	set_opt_ass_color("Tool/Lyric Scroll/Active Color", settings.active_color);
+	set_opt_ass_color("Tool/Lyric Scroll/Inactive Color", settings.inactive_color);
 }
 
 class DialogLyricScroll final : public wxDialog {
