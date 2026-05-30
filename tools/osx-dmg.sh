@@ -37,6 +37,25 @@ DMG_TMP_DIR="${BUILD_DIR}/temp_dmg"
 DMG_PATH="${BUILD_DIR}/${PKG_NAME}.dmg"
 DMG_RW_PATH="${BUILD_DIR}/${PKG_NAME}_rw.dmg"
 
+detach_dmg() {
+  device="$1"
+  max_tries=10
+  i=1
+
+  while [ $i -le $max_tries ]; do
+    if /usr/bin/hdiutil detach "${device}" -force; then
+      return 0
+    fi
+
+    echo "hdiutil detach failed, retrying (${i}/${max_tries})..."
+    sleep 2
+    i=$((i+1))
+  done
+
+  echo "Error: hdiutil detach failed after ${max_tries} tries."
+  return 1
+}
+
 
 if ! test -d "${PKG_DIR}"; then
   echo "\"${PKG_DIR}\" does not exist, please run 'make osx-bundle'"
@@ -100,14 +119,14 @@ if test -n "${SET_STYLE}"; then
   open "/Volumes/${PKG_NAME_VOLUME}"
   read -e DUMB
 
-  hdiutil detach "${DEV_NAME}"
+  detach_dmg "${DEV_NAME}"
 
   DEV_NAME=`/usr/bin/hdiutil attach -readwrite -noverify -noautoopen "${DMG_RW_PATH}" |awk '/GUID_partition_scheme/ {print $1}'`
   echo "Device name: ${DEV_NAME}"
 
   cp -v "/Volumes/${PKG_NAME_VOLUME}/.DS_Store" "${SRC_DIR}/packages/osx_dmg/DS_Store"
   SetFile -a v "${SRC_DIR}/packages/osx_dmg/DS_Store"
-  hdiutil detach "${DEV_NAME}"
+  detach_dmg "${DEV_NAME}"
 
   rm -rf "${DMG_TMP_DIR}"  "${DMG_RW_PATH}" ${SCRIPT_TMP}.scpt ${SCRIPT_TMP}
   exit 0
@@ -119,7 +138,7 @@ fi
 echo
 echo "---- Detaching ----"
 echo /usr/bin/hdiutil detach "${DEV_NAME}" -force
-/usr/bin/hdiutil detach "${DEV_NAME}" -force
+detach_dmg "${DEV_NAME}"
 
 echo
 echo "---- Compressing ----"
