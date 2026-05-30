@@ -27,8 +27,6 @@
         "audio/karaoke"
     ],
     "main" : [
-        "tool/lyrics_scroll",
-        "",
         "subtitle/new",
         "subtitle/open",
         "subtitle/save",
