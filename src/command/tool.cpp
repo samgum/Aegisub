@@ -31,6 +31,8 @@
 
 #include "command.h"
 
+#include "../ass_dialogue.h"
+#include "../ass_file.h"
 #include "../compat.h"
 #include "../dialog_manager.h"
 #include "../dialog_styling_assistant.h"
@@ -38,17 +40,489 @@
 #include "../dialogs.h"
 #include "../include/aegisub/context.h"
 #include "../libresrc/libresrc.h"
+#include "../options.h"
 #include "../resolution_resampler.h"
+#include "../selection_controller.h"
 #include "../video_controller.h"
 
 #include <libaegisub/fs.h>
 #include <libaegisub/path.h>
 
+#include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <wx/checkbox.h>
+#include <wx/choice.h>
+#include <wx/dialog.h>
 #include <wx/msgdlg.h>
+#include <wx/radiobox.h>
+#include <wx/sizer.h>
+#include <wx/spinctrl.h>
+#include <wx/stattext.h>
+#include <wx/textctrl.h>
 #include <wx/utils.h>
 
 namespace {
 	using cmd::Command;
+
+const char *LYRIC_SCROLL_GENERATED = "MusicScroll Generated";
+const char *LYRIC_SCROLL_SOURCE = "MusicScroll Source";
+
+struct LyricScrollSettings {
+	int scope = 0;
+	int source_action = 1;
+	bool clear_previous = true;
+	bool strip_tags = true;
+	bool animate = true;
+	int center_x = 1920;
+	int center_y = 1120;
+	int line_gap = 150;
+	int active_size = 88;
+	int inactive_size = 62;
+	int visible_lines = 2;
+	int transition_ms = 360;
+	int margin_lr = 220;
+	int active_alpha = 0;
+	int inactive_alpha = 96;
+	int layer = 20;
+	int wrap_after = 46;
+	std::string active_color = "&HFFFFFF&";
+	std::string inactive_color = "&HA8A8A8&";
+};
+
+int opt_int(char const *name, int min_value, int max_value) {
+	return std::max(min_value, std::min(max_value, static_cast<int>(OPT_GET(name)->GetInt())));
+}
+
+std::string trim_copy(std::string value) {
+	value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char c) { return !std::isspace(c); }));
+	value.erase(std::find_if(value.rbegin(), value.rend(), [](unsigned char c) { return !std::isspace(c); }).base(), value.end());
+	return value;
+}
+
+bool is_hex_string(std::string const& value) {
+	return !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isxdigit(c) != 0; });
+}
+
+std::string normalize_ass_color(std::string value, char const *fallback) {
+	value = trim_copy(value);
+	if (value.size() == 7 && value[0] == '#') {
+		std::string rgb = value.substr(1);
+		if (is_hex_string(rgb))
+			return "&H" + rgb.substr(4, 2) + rgb.substr(2, 2) + rgb.substr(0, 2) + "&";
+	}
+	if (value.size() == 6 && is_hex_string(value))
+		return "&H" + value + "&";
+	if (value.size() >= 4 && value[0] == '&' && (value[1] == 'H' || value[1] == 'h'))
+		return value.back() == '&' ? value : value + "&";
+	return fallback;
+}
+
+std::string alpha_tag(int alpha) {
+	char buffer[16];
+	std::snprintf(buffer, sizeof buffer, "\\alpha&H%02X&", std::max(0, std::min(255, alpha)));
+	return buffer;
+}
+
+std::string remove_parenthesized_tag(std::string text, std::string const& tag) {
+	size_t pos = 0;
+	while ((pos = text.find(tag, pos)) != std::string::npos) {
+		size_t open = text.find('(', pos + tag.size());
+		if (open != pos + tag.size())
+			break;
+
+		int depth = 0;
+		size_t end = open;
+		for (; end < text.size(); ++end) {
+			if (text[end] == '(')
+				++depth;
+			else if (text[end] == ')' && --depth == 0) {
+				++end;
+				break;
+			}
+		}
+		text.erase(pos, end - pos);
+	}
+	return text;
+}
+
+std::string clean_motion_conflicts(std::string text) {
+	text = remove_parenthesized_tag(std::move(text), "\\fad");
+	text = remove_parenthesized_tag(std::move(text), "\\fade");
+	text = remove_parenthesized_tag(std::move(text), "\\move");
+	text = remove_parenthesized_tag(std::move(text), "\\pos");
+	text = remove_parenthesized_tag(std::move(text), "\\org");
+	return text;
+}
+
+size_t utf8_char_len(unsigned char c) {
+	if ((c & 0x80) == 0) return 1;
+	if ((c & 0xE0) == 0xC0) return 2;
+	if ((c & 0xF0) == 0xE0) return 3;
+	if ((c & 0xF8) == 0xF0) return 4;
+	return 1;
+}
+
+std::string wrap_text(std::string text, int wrap_after) {
+	if (wrap_after <= 0)
+		return text;
+
+	size_t line_start = 0;
+	size_t last_space = std::string::npos;
+	int chars = 0;
+
+	for (size_t pos = 0; pos < text.size();) {
+		if (text.compare(pos, 2, "\\N") == 0 || text[pos] == '\n') {
+			pos += text[pos] == '\n' ? 1 : 2;
+			line_start = pos;
+			last_space = std::string::npos;
+			chars = 0;
+			continue;
+		}
+
+		size_t len = utf8_char_len(static_cast<unsigned char>(text[pos]));
+		if (pos + len > text.size())
+			len = 1;
+		if (len == 1 && std::isspace(static_cast<unsigned char>(text[pos])))
+			last_space = pos;
+
+		++chars;
+		if (chars >= wrap_after && pos + len < text.size()) {
+			size_t break_pos = last_space != std::string::npos && last_space > line_start ? last_space : pos + len;
+			text.replace(break_pos, last_space == break_pos ? 1 : 0, "\\N");
+			pos = break_pos + 2;
+			line_start = pos;
+			last_space = std::string::npos;
+			chars = 0;
+			continue;
+		}
+
+		pos += len;
+	}
+
+	return text;
+}
+
+std::string make_position_tag(int x, int y, int line_gap, int transition_ms, int duration_ms, bool animate) {
+	if (!animate || transition_ms <= 0 || duration_ms <= 0)
+		return "\\pos(" + std::to_string(x) + "," + std::to_string(y) + ")";
+
+	int move_ms = std::min(transition_ms, duration_ms);
+	return "\\move(" + std::to_string(x) + "," + std::to_string(y + line_gap) + "," +
+		std::to_string(x) + "," + std::to_string(y) + ",0," + std::to_string(move_ms) + ")";
+}
+
+std::string lyric_tag(LyricScrollSettings const& settings, int offset, int y, int duration_ms) {
+	bool active = offset == 0;
+	int size = active ? settings.active_size : settings.inactive_size;
+	int alpha = active ? settings.active_alpha : settings.inactive_alpha;
+	std::string color = active ? settings.active_color : settings.inactive_color;
+	return "{\\an5\\q2\\bord0\\shad0\\blur0.6\\fscx100\\fscy100\\fs" + std::to_string(size) +
+		"\\1c" + color + alpha_tag(alpha) +
+		make_position_tag(settings.center_x, y, settings.line_gap, settings.transition_ms, duration_ms, settings.animate) + "}";
+}
+
+LyricScrollSettings load_lyric_scroll_settings() {
+	LyricScrollSettings settings;
+	settings.scope = opt_int("Tool/Lyric Scroll/Scope", 0, 1);
+	settings.source_action = opt_int("Tool/Lyric Scroll/Source Action", 0, 2);
+	settings.clear_previous = OPT_GET("Tool/Lyric Scroll/Clear Previous")->GetBool();
+	settings.strip_tags = OPT_GET("Tool/Lyric Scroll/Strip Tags")->GetBool();
+	settings.animate = OPT_GET("Tool/Lyric Scroll/Animate")->GetBool();
+	settings.center_x = opt_int("Tool/Lyric Scroll/Center X", 0, 10000);
+	settings.center_y = opt_int("Tool/Lyric Scroll/Center Y", 0, 10000);
+	settings.line_gap = opt_int("Tool/Lyric Scroll/Line Gap", 10, 1000);
+	settings.active_size = opt_int("Tool/Lyric Scroll/Active Size", 6, 400);
+	settings.inactive_size = opt_int("Tool/Lyric Scroll/Inactive Size", 6, 400);
+	settings.visible_lines = opt_int("Tool/Lyric Scroll/Visible Lines", 0, 8);
+	settings.transition_ms = opt_int("Tool/Lyric Scroll/Transition MS", 0, 5000);
+	settings.margin_lr = opt_int("Tool/Lyric Scroll/Margin LR", 0, 3000);
+	settings.active_alpha = opt_int("Tool/Lyric Scroll/Active Alpha", 0, 255);
+	settings.inactive_alpha = opt_int("Tool/Lyric Scroll/Inactive Alpha", 0, 255);
+	settings.layer = opt_int("Tool/Lyric Scroll/Layer", 0, 999);
+	settings.wrap_after = opt_int("Tool/Lyric Scroll/Wrap After", 0, 200);
+	settings.active_color = normalize_ass_color(OPT_GET("Tool/Lyric Scroll/Active Color")->GetString(), "&HFFFFFF&");
+	settings.inactive_color = normalize_ass_color(OPT_GET("Tool/Lyric Scroll/Inactive Color")->GetString(), "&HA8A8A8&");
+	return settings;
+}
+
+void save_lyric_scroll_settings(LyricScrollSettings const& settings) {
+	OPT_SET("Tool/Lyric Scroll/Scope")->SetInt(settings.scope);
+	OPT_SET("Tool/Lyric Scroll/Source Action")->SetInt(settings.source_action);
+	OPT_SET("Tool/Lyric Scroll/Clear Previous")->SetBool(settings.clear_previous);
+	OPT_SET("Tool/Lyric Scroll/Strip Tags")->SetBool(settings.strip_tags);
+	OPT_SET("Tool/Lyric Scroll/Animate")->SetBool(settings.animate);
+	OPT_SET("Tool/Lyric Scroll/Center X")->SetInt(settings.center_x);
+	OPT_SET("Tool/Lyric Scroll/Center Y")->SetInt(settings.center_y);
+	OPT_SET("Tool/Lyric Scroll/Line Gap")->SetInt(settings.line_gap);
+	OPT_SET("Tool/Lyric Scroll/Active Size")->SetInt(settings.active_size);
+	OPT_SET("Tool/Lyric Scroll/Inactive Size")->SetInt(settings.inactive_size);
+	OPT_SET("Tool/Lyric Scroll/Visible Lines")->SetInt(settings.visible_lines);
+	OPT_SET("Tool/Lyric Scroll/Transition MS")->SetInt(settings.transition_ms);
+	OPT_SET("Tool/Lyric Scroll/Margin LR")->SetInt(settings.margin_lr);
+	OPT_SET("Tool/Lyric Scroll/Active Alpha")->SetInt(settings.active_alpha);
+	OPT_SET("Tool/Lyric Scroll/Inactive Alpha")->SetInt(settings.inactive_alpha);
+	OPT_SET("Tool/Lyric Scroll/Layer")->SetInt(settings.layer);
+	OPT_SET("Tool/Lyric Scroll/Wrap After")->SetInt(settings.wrap_after);
+	OPT_SET("Tool/Lyric Scroll/Active Color")->SetString(settings.active_color);
+	OPT_SET("Tool/Lyric Scroll/Inactive Color")->SetString(settings.inactive_color);
+}
+
+class DialogLyricScroll final : public wxDialog {
+	wxRadioBox *scope = nullptr;
+	wxChoice *source_action = nullptr;
+	wxCheckBox *clear_previous = nullptr;
+	wxCheckBox *strip_tags = nullptr;
+	wxCheckBox *animate = nullptr;
+	wxSpinCtrl *center_x = nullptr;
+	wxSpinCtrl *center_y = nullptr;
+	wxSpinCtrl *line_gap = nullptr;
+	wxSpinCtrl *active_size = nullptr;
+	wxSpinCtrl *inactive_size = nullptr;
+	wxSpinCtrl *visible_lines = nullptr;
+	wxSpinCtrl *transition_ms = nullptr;
+	wxSpinCtrl *margin_lr = nullptr;
+	wxSpinCtrl *active_alpha = nullptr;
+	wxSpinCtrl *inactive_alpha = nullptr;
+	wxSpinCtrl *layer = nullptr;
+	wxSpinCtrl *wrap_after = nullptr;
+	wxTextCtrl *active_color = nullptr;
+	wxTextCtrl *inactive_color = nullptr;
+	LyricScrollSettings settings;
+
+	wxSpinCtrl *spin(int value, int min_value, int max_value) {
+		return new wxSpinCtrl(this, -1, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, min_value, max_value, value);
+	}
+
+	void add_row(wxFlexGridSizer *grid, wxString const& label, wxWindow *ctrl) {
+		grid->Add(new wxStaticText(this, -1, label), wxSizerFlags().Center().Right());
+		grid->Add(ctrl, wxSizerFlags(1).Expand());
+	}
+
+	void OnOK(wxCommandEvent&) {
+		settings.scope = scope->GetSelection();
+		settings.source_action = source_action->GetSelection();
+		settings.clear_previous = clear_previous->GetValue();
+		settings.strip_tags = strip_tags->GetValue();
+		settings.animate = animate->GetValue();
+		settings.center_x = center_x->GetValue();
+		settings.center_y = center_y->GetValue();
+		settings.line_gap = line_gap->GetValue();
+		settings.active_size = active_size->GetValue();
+		settings.inactive_size = inactive_size->GetValue();
+		settings.visible_lines = visible_lines->GetValue();
+		settings.transition_ms = transition_ms->GetValue();
+		settings.margin_lr = margin_lr->GetValue();
+		settings.active_alpha = active_alpha->GetValue();
+		settings.inactive_alpha = inactive_alpha->GetValue();
+		settings.layer = layer->GetValue();
+		settings.wrap_after = wrap_after->GetValue();
+		settings.active_color = normalize_ass_color(from_wx(active_color->GetValue()), "&HFFFFFF&");
+		settings.inactive_color = normalize_ass_color(from_wx(inactive_color->GetValue()), "&HA8A8A8&");
+		save_lyric_scroll_settings(settings);
+		EndModal(wxID_OK);
+	}
+
+public:
+	DialogLyricScroll(wxWindow *parent, agi::Context *c)
+	: wxDialog(parent, -1, _("Music Lyrics Scroll"))
+	, settings(load_lyric_scroll_settings())
+	{
+		int res_x = 0;
+		int res_y = 0;
+		c->ass->GetResolution(res_x, res_y);
+		if (settings.center_x == 0) settings.center_x = res_x > 0 ? res_x / 2 : 960;
+		if (settings.center_y == 0) settings.center_y = res_y > 0 ? res_y / 2 : 540;
+
+		wxString scope_choices[] = { _("Selected lines"), _("All dialogue lines") };
+		scope = new wxRadioBox(this, -1, _("Scope"), wxDefaultPosition, wxDefaultSize, 2, scope_choices, 1, wxRA_SPECIFY_COLS);
+		scope->SetSelection(settings.scope);
+
+		source_action = new wxChoice(this, -1);
+		source_action->Append(_("Keep source lines visible"));
+		source_action->Append(_("Comment source lines"));
+		source_action->Append(_("Delete source lines"));
+		source_action->SetSelection(settings.source_action);
+
+		clear_previous = new wxCheckBox(this, -1, _("Clear previously generated scroll lines"));
+		clear_previous->SetValue(settings.clear_previous);
+		strip_tags = new wxCheckBox(this, -1, _("Strip existing override tags from lyric text"));
+		strip_tags->SetValue(settings.strip_tags);
+		animate = new wxCheckBox(this, -1, _("Animate line movement with ASS move tags"));
+		animate->SetValue(settings.animate);
+
+		center_x = spin(settings.center_x, 0, 10000);
+		center_y = spin(settings.center_y, 0, 10000);
+		line_gap = spin(settings.line_gap, 10, 1000);
+		active_size = spin(settings.active_size, 6, 400);
+		inactive_size = spin(settings.inactive_size, 6, 400);
+		visible_lines = spin(settings.visible_lines, 0, 8);
+		transition_ms = spin(settings.transition_ms, 0, 5000);
+		margin_lr = spin(settings.margin_lr, 0, 3000);
+		active_alpha = spin(settings.active_alpha, 0, 255);
+		inactive_alpha = spin(settings.inactive_alpha, 0, 255);
+		layer = spin(settings.layer, 0, 999);
+		wrap_after = spin(settings.wrap_after, 0, 200);
+		active_color = new wxTextCtrl(this, -1, to_wx(settings.active_color));
+		inactive_color = new wxTextCtrl(this, -1, to_wx(settings.inactive_color));
+
+		auto grid = new wxFlexGridSizer(2, 7, 8);
+		grid->AddGrowableCol(1, 1);
+		add_row(grid, _("Source action"), source_action);
+		add_row(grid, _("Center X"), center_x);
+		add_row(grid, _("Center Y"), center_y);
+		add_row(grid, _("Line gap"), line_gap);
+		add_row(grid, _("Active font size"), active_size);
+		add_row(grid, _("Inactive font size"), inactive_size);
+		add_row(grid, _("Visible lines above/below"), visible_lines);
+		add_row(grid, _("Transition duration ms"), transition_ms);
+		add_row(grid, _("Left/right margin"), margin_lr);
+		add_row(grid, _("Active alpha 0-255"), active_alpha);
+		add_row(grid, _("Inactive alpha 0-255"), inactive_alpha);
+		add_row(grid, _("Layer"), layer);
+		add_row(grid, _("Wrap after characters"), wrap_after);
+		add_row(grid, _("Active color ASS BGR"), active_color);
+		add_row(grid, _("Inactive color ASS BGR"), inactive_color);
+
+		auto main = new wxBoxSizer(wxVERTICAL);
+		main->Add(scope, wxSizerFlags().Expand().Border());
+		main->Add(grid, wxSizerFlags(1).Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+		main->Add(clear_previous, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+		main->Add(strip_tags, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+		main->Add(animate, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+		main->Add(CreateButtonSizer(wxOK | wxCANCEL), wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+		SetSizerAndFit(main);
+		SetMinSize(wxSize(560, -1));
+		CenterOnParent();
+		Bind(wxEVT_BUTTON, &DialogLyricScroll::OnOK, this, wxID_OK);
+	}
+
+	LyricScrollSettings const& GetSettings() const { return settings; }
+};
+
+std::vector<AssDialogue *> collect_lyric_sources(agi::Context *c, LyricScrollSettings const& settings) {
+	std::vector<AssDialogue *> lines;
+	if (settings.scope == 0) {
+		lines = c->selectionController->GetSortedSelection();
+	}
+	else {
+		for (auto& line : c->ass->Events) {
+			if (!line.Comment || line.Effect.get() == LYRIC_SCROLL_SOURCE)
+				lines.push_back(&line);
+		}
+	}
+
+	lines.erase(std::remove_if(lines.begin(), lines.end(), [](AssDialogue *line) {
+		return line->Effect.get() == LYRIC_SCROLL_GENERATED || trim_copy(line->GetStrippedText()).empty();
+	}), lines.end());
+	return lines;
+}
+
+std::string lyric_text(AssDialogue *line, LyricScrollSettings const& settings) {
+	std::string text = settings.strip_tags ? line->GetStrippedText() : line->Text.get();
+	return wrap_text(clean_motion_conflicts(std::move(text)), settings.wrap_after);
+}
+
+void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
+	auto sources = collect_lyric_sources(c, settings);
+	bool removed_previous = false;
+	if (settings.clear_previous) {
+		c->ass->Events.remove_and_dispose_if([](AssDialogue const& line) {
+			return line.Effect.get() == LYRIC_SCROLL_GENERATED;
+		}, [&](AssDialogue *line) {
+			removed_previous = true;
+			delete line;
+		});
+	}
+
+	if (sources.empty()) {
+		if (removed_previous)
+			c->ass->Commit(_("clear music lyric scroll"), AssFile::COMMIT_DIAG_ADDREM);
+		wxMessageBox(_("No subtitle lines were available for lyric scrolling."), _("Music Lyrics Scroll"), wxOK | wxICON_INFORMATION, c->parent);
+		return;
+	}
+
+	Selection new_selection;
+	AssDialogue *new_active = nullptr;
+
+	for (size_t i = 0; i < sources.size(); ++i) {
+		int start = static_cast<int>(sources[i]->Start);
+		int end = static_cast<int>(sources[i]->End);
+		if (i + 1 < sources.size()) {
+			int next_start = static_cast<int>(sources[i + 1]->Start);
+			if (next_start > start)
+				end = next_start;
+		}
+		if (end <= start)
+			end = start + 1000;
+		int duration = end - start;
+
+		int first = std::max<int>(0, static_cast<int>(i) - settings.visible_lines);
+		int last = std::min<int>(static_cast<int>(sources.size()) - 1, static_cast<int>(i) + settings.visible_lines);
+		for (int j = first; j <= last; ++j) {
+			int offset = j - static_cast<int>(i);
+			int y = settings.center_y + offset * settings.line_gap;
+
+			auto generated = new AssDialogue(*sources[j]);
+			generated->Comment = false;
+			generated->Layer = settings.layer;
+			generated->Start = start;
+			generated->End = end;
+			generated->Effect = LYRIC_SCROLL_GENERATED;
+			generated->Margin[0] = settings.margin_lr;
+			generated->Margin[1] = settings.margin_lr;
+			generated->Text = lyric_tag(settings, offset, y, duration) + lyric_text(sources[j], settings);
+			c->ass->Events.push_back(*generated);
+			new_selection.insert(generated);
+			if (!new_active)
+				new_active = generated;
+		}
+	}
+
+	if (settings.source_action == 1) {
+		for (auto line : sources) {
+			line->Comment = true;
+			line->Effect = LYRIC_SCROLL_SOURCE;
+		}
+	}
+	else if (settings.source_action == 2) {
+		Selection source_set(sources.begin(), sources.end());
+		c->ass->Events.remove_and_dispose_if([&](AssDialogue const& line) {
+			return source_set.count(const_cast<AssDialogue *>(&line)) != 0;
+		}, [](AssDialogue *line) {
+			delete line;
+		});
+	}
+	else {
+		for (auto line : sources) {
+			if (line->Effect.get() == LYRIC_SCROLL_SOURCE)
+				line->Effect = "";
+			line->Comment = false;
+		}
+	}
+
+	c->ass->Commit(_("music lyric scroll"), AssFile::COMMIT_DIAG_ADDREM | AssFile::COMMIT_DIAG_FULL);
+	if (new_active)
+		c->selectionController->SetSelectionAndActive(std::move(new_selection), new_active);
+}
+
+struct tool_lyric_scroll final : public Command {
+	CMD_NAME("tool/lyrics_scroll")
+	CMD_ICON(timing_processor_toolbutton)
+	STR_MENU("&Music Lyrics Scroll...")
+	STR_DISP("Music Lyrics Scroll")
+	STR_HELP("Generate music-app-style scrolling lyric subtitle layers")
+
+	void operator()(agi::Context *c) override {
+		DialogLyricScroll dialog(c->parent, c);
+		if (dialog.ShowModal() == wxID_OK)
+			apply_lyric_scroll(c, dialog.GetSettings());
+	}
+};
 
 struct tool_export final : public Command {
 	CMD_NAME("tool/export")
@@ -342,6 +816,7 @@ struct tool_translation_assistant_insert final : public tool_translation_assista
 
 namespace cmd {
 	void init_tool() {
+		reg(std::make_unique<tool_lyric_scroll>());
 		reg(std::make_unique<tool_export>());
 		reg(std::make_unique<tool_font_collector>());
 		reg(std::make_unique<tool_line_select>());

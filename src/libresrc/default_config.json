@@ -575,6 +575,27 @@
 			"Shadow Percent" : 0,
 			"Size Percent" : 35
 		},
+		"Lyric Scroll" : {
+			"Active Alpha" : 0,
+			"Active Color" : "&HFFFFFF&",
+			"Active Size" : 88,
+			"Animate" : true,
+			"Center X" : 0,
+			"Center Y" : 0,
+			"Clear Previous" : true,
+			"Inactive Alpha" : 96,
+			"Inactive Color" : "&HA8A8A8&",
+			"Inactive Size" : 62,
+			"Layer" : 20,
+			"Line Gap" : 150,
+			"Margin LR" : 220,
+			"Scope" : 0,
+			"Source Action" : 1,
+			"Strip Tags" : true,
+			"Transition MS" : 360,
+			"Visible Lines" : 2,
+			"Wrap After" : 46
+		},
 		"Spell Checker" : {
 			"Backend" : "hunspell",
 			"Language" : "en_US",
