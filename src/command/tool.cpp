@@ -870,9 +870,139 @@ std::string style_font(AssFile *ass, std::string const& style_name, char const *
 	return fallback;
 }
 
-std::string build_body(LyricRow const& row, bool current, LyricScrollSettings const& settings) {
-	std::string primary = escape_ass_text(row.primary);
-	std::string secondary = escape_ass_text(row.secondary);
+double lyric_wrap_unit(std::string const& ch) {
+	if (ch.empty())
+		return 0.0;
+	unsigned char first = static_cast<unsigned char>(ch[0]);
+	if (ch.size() == 1 && std::isspace(first))
+		return 0.35;
+	if (ch.size() == 1 && std::ispunct(first))
+		return 0.45;
+	if (first < 0x80)
+		return 0.58;
+	return 1.0;
+}
+
+std::string wrap_by_units(std::string text, int max_units) {
+	if (max_units <= 0)
+		return text;
+
+	size_t line_start = 0;
+	size_t last_space = std::string::npos;
+	double units = 0.0;
+	for (size_t pos = 0; pos < text.size();) {
+		if (text.compare(pos, 2, "\\N") == 0 || text[pos] == '\n') {
+			pos += text[pos] == '\n' ? 1 : 2;
+			line_start = pos;
+			last_space = std::string::npos;
+			units = 0.0;
+			continue;
+		}
+
+		size_t len = utf8_char_len(static_cast<unsigned char>(text[pos]));
+		if (pos + len > text.size())
+			len = 1;
+		std::string ch = text.substr(pos, len);
+		if (len == 1 && std::isspace(static_cast<unsigned char>(text[pos])))
+			last_space = pos;
+
+		double next_units = units + lyric_wrap_unit(ch);
+		if (next_units > max_units && pos > line_start) {
+			size_t break_pos = last_space != std::string::npos && last_space > line_start ? last_space : pos;
+			text.replace(break_pos, last_space == break_pos ? 1 : 0, "\\N");
+			pos = break_pos + 2;
+			line_start = pos;
+			last_space = std::string::npos;
+			units = 0.0;
+			continue;
+		}
+
+		units = next_units;
+		pos += len;
+	}
+	return text;
+}
+
+int count_ass_lines(std::string const& text) {
+	if (text.empty())
+		return 0;
+
+	int lines = 1;
+	for (size_t pos = 0; (pos = text.find("\\N", pos)) != std::string::npos; pos += 2)
+		++lines;
+	return lines;
+}
+
+struct LyricRenderLayout {
+	int primary_wrap_units = 24;
+	int secondary_wrap_units = 34;
+	double padding = 40.0;
+};
+
+LyricRenderLayout make_render_layout(LyricScrollSettings const& settings, int width, int height) {
+	bool portrait = height > width;
+	double center_distance = std::abs(settings.center_x - width / 2.0);
+	double region_width = portrait ? width * 0.84 : (center_distance > width * 0.12 ? width * 0.46 : width * 0.72);
+	LyricRenderLayout layout;
+	layout.primary_wrap_units = std::max(8, static_cast<int>(std::floor(region_width / std::max(1.0, settings.active_size * 0.45))));
+	int secondary_size = std::max(6, static_cast<int>(std::lround(settings.active_size * 72.0 / 165.0)));
+	layout.secondary_wrap_units = std::max(10, static_cast<int>(std::floor(region_width / std::max(1.0, secondary_size * 0.44))));
+	layout.padding = std::max(12.0, settings.line_gap * 0.18);
+	return layout;
+}
+
+std::string wrapped_primary(LyricRow const& row, LyricRenderLayout const& layout) {
+	return wrap_by_units(row.primary, layout.primary_wrap_units);
+}
+
+std::string wrapped_secondary(LyricRow const& row, LyricRenderLayout const& layout) {
+	return wrap_by_units(row.secondary, layout.secondary_wrap_units);
+}
+
+double row_visual_height(LyricRow const& row, bool current, LyricScrollSettings const& settings, LyricRenderLayout const& layout) {
+	int primary_size = current ? settings.active_size : settings.inactive_size;
+	int secondary_size = current ?
+		std::max(6, static_cast<int>(std::lround(settings.active_size * 72.0 / 165.0))) :
+		std::max(6, static_cast<int>(std::lround(settings.inactive_size * 58.0 / 128.0)));
+
+	int primary_lines = std::max(1, count_ass_lines(wrapped_primary(row, layout)));
+	int secondary_lines = row.secondary.empty() ? 0 : std::max(1, count_ass_lines(wrapped_secondary(row, layout)));
+	double height = primary_lines * primary_size * 1.08;
+	if (secondary_lines)
+		height += primary_size * 0.18 + secondary_lines * secondary_size * 1.05;
+	return height + settings.outline_size * 2.0;
+}
+
+double center_distance_between(double first_height, double second_height, LyricScrollSettings const& settings, LyricRenderLayout const& layout) {
+	return std::max<double>(settings.line_gap, first_height / 2.0 + second_height / 2.0 + layout.padding);
+}
+
+double row_center_y(std::vector<LyricRow> const& rows, int active_index, int row_index, int center, LyricScrollSettings const& settings, LyricRenderLayout const& layout) {
+	if (row_index == active_index)
+		return center;
+
+	double y = center;
+	double previous_height = row_visual_height(rows[active_index], true, settings, layout);
+	if (row_index > active_index) {
+		for (int i = active_index + 1; i <= row_index; ++i) {
+			double height = row_visual_height(rows[i], false, settings, layout);
+			y += center_distance_between(previous_height, height, settings, layout);
+			previous_height = height;
+		}
+		return y;
+	}
+
+	for (int i = active_index - 1; i >= row_index; --i) {
+		double height = row_visual_height(rows[i], false, settings, layout);
+		y -= center_distance_between(previous_height, height, settings, layout);
+		previous_height = height;
+	}
+	return y;
+}
+
+std::string build_body(LyricRow const& row, bool current, LyricScrollSettings const& settings, LyricRenderLayout const& layout) {
+	std::string primary = escape_ass_text(wrapped_primary(row, layout));
+	std::string secondary = escape_ass_text(wrapped_secondary(row, layout));
 	if (current) {
 		std::string body = "{\\an5\\blur0.5\\fsp0}" + primary;
 		if (!secondary.empty()) {
@@ -909,11 +1039,11 @@ AssDialogue *add_scroll_dialogue(agi::Context *c, AssDialogue *base, int layer, 
 	return generated;
 }
 
-AssDialogue *add_position_dialogue(agi::Context *c, LyricRow const& row, int layer, int start, int end, double y, double scale, int alpha, std::string const& color, bool current, int x, LyricScrollSettings const& settings) {
+AssDialogue *add_position_dialogue(agi::Context *c, LyricRow const& row, int layer, int start, int end, double y, double scale, int alpha, std::string const& color, bool current, int x, LyricScrollSettings const& settings, LyricRenderLayout const& layout) {
 	char buffer[256];
-	std::snprintf(buffer, sizeof buffer, "{\\an5\\pos(%d,%d)\\alpha&H%02X&\\1c%s\\fscx%.1f\\fscy%.1f}",
+	std::snprintf(buffer, sizeof buffer, "{\\an5\\q2\\pos(%d,%d)\\alpha&H%02X&\\1c%s\\fscx%.1f\\fscy%.1f}",
 		x, static_cast<int>(std::lround(y)), std::max(0, std::min(255, alpha)), color.c_str(), scale, scale);
-	return add_scroll_dialogue(c, row.line, layer, start, end, current ? "ScrollCurrent" : "ScrollDim", std::string(buffer) + build_body(row, current, settings));
+	return add_scroll_dialogue(c, row.line, layer, start, end, current ? "ScrollCurrent" : "ScrollDim", std::string(buffer) + build_body(row, current, settings, layout));
 }
 
 void generate_scroll_events(agi::Context *c, std::vector<LyricRow> const& rows, std::vector<CreditRow> const& credits, LyricScrollSettings const& settings, Selection& new_selection, AssDialogue *&new_active) {
@@ -925,9 +1055,9 @@ void generate_scroll_events(agi::Context *c, std::vector<LyricRow> const& rows, 
 
 	int x = settings.center_x > 0 ? settings.center_x : width / 2;
 	int center = settings.center_y > 0 ? settings.center_y : height / 2;
-	int gap = settings.line_gap > 0 ? settings.line_gap : static_cast<int>(std::lround(height * 0.118));
 	int window = settings.visible_lines;
 	int motion_steps = 28;
+	auto layout = make_render_layout(settings, width, height);
 
 	for (auto const& credit : credits) {
 		std::string text = escape_ass_text(replace_all(credit.text, "\\N", " / "));
@@ -959,12 +1089,17 @@ void generate_scroll_events(agi::Context *c, std::vector<LyricRow> const& rows, 
 				if (std::abs(target_offset) > window)
 					continue;
 
+				int previous_active = static_cast<int>(active_index) - 1;
+				double start_y = previous_active >= 0 && std::abs(previous_offset) <= window ?
+					row_center_y(rows, previous_active, row_index, center, settings, layout) :
+					row_center_y(rows, static_cast<int>(active_index), row_index, center, settings, layout) + settings.line_gap;
+				double target_y = row_center_y(rows, static_cast<int>(active_index), row_index, center, settings, layout);
 				int start_offset = std::abs(previous_offset) <= window ? previous_offset : target_offset + 1;
 				double float_offset = lerp(start_offset, target_offset, progress);
 				bool current = target_offset == 0;
 				auto generated = add_position_dialogue(c, rows[row_index], current ? settings.layer : std::max(0, settings.layer - 1),
-					span_start, span_end, center + float_offset * gap, scale_for_offset(float_offset),
-					alpha_for_offset(float_offset, settings), color_for_offset(float_offset), current, x, settings);
+					span_start, span_end, lerp(start_y, target_y, progress), scale_for_offset(float_offset),
+					alpha_for_offset(float_offset, settings), color_for_offset(float_offset), current, x, settings, layout);
 				if (generated) {
 					new_selection.insert(generated);
 					if (!new_active) new_active = generated;
@@ -982,8 +1117,8 @@ void generate_scroll_events(agi::Context *c, std::vector<LyricRow> const& rows, 
 			int offset = row_index - static_cast<int>(active_index);
 			bool current = offset == 0;
 			auto generated = add_position_dialogue(c, rows[row_index], current ? settings.layer : std::max(0, settings.layer - 1),
-				hold_start, end, center + offset * gap, scale_for_offset(offset),
-				alpha_for_offset(offset, settings), color_for_offset(offset), current, x, settings);
+				hold_start, end, row_center_y(rows, static_cast<int>(active_index), row_index, center, settings, layout), scale_for_offset(offset),
+				alpha_for_offset(offset, settings), color_for_offset(offset), current, x, settings, layout);
 			if (generated) {
 				new_selection.insert(generated);
 				if (!new_active) new_active = generated;
