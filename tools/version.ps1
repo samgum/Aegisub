@@ -103,17 +103,24 @@ $version['BUILD_GIT_VERSION_NUMBER'] = $gitRevision
 $version['BUILD_GIT_VERSION_STRING'] = $gitVersionString
 
 $version.GetEnumerator() | %{
+  $key = $_.Key
   $type = $_.Value.GetType()
   $value = $_.Value
   $fmtValue = switch ($type) {
     ([string]) {"`"$value`""}
     ([int]) {$value.ToString()}
     ([bool]) {([int]$value).ToString()}
-    ([object[]]) {$value -join ', '}
+    ([object[]]) {
+      $outputParts = $value
+      if ($key -eq 'RESOURCE_BASE_VERSION' -and $value.Length -gt 3) {
+        $outputParts = $value[0..2]
+      }
+      $outputParts -join ', '
+    }
     default {
       Write-Host "no format known for type '$type' - trying default string conversion" -ForegroundColor Red
       {"`"$($value.ToString())`""}
     }
   }
-  "`n#define $($_.Key) $($fmtValue)"
+  "`n#define $($key) $($fmtValue)"
 } | Out-File -FilePath $gitVersionHeaderPath -Encoding utf8
