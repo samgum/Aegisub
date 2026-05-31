@@ -61,6 +61,7 @@
 #include <vector>
 
 #include <wx/checkbox.h>
+#include <wx/button.h>
 #include <wx/choice.h>
 #include <wx/dialog.h>
 #include <wx/msgdlg.h>
@@ -85,21 +86,97 @@ struct LyricScrollSettings {
 	bool clear_previous = true;
 	bool strip_tags = true;
 	bool animate = true;
+	int resolution_preset = 0;
+	int target_width = 3840;
+	int target_height = 2160;
 	int center_x = 0;
 	int center_y = 0;
 	int line_gap = 0;
-	int active_size = 165;
-	int inactive_size = 128;
+	int active_size = 0;
+	int inactive_size = 0;
 	int visible_lines = 3;
 	int transition_ms = 700;
-	int margin_lr = 120;
+	int margin_lr = 0;
 	int active_alpha = 0;
 	int inactive_alpha = 88;
 	int layer = 4;
 	int wrap_after = 0;
+	int outline_size = 0;
+	int shadow_size = 0;
 	std::string active_color = "&HFFFFFF&";
 	std::string inactive_color = "&HD8D8D8&";
+	std::string outline_color = "&H000000&";
 };
+
+struct ScrollResolution {
+	int script_width = 3840;
+	int script_height = 2160;
+	int target_width = 3840;
+	int target_height = 2160;
+	double scale_x = 1.0;
+	double scale_y = 1.0;
+};
+
+ScrollResolution resolve_scroll_resolution(AssFile *ass, LyricScrollSettings const& settings) {
+	ScrollResolution res;
+	ass->GetResolution(res.script_width, res.script_height);
+	if (res.script_width <= 0) res.script_width = 3840;
+	if (res.script_height <= 0) res.script_height = 2160;
+
+	switch (settings.resolution_preset) {
+		case 1:
+			res.target_width = 3840;
+			res.target_height = 2160;
+			break;
+		case 2:
+			res.target_width = 1920;
+			res.target_height = 1080;
+			break;
+		case 3:
+			res.target_width = 1280;
+			res.target_height = 720;
+			break;
+		case 4:
+			res.target_width = 1080;
+			res.target_height = 1920;
+			break;
+		case 5:
+			res.target_width = 720;
+			res.target_height = 1280;
+			break;
+		case 6:
+			res.target_width = std::max(1, settings.target_width);
+			res.target_height = std::max(1, settings.target_height);
+			break;
+		default:
+			res.target_width = res.script_width;
+			res.target_height = res.script_height;
+			break;
+	}
+
+	res.scale_x = static_cast<double>(res.script_width) / res.target_width;
+	res.scale_y = static_cast<double>(res.script_height) / res.target_height;
+	return res;
+}
+
+LyricScrollSettings resolve_layout_settings(LyricScrollSettings settings, ScrollResolution const& res) {
+	bool portrait = res.target_height > res.target_width;
+	if (settings.center_x <= 0)
+		settings.center_x = portrait ? res.target_width / 2 : static_cast<int>(std::lround(res.target_width * 2600.0 / 3840.0));
+	if (settings.center_y <= 0)
+		settings.center_y = portrait ? static_cast<int>(std::lround(res.target_height * 0.55)) : res.target_height / 2;
+	if (settings.line_gap <= 0)
+		settings.line_gap = std::max(24, static_cast<int>(std::lround(portrait ? res.target_height * 0.088 : res.target_height * 250.0 / 2160.0)));
+	if (settings.active_size <= 0)
+		settings.active_size = std::max(24, static_cast<int>(std::lround(portrait ? res.target_width * 0.072 : res.target_height * 165.0 / 2160.0)));
+	if (settings.inactive_size <= 0)
+		settings.inactive_size = std::max(18, static_cast<int>(std::lround(portrait ? res.target_width * 0.054 : res.target_height * 125.0 / 2160.0)));
+	if (settings.margin_lr <= 0)
+		settings.margin_lr = std::max(20, static_cast<int>(std::lround(portrait ? res.target_width * 0.08 : res.target_width * 555.0 / 3840.0)));
+	return settings;
+}
+
+void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings);
 
 int opt_int(char const *name, int min_value, int max_value) {
 	return std::max(min_value, std::min(max_value, static_cast<int>(OPT_GET(name)->GetInt())));
@@ -230,11 +307,14 @@ LyricScrollSettings load_lyric_scroll_settings() {
 	settings.clear_previous = OPT_GET("Tool/Lyric Scroll/Clear Previous")->GetBool();
 	settings.strip_tags = OPT_GET("Tool/Lyric Scroll/Strip Tags")->GetBool();
 	settings.animate = OPT_GET("Tool/Lyric Scroll/Animate")->GetBool();
+	settings.resolution_preset = opt_int("Tool/Lyric Scroll/Resolution Preset", 0, 6);
+	settings.target_width = opt_int("Tool/Lyric Scroll/Target Width", 1, 10000);
+	settings.target_height = opt_int("Tool/Lyric Scroll/Target Height", 1, 10000);
 	settings.center_x = opt_int("Tool/Lyric Scroll/Center X", 0, 10000);
 	settings.center_y = opt_int("Tool/Lyric Scroll/Center Y", 0, 10000);
 	settings.line_gap = opt_int("Tool/Lyric Scroll/Line Gap", 0, 1000);
-	settings.active_size = opt_int("Tool/Lyric Scroll/Active Size", 6, 400);
-	settings.inactive_size = opt_int("Tool/Lyric Scroll/Inactive Size", 6, 400);
+	settings.active_size = opt_int("Tool/Lyric Scroll/Active Size", 0, 400);
+	settings.inactive_size = opt_int("Tool/Lyric Scroll/Inactive Size", 0, 400);
 	settings.visible_lines = opt_int("Tool/Lyric Scroll/Visible Lines", 0, 8);
 	settings.transition_ms = opt_int("Tool/Lyric Scroll/Transition MS", 0, 5000);
 	settings.margin_lr = opt_int("Tool/Lyric Scroll/Margin LR", 0, 3000);
@@ -242,8 +322,11 @@ LyricScrollSettings load_lyric_scroll_settings() {
 	settings.inactive_alpha = opt_int("Tool/Lyric Scroll/Inactive Alpha", 0, 255);
 	settings.layer = opt_int("Tool/Lyric Scroll/Layer", 0, 999);
 	settings.wrap_after = opt_int("Tool/Lyric Scroll/Wrap After", 0, 200);
+	settings.outline_size = opt_int("Tool/Lyric Scroll/Outline Size", 0, 60);
+	settings.shadow_size = opt_int("Tool/Lyric Scroll/Shadow Size", 0, 60);
 	settings.active_color = opt_ass_color("Tool/Lyric Scroll/Active Color", "&HFFFFFF&");
 	settings.inactive_color = opt_ass_color("Tool/Lyric Scroll/Inactive Color", "&HD8D8D8&");
+	settings.outline_color = opt_ass_color("Tool/Lyric Scroll/Outline Color", "&H000000&");
 
 	if (settings.center_x == 1920 && settings.center_y == 1120 && settings.line_gap == 150 &&
 		settings.active_size == 88 && settings.inactive_size == 62 && settings.visible_lines == 2 &&
@@ -253,11 +336,11 @@ LyricScrollSettings load_lyric_scroll_settings() {
 		settings.center_x = 0;
 		settings.center_y = 0;
 		settings.line_gap = 0;
-		settings.active_size = 165;
-		settings.inactive_size = 128;
+		settings.active_size = 0;
+		settings.inactive_size = 0;
 		settings.visible_lines = 3;
 		settings.transition_ms = 700;
-		settings.margin_lr = 120;
+		settings.margin_lr = 0;
 		settings.inactive_alpha = 88;
 		settings.layer = 4;
 		settings.wrap_after = 0;
@@ -273,6 +356,9 @@ void save_lyric_scroll_settings(LyricScrollSettings const& settings) {
 	OPT_SET("Tool/Lyric Scroll/Clear Previous")->SetBool(settings.clear_previous);
 	OPT_SET("Tool/Lyric Scroll/Strip Tags")->SetBool(settings.strip_tags);
 	OPT_SET("Tool/Lyric Scroll/Animate")->SetBool(settings.animate);
+	OPT_SET("Tool/Lyric Scroll/Resolution Preset")->SetInt(settings.resolution_preset);
+	OPT_SET("Tool/Lyric Scroll/Target Width")->SetInt(settings.target_width);
+	OPT_SET("Tool/Lyric Scroll/Target Height")->SetInt(settings.target_height);
 	OPT_SET("Tool/Lyric Scroll/Center X")->SetInt(settings.center_x);
 	OPT_SET("Tool/Lyric Scroll/Center Y")->SetInt(settings.center_y);
 	OPT_SET("Tool/Lyric Scroll/Line Gap")->SetInt(settings.line_gap);
@@ -285,16 +371,23 @@ void save_lyric_scroll_settings(LyricScrollSettings const& settings) {
 	OPT_SET("Tool/Lyric Scroll/Inactive Alpha")->SetInt(settings.inactive_alpha);
 	OPT_SET("Tool/Lyric Scroll/Layer")->SetInt(settings.layer);
 	OPT_SET("Tool/Lyric Scroll/Wrap After")->SetInt(settings.wrap_after);
+	OPT_SET("Tool/Lyric Scroll/Outline Size")->SetInt(settings.outline_size);
+	OPT_SET("Tool/Lyric Scroll/Shadow Size")->SetInt(settings.shadow_size);
 	set_opt_ass_color("Tool/Lyric Scroll/Active Color", settings.active_color);
 	set_opt_ass_color("Tool/Lyric Scroll/Inactive Color", settings.inactive_color);
+	set_opt_ass_color("Tool/Lyric Scroll/Outline Color", settings.outline_color);
 }
 
 class DialogLyricScroll final : public wxDialog {
+	agi::Context *context = nullptr;
 	wxRadioBox *scope = nullptr;
 	wxChoice *source_action = nullptr;
+	wxChoice *resolution_preset = nullptr;
 	wxCheckBox *clear_previous = nullptr;
 	wxCheckBox *strip_tags = nullptr;
 	wxCheckBox *animate = nullptr;
+	wxSpinCtrl *target_width = nullptr;
+	wxSpinCtrl *target_height = nullptr;
 	wxSpinCtrl *center_x = nullptr;
 	wxSpinCtrl *center_y = nullptr;
 	wxSpinCtrl *line_gap = nullptr;
@@ -307,9 +400,14 @@ class DialogLyricScroll final : public wxDialog {
 	wxSpinCtrl *inactive_alpha = nullptr;
 	wxSpinCtrl *layer = nullptr;
 	wxSpinCtrl *wrap_after = nullptr;
+	wxSpinCtrl *outline_size = nullptr;
+	wxSpinCtrl *shadow_size = nullptr;
 	wxTextCtrl *active_color = nullptr;
 	wxTextCtrl *inactive_color = nullptr;
+	wxTextCtrl *outline_color = nullptr;
 	LyricScrollSettings settings;
+	int script_width = 3840;
+	int script_height = 2160;
 
 	wxSpinCtrl *spin(wxWindow *parent, int value, int min_value, int max_value) {
 		return new wxSpinCtrl(parent, -1, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, min_value, max_value, value);
@@ -320,12 +418,53 @@ class DialogLyricScroll final : public wxDialog {
 		grid->Add(ctrl, wxSizerFlags(1).Expand());
 	}
 
-	void OnOK(wxCommandEvent&) {
+	void UpdateResolutionPreset() {
+		if (!resolution_preset)
+			return;
+
+		switch (resolution_preset->GetSelection()) {
+			case 0:
+				target_width->SetValue(script_width);
+				target_height->SetValue(script_height);
+				break;
+			case 1:
+				target_width->SetValue(3840);
+				target_height->SetValue(2160);
+				break;
+			case 2:
+				target_width->SetValue(1920);
+				target_height->SetValue(1080);
+				break;
+			case 3:
+				target_width->SetValue(1280);
+				target_height->SetValue(720);
+				break;
+			case 4:
+				target_width->SetValue(1080);
+				target_height->SetValue(1920);
+				break;
+			case 5:
+				target_width->SetValue(720);
+				target_height->SetValue(1280);
+				break;
+			case 6:
+				break;
+			default:
+				target_width->SetValue(script_width);
+				target_height->SetValue(script_height);
+				break;
+		}
+	}
+
+	void CaptureSettings() {
 		settings.scope = scope->GetSelection();
 		settings.source_action = source_action->GetSelection();
 		settings.clear_previous = clear_previous->GetValue();
 		settings.strip_tags = strip_tags->GetValue();
 		settings.animate = animate->GetValue();
+		settings.resolution_preset = resolution_preset->GetSelection();
+		settings.target_width = target_width->GetValue();
+		settings.target_height = target_height->GetValue();
 		settings.center_x = center_x->GetValue();
 		settings.center_y = center_y->GetValue();
 		settings.line_gap = line_gap->GetValue();
@@ -338,22 +477,37 @@ class DialogLyricScroll final : public wxDialog {
 		settings.inactive_alpha = inactive_alpha->GetValue();
 		settings.layer = layer->GetValue();
 		settings.wrap_after = wrap_after->GetValue();
+		settings.outline_size = outline_size->GetValue();
+		settings.shadow_size = shadow_size->GetValue();
 		settings.active_color = normalize_ass_color(from_wx(active_color->GetValue()), "&HFFFFFF&");
-		settings.inactive_color = normalize_ass_color(from_wx(inactive_color->GetValue()), "&HA8A8A8&");
+		settings.inactive_color = normalize_ass_color(from_wx(inactive_color->GetValue()), "&HD8D8D8&");
+		settings.outline_color = normalize_ass_color(from_wx(outline_color->GetValue()), "&H000000&");
+	}
+
+	void OnOK(wxCommandEvent&) {
+		CaptureSettings();
 		save_lyric_scroll_settings(settings);
 		EndModal(wxID_OK);
+	}
+
+	void OnPreview(wxCommandEvent&) {
+		CaptureSettings();
+		save_lyric_scroll_settings(settings);
+		auto preview_settings = settings;
+		if (preview_settings.source_action == 2)
+			preview_settings.source_action = 1;
+		apply_lyric_scroll(context, preview_settings);
 	}
 
 public:
 	DialogLyricScroll(wxWindow *parent, agi::Context *c)
 	: wxDialog(parent, -1, _("Music Lyrics Scroll Generator"))
+	, context(c)
 	, settings(load_lyric_scroll_settings())
 	{
-		int res_x = 0;
-		int res_y = 0;
-		c->ass->GetResolution(res_x, res_y);
-		if (settings.center_x == 0) settings.center_x = res_x > 0 ? res_x / 2 : 960;
-		if (settings.center_y == 0) settings.center_y = res_y > 0 ? res_y / 2 : 540;
+		c->ass->GetResolution(script_width, script_height);
+		if (script_width <= 0) script_width = 3840;
+		if (script_height <= 0) script_height = 2160;
 
 		auto notebook = new wxNotebook(this, -1);
 		auto common_page = new wxPanel(notebook);
@@ -369,6 +523,16 @@ public:
 		source_action->Append(_("Delete original subtitles"));
 		source_action->SetSelection(settings.source_action);
 
+		resolution_preset = new wxChoice(common_page, -1);
+		resolution_preset->Append(_("Script PlayRes"));
+		resolution_preset->Append(_("2160p / 4K"));
+		resolution_preset->Append(_("1080p"));
+		resolution_preset->Append(_("720p"));
+		resolution_preset->Append(_("1080x1920 vertical"));
+		resolution_preset->Append(_("720x1280 vertical"));
+		resolution_preset->Append(_("Custom"));
+		resolution_preset->SetSelection(settings.resolution_preset);
+
 		clear_previous = new wxCheckBox(advanced_page, -1, _("Clear previous scroll results before regenerating"));
 		clear_previous->SetValue(settings.clear_previous);
 		strip_tags = new wxCheckBox(advanced_page, -1, _("Strip override tags from source subtitles"));
@@ -376,11 +540,13 @@ public:
 		animate = new wxCheckBox(advanced_page, -1, _("Enable smooth scrolling animation"));
 		animate->SetValue(settings.animate);
 
+		target_width = spin(common_page, settings.target_width, 1, 10000);
+		target_height = spin(common_page, settings.target_height, 1, 10000);
 		center_x = spin(advanced_page, settings.center_x, 0, 10000);
 		center_y = spin(common_page, settings.center_y, 0, 10000);
 		line_gap = spin(common_page, settings.line_gap, 0, 1000);
-		active_size = spin(common_page, settings.active_size, 6, 400);
-		inactive_size = spin(common_page, settings.inactive_size, 6, 400);
+		active_size = spin(common_page, settings.active_size, 0, 400);
+		inactive_size = spin(common_page, settings.inactive_size, 0, 400);
 		visible_lines = spin(common_page, settings.visible_lines, 0, 8);
 		transition_ms = spin(common_page, settings.transition_ms, 0, 5000);
 		margin_lr = spin(advanced_page, settings.margin_lr, 0, 3000);
@@ -388,16 +554,22 @@ public:
 		inactive_alpha = spin(advanced_page, settings.inactive_alpha, 0, 255);
 		layer = spin(advanced_page, settings.layer, 0, 999);
 		wrap_after = spin(common_page, settings.wrap_after, 0, 200);
+		outline_size = spin(advanced_page, settings.outline_size, 0, 60);
+		shadow_size = spin(advanced_page, settings.shadow_size, 0, 60);
 		active_color = new wxTextCtrl(advanced_page, -1, to_wx(settings.active_color));
 		inactive_color = new wxTextCtrl(advanced_page, -1, to_wx(settings.inactive_color));
+		outline_color = new wxTextCtrl(advanced_page, -1, to_wx(settings.outline_color));
 
 		auto common_grid = new wxFlexGridSizer(2, 8, 8);
 		common_grid->AddGrowableCol(1, 1);
 		add_row(common_page, common_grid, _("Source subtitle handling"), source_action);
-		add_row(common_page, common_grid, _("Current lyric Y position"), center_y);
-		add_row(common_page, common_grid, _("Active line font size"), active_size);
-		add_row(common_page, common_grid, _("Inactive line font size"), inactive_size);
-		add_row(common_page, common_grid, _("Line gap"), line_gap);
+		add_row(common_page, common_grid, _("Output resolution"), resolution_preset);
+		add_row(common_page, common_grid, _("Output width"), target_width);
+		add_row(common_page, common_grid, _("Output height"), target_height);
+		add_row(common_page, common_grid, _("Current lyric Y position (0 auto)"), center_y);
+		add_row(common_page, common_grid, _("Active line font size (0 auto)"), active_size);
+		add_row(common_page, common_grid, _("Inactive line font size (0 auto)"), inactive_size);
+		add_row(common_page, common_grid, _("Line gap (0 auto)"), line_gap);
 		add_row(common_page, common_grid, _("Visible surrounding lines"), visible_lines);
 		add_row(common_page, common_grid, _("Scroll transition (ms)"), transition_ms);
 		add_row(common_page, common_grid, _("Wrap lyrics after N chars"), wrap_after);
@@ -409,13 +581,16 @@ public:
 
 		auto advanced_grid = new wxFlexGridSizer(2, 8, 8);
 		advanced_grid->AddGrowableCol(1, 1);
-		add_row(advanced_page, advanced_grid, _("Center X position"), center_x);
-		add_row(advanced_page, advanced_grid, _("Left/right margin"), margin_lr);
+		add_row(advanced_page, advanced_grid, _("Center X position (0 auto)"), center_x);
+		add_row(advanced_page, advanced_grid, _("Left/right margin (0 auto)"), margin_lr);
 		add_row(advanced_page, advanced_grid, _("Active line alpha"), active_alpha);
 		add_row(advanced_page, advanced_grid, _("Inactive line alpha"), inactive_alpha);
 		add_row(advanced_page, advanced_grid, _("Layer"), layer);
 		add_row(advanced_page, advanced_grid, _("Active line color"), active_color);
 		add_row(advanced_page, advanced_grid, _("Inactive line color"), inactive_color);
+		add_row(advanced_page, advanced_grid, _("Border size"), outline_size);
+		add_row(advanced_page, advanced_grid, _("Shadow size"), shadow_size);
+		add_row(advanced_page, advanced_grid, _("Border color"), outline_color);
 
 		auto advanced_sizer = new wxBoxSizer(wxVERTICAL);
 		advanced_sizer->Add(advanced_grid, wxSizerFlags(1).Expand().Border());
@@ -427,13 +602,22 @@ public:
 		notebook->AddPage(common_page, _("Common"), true);
 		notebook->AddPage(advanced_page, _("Advanced"));
 
+		UpdateResolutionPreset();
+
 		auto main = new wxBoxSizer(wxVERTICAL);
 		main->Add(notebook, wxSizerFlags(1).Expand().Border());
-		main->Add(CreateButtonSizer(wxOK | wxCANCEL), wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
+		auto button_sizer = new wxBoxSizer(wxHORIZONTAL);
+		button_sizer->Add(new wxButton(this, wxID_APPLY, _("Preview")), wxSizerFlags().Border(wxRIGHT));
+		button_sizer->AddStretchSpacer();
+		button_sizer->Add(new wxButton(this, wxID_OK), wxSizerFlags().Border(wxRIGHT));
+		button_sizer->Add(new wxButton(this, wxID_CANCEL));
+		main->Add(button_sizer, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 		SetSizerAndFit(main);
 		SetMinSize(wxSize(540, -1));
 		CenterOnParent();
 		Bind(wxEVT_BUTTON, &DialogLyricScroll::OnOK, this, wxID_OK);
+		Bind(wxEVT_BUTTON, &DialogLyricScroll::OnPreview, this, wxID_APPLY);
+		resolution_preset->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { UpdateResolutionPreset(); });
 	}
 
 	LyricScrollSettings const& GetSettings() const { return settings; }
@@ -623,7 +807,7 @@ double scale_for_offset(double offset) {
 std::string color_for_offset(double offset) {
 	int gray = static_cast<int>(std::lround(interpolate_points({{0, 255}, {1, 216}, {4, 190}}, offset)));
 	char buffer[16];
-	std::snprintf(buffer, sizeof buffer, "&H00%02X%02X%02X", gray, gray, gray);
+	std::snprintf(buffer, sizeof buffer, "&H%02X%02X%02X&", gray, gray, gray);
 	return buffer;
 }
 
@@ -647,7 +831,7 @@ std::vector<std::tuple<int, int, double>> split_transition(int start, int end, i
 	return spans;
 }
 
-void upsert_scroll_style(AssFile *ass, std::string const& name, std::string const& font, int size, std::string const& primary, int margin, int outline, int shadow) {
+void upsert_scroll_style(AssFile *ass, std::string const& name, std::string const& font, int size, std::string const& primary, int margin, int outline, int shadow, std::string const& outline_color) {
 	AssStyle *style = ass->GetStyle(name);
 	if (!style) {
 		style = new AssStyle;
@@ -659,7 +843,7 @@ void upsert_scroll_style(AssFile *ass, std::string const& name, std::string cons
 	style->fontsize = size;
 	style->primary = agi::Color(primary);
 	style->secondary = agi::Color("&H000000FF");
-	style->outline = outline ? agi::Color("&H00111111") : agi::Color("&H00000000");
+	style->outline = agi::Color(outline_color);
 	style->shadow = agi::Color("&H00000000");
 	style->bold = false;
 	style->italic = false;
@@ -690,18 +874,18 @@ std::string build_body(LyricRow const& row, bool current, LyricScrollSettings co
 	std::string primary = escape_ass_text(row.primary);
 	std::string secondary = escape_ass_text(row.secondary);
 	if (current) {
-		std::string body = "{\\an5\\blur0.5\\bord0\\shad0\\fsp0}" + primary;
+		std::string body = "{\\an5\\blur0.5\\fsp0}" + primary;
 		if (!secondary.empty()) {
 			int secondary_size = std::max(6, static_cast<int>(std::lround(settings.active_size * 72.0 / 165.0)));
-			body += "\\N{\\fs" + std::to_string(secondary_size) + "\\alpha&H42&\\bord0\\shad0}" + secondary;
+			body += "\\N{\\fs" + std::to_string(secondary_size) + "\\alpha&H42&}" + secondary;
 		}
 		return body;
 	}
 
-	std::string body = "{\\an5\\blur1\\bord0\\shad0\\fsp0}" + primary;
+	std::string body = "{\\an5\\blur1\\fsp0}" + primary;
 	if (!secondary.empty()) {
 		int secondary_size = std::max(6, static_cast<int>(std::lround(settings.inactive_size * 58.0 / 128.0)));
-		body += "\\N{\\fs" + std::to_string(secondary_size) + "\\alpha&H78&\\bord0\\shad0}" + secondary;
+		body += "\\N{\\fs" + std::to_string(secondary_size) + "\\alpha&H78&}" + secondary;
 	}
 	return body;
 }
@@ -841,12 +1025,19 @@ void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
 		return;
 	}
 
+	auto resolution = resolve_scroll_resolution(c->ass.get(), settings);
+	if (resolution.target_width != resolution.script_width || resolution.target_height != resolution.script_height) {
+		c->ass->SetScriptInfo("PlayResX", std::to_string(resolution.target_width));
+		c->ass->SetScriptInfo("PlayResY", std::to_string(resolution.target_height));
+	}
+	auto layout_settings = resolve_layout_settings(settings, resolution);
+
 	std::string primary_font = style_font(c->ass.get(), primary_style, "思源黑体 CN Heavy");
 	std::string secondary_font = style_font(c->ass.get(), secondary_style, "思源黑体 CN Medium");
-	upsert_scroll_style(c->ass.get(), "ScrollCurrent", primary_font, settings.active_size, settings.active_color, settings.margin_lr, 0, 0);
-	upsert_scroll_style(c->ass.get(), "ScrollDim", secondary_font.empty() ? primary_font : secondary_font, settings.inactive_size, settings.inactive_color, settings.margin_lr, 0, 0);
-	upsert_scroll_style(c->ass.get(), "ScrollCredit", primary_font, 120, settings.active_color, settings.margin_lr, 2, 2);
-	generate_scroll_events(c, rows, credits, settings, new_selection, new_active);
+	upsert_scroll_style(c->ass.get(), "ScrollCurrent", primary_font, layout_settings.active_size, layout_settings.active_color, layout_settings.margin_lr, layout_settings.outline_size, layout_settings.shadow_size, layout_settings.outline_color);
+	upsert_scroll_style(c->ass.get(), "ScrollDim", secondary_font.empty() ? primary_font : secondary_font, layout_settings.inactive_size, layout_settings.inactive_color, layout_settings.margin_lr, layout_settings.outline_size, layout_settings.shadow_size, layout_settings.outline_color);
+	upsert_scroll_style(c->ass.get(), "ScrollCredit", primary_font, std::max(18, static_cast<int>(std::lround(layout_settings.active_size * 120.0 / 165.0))), layout_settings.active_color, layout_settings.margin_lr, layout_settings.outline_size, layout_settings.shadow_size, layout_settings.outline_color);
+	generate_scroll_events(c, rows, credits, layout_settings, new_selection, new_active);
 
 	if (settings.source_action == 1) {
 		for (auto line : sources) {
