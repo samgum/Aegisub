@@ -111,6 +111,8 @@ class OpenALPlayer final : public AudioPlayer, wxTimer {
 	/// Buffer to decode audio into
 	std::vector<char> decode_buffer;
 
+	int64_t last_position = 0;
+
 	/// Fill count OpenAL buffers
 	void FillBuffers(ALsizei count);
 
@@ -231,6 +233,7 @@ void OpenALPlayer::Play(int64_t start, int64_t count)
 	cur_frame = start;
 	end_frame = start + count;
 	playing = true;
+	last_position = start;
 
 	// Prepare buffers
 	buffers_free = num_buffers;
@@ -372,6 +375,7 @@ void OpenALPlayer::SetPlaybackSpeed(double speed)
 	if (playing) {
 		start_frame = GetCurrentPosition() - buffers_played * decode_buffer.size() / bpf;
 		playback_segment_timer.Start();
+		last_position = start_frame;
 	}
 
 	playback_speed = mid(0.25, speed, 4.0);
@@ -414,7 +418,13 @@ int64_t OpenALPlayer::GetCurrentPosition()
 		output_frames = static_cast<int64_t>(std::lround(output_frames * playback_speed));
 #endif
 
-	return std::max<int64_t>(start_frame, start_frame + output_frames);
+	int64_t real = std::max<int64_t>(start_frame, start_frame + output_frames);
+	if (real < last_position)
+		real = last_position;
+	else
+		last_position = real;
+
+	return real;
 }
 }
 

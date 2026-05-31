@@ -229,13 +229,33 @@ void PortAudioPlayer::paStreamFinishedCallback(void *) {
 }
 
 void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
+#ifdef __APPLE__
+	// Force recreating the stream to let CoreAudio pick up headphone jack transition
+	if (OPT_GET("Player/Audio/PortAudio/Device Name")->GetString() == "Default") {
+		if (stream) {
+			Pa_CloseStream(stream);
+			stream = nullptr;
+		}
+		devices.clear();
+		default_device.clear();
+		for (size_t i = 0; i < pa_host_api_priority_count; ++i) {
+			PaHostApiIndex host_idx = Pa_HostApiTypeIdToHostApiIndex(pa_host_api_priority[i]);
+			if (host_idx >= 0)
+				GatherDevices(host_idx);
+		}
+		GatherDevices(Pa_GetDefaultHostApi());
+		OpenStream();
+	}
+#else
 	RefreshDefaultDevice();
+#endif
 
 	current = start_sample;
 	start = start_sample;
 	end = start_sample + count;
 	speed_position = 0.0;
 	draining = false;
+	last_position = start_sample;
 
 #ifdef WITH_SOUNDTOUCH
 	if (tempo_processor)
@@ -378,7 +398,10 @@ int64_t PortAudioPlayer::GetCurrentPosition() {
 	// When SoundTouch is active, use the tracked input position directly
 	// as it's more reliable than time-based estimation
 	if (playback_speed != 1.0 && tempo_processor) {
-		return current;
+		int64_t real = current;
+		if (real < last_position) real = last_position;
+		else last_position = real;
+		return real;
 	}
 #endif
 
@@ -398,6 +421,11 @@ int64_t PortAudioPlayer::GetCurrentPosition() {
 		<< " real: " << real
 		<< " diff: " << pa_time - pa_start;
 #endif
+
+	if (real < last_position)
+		real = last_position;
+	else
+		last_position = real;
 
 	return real;
 }
@@ -429,6 +457,7 @@ void PortAudioPlayer::SetPlaybackSpeed(double speed) {
 		current = start;
 		speed_position = 0.0;
 		pa_start = Pa_GetStreamTime(stream);
+		last_position = start;
 	}
 
 	playback_speed = std::max(0.25, std::min(speed, 4.0));
