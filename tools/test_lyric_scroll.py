@@ -18,7 +18,10 @@ def test_dialog_has_style_preview_widgets():
     source = TOOL.read_text(encoding="utf-8")
     preview_header = (ROOT / "src" / "subs_preview.h").read_text(encoding="utf-8")
     preview_cpp = (ROOT / "src" / "subs_preview.cpp").read_text(encoding="utf-8")
+    dialog_pos = source.index("class DialogLyricScroll")
     assert '#include "../subs_preview.h"' in source
+    assert source.index("std::string plain_lyric_text(AssDialogue *line, LyricScrollSettings const& settings);") < dialog_pos
+    assert source.index("std::string escape_ass_text(std::string text);") < dialog_pos
     assert "SubtitlesPreview *active_preview" in source
     assert "SubtitlesPreview *inactive_preview" in source
     assert "std::string PreviewText(bool current)" in source
