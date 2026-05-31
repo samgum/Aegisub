@@ -80,6 +80,7 @@ class DirectSoundPlayer final : public AudioPlayer {
 	bool FillBuffer(bool fill);
 	DWORD GetPlaybackFrequency() const;
 	DirectSoundPlayerThread *thread = nullptr;
+	int64_t last_position = 0;
 
 public:
 	DirectSoundPlayer(agi::AudioProvider *provider, wxWindow *parent);
@@ -255,6 +256,7 @@ void DirectSoundPlayer::Play(int64_t start,int64_t count) {
 	endPos = start+count;
 	playPos = start;
 	offset = 0;
+	last_position = start;
 
 	// Fill whole buffer
 	FillBuffer(true);
@@ -309,7 +311,14 @@ int64_t DirectSoundPlayer::GetCurrentPosition() {
 	// (during vidoeo playback, cur_frame might get changed to resync)
 	DWORD curtime = GetTickCount();
 	int64_t tdiff = curtime - startTime;
-	return startPos + tdiff * provider->GetSampleRate() * playback_speed / 1000;
+	int64_t real = startPos + tdiff * provider->GetSampleRate() * playback_speed / 1000;
+
+	if (real < last_position)
+		real = last_position;
+	else
+		last_position = real;
+
+	return real;
 }
 
 void DirectSoundPlayer::SetPlaybackSpeed(double speed) {
@@ -318,6 +327,7 @@ void DirectSoundPlayer::SetPlaybackSpeed(double speed) {
 	if (playing) {
 		startPos = GetCurrentPosition();
 		startTime = GetTickCount();
+		last_position = startPos;
 	}
 
 	playback_speed = mid(0.25, speed, 4.0);

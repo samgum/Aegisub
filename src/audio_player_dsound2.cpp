@@ -408,6 +408,8 @@ class DirectSoundPlayer2Thread {
 	/// Convert a number of queued bytes to playback time at the current speed
 	int LatencyFromBytes(DWORD bytes, WAVEFORMATEX const& waveFormat) const;
 
+	int64_t last_position = 0;
+
 public:
 	/// @brief Constructor, creates and starts playback thread
 	/// @param provider       Audio provider to take sample data from
@@ -855,6 +857,7 @@ void DirectSoundPlayer2Thread::Play(int64_t start, int64_t count)
 
 	start_frame = start;
 	end_frame = start+count;
+	last_position = start;
 	SetEvent(event_start_playback);
 
 	last_playback_restart = GetTickCount();
@@ -901,8 +904,10 @@ void DirectSoundPlayer2Thread::SetPlaybackSpeed(double new_speed)
 {
 	CheckError();
 
-	if (IsPlaying())
+	if (IsPlaying()) {
 		start_frame = GetCurrentFrame();
+		last_position = start_frame;
+	}
 
 	playback_speed = mid(0.25, new_speed, 4.0);
 	last_playback_restart = GetTickCount();
@@ -938,7 +943,13 @@ int64_t DirectSoundPlayer2Thread::GetCurrentFrame()
 
 	int64_t milliseconds_elapsed = GetTickCount() - last_playback_restart;
 
-	return start_frame + milliseconds_elapsed * provider->GetSampleRate() * playback_speed / 1000;
+	int64_t real = start_frame + milliseconds_elapsed * provider->GetSampleRate() * playback_speed / 1000;
+	if (real < last_position)
+		real = last_position;
+	else
+		last_position = real;
+
+	return real;
 }
 
 int64_t DirectSoundPlayer2Thread::GetEndFrame()
