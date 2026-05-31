@@ -72,13 +72,14 @@ SubtitlesPreview::SubtitlesPreview(wxWindow *parent, wxSize size, int winStyle, 
 SubtitlesPreview::~SubtitlesPreview() {
 }
 
-void SubtitlesPreview::SetStyle(AssStyle const& new_style) {
+void SubtitlesPreview::SetStyle(AssStyle const& new_style, bool force_center) {
 	if (provider && style->font != new_style.font)
 		provider->Reinitialize();
 
 	*style = new_style;
 	style->name = "Default";
-	style->alignment = 5;
+	if (force_center)
+		style->alignment = 5;
 	std::fill(style->Margin.begin(), style->Margin.end(), 0);
 	style->UpdateData();
 	UpdateBitmap();

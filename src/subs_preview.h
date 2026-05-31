@@ -73,7 +73,7 @@ class SubtitlesPreview final : public wxWindow {
 
 public:
 	/// Set the style to use
-	void SetStyle(AssStyle const& style);
+	void SetStyle(AssStyle const& style, bool force_center = true);
 	/// Set the text to display
 	void SetText(std::string const& text);
 	/// Set the background color
