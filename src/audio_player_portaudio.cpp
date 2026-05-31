@@ -230,20 +230,13 @@ void PortAudioPlayer::paStreamFinishedCallback(void *) {
 
 void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 #ifdef __APPLE__
-	// Force recreating the stream to let CoreAudio pick up headphone jack transition
+	// Force recreating the stream to let CoreAudio pick up headphone jack transition without rebuilding devices
 	if (OPT_GET("Player/Audio/PortAudio/Device Name")->GetString() == "Default") {
 		if (stream) {
 			Pa_CloseStream(stream);
 			stream = nullptr;
+			active_device = paNoDevice;
 		}
-		devices.clear();
-		default_device.clear();
-		for (size_t i = 0; i < pa_host_api_priority_count; ++i) {
-			PaHostApiIndex host_idx = Pa_HostApiTypeIdToHostApiIndex(pa_host_api_priority[i]);
-			if (host_idx >= 0)
-				GatherDevices(host_idx);
-		}
-		GatherDevices(Pa_GetDefaultHostApi());
 		OpenStream();
 	}
 #else
