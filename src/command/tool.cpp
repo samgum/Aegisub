@@ -54,7 +54,6 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
-#include <cstdint>
 #include <initializer_list>
 #include <map>
 #include <set>
@@ -309,114 +308,6 @@ size_t utf8_char_len(unsigned char c) {
 	if ((c & 0xF0) == 0xE0) return 3;
 	if ((c & 0xF8) == 0xF0) return 4;
 	return 1;
-}
-
-bool decode_utf8(std::string const& text, std::vector<uint32_t>& codepoints) {
-	codepoints.clear();
-	for (size_t pos = 0; pos < text.size();) {
-		unsigned char first = static_cast<unsigned char>(text[pos]);
-		size_t len = utf8_char_len(first);
-		if (pos + len > text.size())
-			return false;
-
-		uint32_t cp = 0;
-		if (len == 1) {
-			cp = first;
-			if (first >= 0x80)
-				return false;
-		}
-		else {
-			cp = first & ((1 << (7 - len)) - 1);
-			for (size_t i = 1; i < len; ++i) {
-				unsigned char cont = static_cast<unsigned char>(text[pos + i]);
-				if ((cont & 0xC0) != 0x80)
-					return false;
-				cp = (cp << 6) | (cont & 0x3F);
-			}
-		}
-
-		codepoints.push_back(cp);
-		pos += len;
-	}
-	return true;
-}
-
-int cjk_score(std::vector<uint32_t> const& codepoints) {
-	int score = 0;
-	for (uint32_t cp : codepoints) {
-		if ((cp >= 0x3400 && cp <= 0x9FFF) || (cp >= 0x3040 && cp <= 0x30FF) || (cp >= 0xAC00 && cp <= 0xD7AF))
-			++score;
-	}
-	return score;
-}
-
-int mojibake_marker_count(std::vector<uint32_t> const& codepoints) {
-	int count = 0;
-	for (uint32_t cp : codepoints) {
-		if (cp == 0x00C2 || cp == 0x00C3 || cp == 0x00E2 || cp == 0x00E3 || cp == 0x00E6 || cp == 0x00E7 || cp == 0x00E8 || cp == 0x00E9)
-			++count;
-	}
-	return count;
-}
-
-bool append_legacy_byte(std::string& bytes, uint32_t cp) {
-	if (cp <= 0xFF) {
-		bytes.push_back(static_cast<char>(cp));
-		return true;
-	}
-
-	switch (cp) {
-		case 0x20AC: bytes.push_back(static_cast<char>(0x80)); return true;
-		case 0x201A: bytes.push_back(static_cast<char>(0x82)); return true;
-		case 0x0192: bytes.push_back(static_cast<char>(0x83)); return true;
-		case 0x201E: bytes.push_back(static_cast<char>(0x84)); return true;
-		case 0x2026: bytes.push_back(static_cast<char>(0x85)); return true;
-		case 0x2020: bytes.push_back(static_cast<char>(0x86)); return true;
-		case 0x2021: bytes.push_back(static_cast<char>(0x87)); return true;
-		case 0x02C6: bytes.push_back(static_cast<char>(0x88)); return true;
-		case 0x2030: bytes.push_back(static_cast<char>(0x89)); return true;
-		case 0x0160: bytes.push_back(static_cast<char>(0x8A)); return true;
-		case 0x2039: bytes.push_back(static_cast<char>(0x8B)); return true;
-		case 0x0152: bytes.push_back(static_cast<char>(0x8C)); return true;
-		case 0x017D: bytes.push_back(static_cast<char>(0x8E)); return true;
-		case 0x2018: bytes.push_back(static_cast<char>(0x91)); return true;
-		case 0x2019: bytes.push_back(static_cast<char>(0x92)); return true;
-		case 0x201C: bytes.push_back(static_cast<char>(0x93)); return true;
-		case 0x201D: bytes.push_back(static_cast<char>(0x94)); return true;
-		case 0x2022: bytes.push_back(static_cast<char>(0x95)); return true;
-		case 0x2013: bytes.push_back(static_cast<char>(0x96)); return true;
-		case 0x2014: bytes.push_back(static_cast<char>(0x97)); return true;
-		case 0x02DC: bytes.push_back(static_cast<char>(0x98)); return true;
-		case 0x2122: bytes.push_back(static_cast<char>(0x99)); return true;
-		case 0x0161: bytes.push_back(static_cast<char>(0x9A)); return true;
-		case 0x203A: bytes.push_back(static_cast<char>(0x9B)); return true;
-		case 0x0153: bytes.push_back(static_cast<char>(0x9C)); return true;
-		case 0x017E: bytes.push_back(static_cast<char>(0x9E)); return true;
-		case 0x0178: bytes.push_back(static_cast<char>(0x9F)); return true;
-		default: return false;
-	}
-}
-
-std::string repair_latin1_mojibake(std::string const& text) {
-	std::vector<uint32_t> original;
-	if (!decode_utf8(text, original) || mojibake_marker_count(original) < 2)
-		return text;
-
-	std::string bytes;
-	bytes.reserve(original.size());
-	for (uint32_t cp : original) {
-		if (!append_legacy_byte(bytes, cp))
-			return text;
-	}
-
-	std::vector<uint32_t> repaired;
-	if (!decode_utf8(bytes, repaired))
-		return text;
-
-	if (cjk_score(repaired) <= cjk_score(original) + 1)
-		return text;
-
-	return bytes;
 }
 
 std::string wrap_text(std::string text, int wrap_after) {
@@ -1055,7 +946,6 @@ std::string collapse_spaces_preserving_line_breaks(std::string text) {
 
 std::string plain_lyric_text(AssDialogue *line, LyricScrollSettings const& settings) {
 	std::string text = settings.strip_tags ? line->GetStrippedText() : clean_motion_conflicts(line->Text.get());
-	text = repair_latin1_mojibake(text);
 	if (settings.preserve_line_breaks)
 		return wrap_text(collapse_spaces_preserving_line_breaks(normalize_line_breaks(std::move(text))), settings.wrap_after);
 

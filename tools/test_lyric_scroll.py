@@ -122,12 +122,12 @@ def test_bilingual_matching_does_not_require_identical_timestamps():
     assert "settings.language_mode == 1" in source
 
 
-def test_mojibake_repair_is_guarded_by_cjk_score():
+def test_lyric_scroll_does_not_rewrite_text_encoding():
     source = TOOL.read_text(encoding="utf-8")
-    assert "repair_latin1_mojibake(text)" in source
-    assert "mojibake_marker_count(original) < 2" in source
-    assert "append_legacy_byte(bytes, cp)" in source
-    assert "cjk_score(repaired) <= cjk_score(original) + 1" in source
+    assert "repair_latin1_mojibake" not in source
+    assert "mojibake_marker_count" not in source
+    assert "append_legacy_byte" not in source
+    assert "std::string text = settings.strip_tags ? line->GetStrippedText() : clean_motion_conflicts(line->Text.get());" in source
 
 
 def test_transition_uses_continuous_move_tags():
@@ -154,7 +154,7 @@ def main():
         test_language_mode_style_and_font_controls_are_persisted,
         test_font_controls_use_the_style_editor_font_source,
         test_bilingual_matching_does_not_require_identical_timestamps,
-        test_mojibake_repair_is_guarded_by_cjk_score,
+        test_lyric_scroll_does_not_rewrite_text_encoding,
         test_transition_uses_continuous_move_tags,
     ]
     for test in tests:
