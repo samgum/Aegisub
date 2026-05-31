@@ -24,6 +24,8 @@ def test_dialog_has_style_preview_widgets():
     assert source.index("std::string escape_ass_text(std::string text);") < dialog_pos
     assert "SubtitlesPreview *active_preview" in source
     assert "SubtitlesPreview *inactive_preview" in source
+    assert "new SubtitlesPreview(common_page" in source
+    assert "new SubtitlesPreview(preview_box->GetStaticBox()" not in source
     assert "std::string PreviewText(bool current)" in source
     assert "Current lyric line\\\\NTranslated line" in source
     assert "UpdateStylePreview()" in source

@@ -684,8 +684,8 @@ public:
 		add_row(common_page, common_grid, _("Wrap lyrics after N chars"), wrap_after);
 
 		auto preview_box = new wxStaticBoxSizer(wxVERTICAL, common_page, _("Style preview"));
-		active_preview = new SubtitlesPreview(preview_box->GetStaticBox(), wxSize(520, 86), wxSUNKEN_BORDER, agi::Color(48, 48, 48));
-		inactive_preview = new SubtitlesPreview(preview_box->GetStaticBox(), wxSize(520, 70), wxSUNKEN_BORDER, agi::Color(48, 48, 48));
+		active_preview = new SubtitlesPreview(common_page, wxSize(520, 86), wxSUNKEN_BORDER, agi::Color(48, 48, 48));
+		inactive_preview = new SubtitlesPreview(common_page, wxSize(520, 70), wxSUNKEN_BORDER, agi::Color(48, 48, 48));
 		preview_box->Add(active_preview, wxSizerFlags().Expand().Border(wxALL, 4));
 		preview_box->Add(inactive_preview, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM, 4));
 
