@@ -7,6 +7,7 @@ OPENAL = ROOT / "src" / "audio_player_openal.cpp"
 PORTAUDIO = ROOT / "src" / "audio_player_portaudio.cpp"
 PORTAUDIO_H = ROOT / "src" / "audio_player_portaudio.h"
 SOUNDTOUCH = ROOT / "src" / "audio_player_soundtouch.cpp"
+SAMPLE_SAFETY = ROOT / "src" / "audio_sample_safety.h"
 
 
 def test_openal_uses_provider_sample_format():
@@ -39,9 +40,11 @@ def test_soundtouch_avoids_preclipping_and_output_clipping():
     source = SOUNDTOUCH.read_text(encoding="utf-8")
     assert "provider->GetAudio(source_buffer.data(), input_frame, frames)" in source
     assert "GetAudioWithVolume(source_buffer.data(), input_frame, frames, volume)" not in source
-    assert "* 0.98" in source
-    assert "std::clamp(output_buffer[i], -1.0f, 1.0f)" in source
-    assert "32767.0f" in source
+    assert "AudioSampleSafety::kSoundTouchInputHeadroom" in source
+    assert "provider->GetAudio(dst, input_frame, available)" in source
+    assert "AudioSampleSafety::ApplyGainLimiter(out, available * channels(), volume)" in source
+    assert "AudioSampleSafety::ConvertFloatToInt16Limited" in source
+    assert "std::clamp(output_buffer[i], -1.0f, 1.0f)" not in source
 
 
 def test_volume_changes_reach_soundtouch_processors():
@@ -52,6 +55,29 @@ def test_volume_changes_reach_soundtouch_processors():
     assert "tempo_processor->SetVolume(vol);" in portaudio_h
 
 
+def test_preview_output_uses_shared_peak_limiter():
+    safety = SAMPLE_SAFETY.read_text(encoding="utf-8")
+    openal = OPENAL.read_text(encoding="utf-8")
+    portaudio = PORTAUDIO.read_text(encoding="utf-8")
+    soundtouch = SOUNDTOUCH.read_text(encoding="utf-8")
+
+    assert "kPreviewCeiling = kInt16Max * 0.92" in safety
+    assert "ApplyGainLimiter" in safety
+    assert "ConvertFloatToInt16Limited" in safety
+
+    assert '#include "audio_sample_safety.h"' in openal
+    assert '#include "audio_sample_safety.h"' in portaudio
+    assert '#include "audio_sample_safety.h"' in soundtouch
+
+    assert "provider->GetAudio(outputBuffer, player->current, lenAvailable)" in portaudio
+    assert "GetAudioWithVolume(outputBuffer, player->current, lenAvailable" not in portaudio
+    assert "AudioSampleSafety::ApplyGainLimiter(" in portaudio
+
+    assert "provider->GetAudio(&decode_buffer[0], cur_frame, fill_len)" in openal
+    assert "GetAudioWithVolume(&decode_buffer[0], cur_frame, fill_len" not in openal
+    assert "AudioSampleSafety::ApplyGainLimiter(" in openal
+
+
 def main():
     tests = [
         test_openal_uses_provider_sample_format,
@@ -59,6 +85,7 @@ def main():
         test_portaudio_uses_safer_macos_latency_and_no_dither,
         test_soundtouch_avoids_preclipping_and_output_clipping,
         test_volume_changes_reach_soundtouch_processors,
+        test_preview_output_uses_shared_peak_limiter,
     ]
     for test in tests:
         test()

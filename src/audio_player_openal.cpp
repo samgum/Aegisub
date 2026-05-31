@@ -35,6 +35,7 @@
 #ifdef WITH_OPENAL
 #include "include/aegisub/audio_player.h"
 
+#include "audio_sample_safety.h"
 #include "audio_controller.h"
 #include "utils.h"
 
@@ -295,9 +296,14 @@ void OpenALPlayer::FillBuffers(ALsizei count)
 		{
 			ALsizei fill_len = mid<ALsizei>(0, decode_buffer.size() / bpf, end_frame - cur_frame);
 
-			if (fill_len > 0)
+			if (fill_len > 0) {
 				// Get fill_len frames of audio
-				provider->GetAudioWithVolume(&decode_buffer[0], cur_frame, fill_len, volume);
+				provider->GetAudio(&decode_buffer[0], cur_frame, fill_len);
+				AudioSampleSafety::ApplyGainLimiter(
+					reinterpret_cast<int16_t *>(&decode_buffer[0]),
+					(size_t)fill_len * provider->GetChannels(),
+					volume);
+			}
 			if ((size_t)fill_len * bpf < decode_buffer.size())
 				// And zerofill the rest
 				memset(&decode_buffer[fill_len * bpf], 0, decode_buffer.size() - fill_len * bpf);

@@ -1,6 +1,8 @@
 #ifdef WITH_SOUNDTOUCH
 #include "audio_player_soundtouch.h"
 
+#include "audio_sample_safety.h"
+
 #include <libaegisub/audio/provider.h>
 
 #include <SoundTouch.h>
@@ -45,9 +47,8 @@ void SoundTouchAudioProcessor::feed_more() {
 	provider->GetAudio(source_buffer.data(), input_frame, frames);
 	input_frame += frames;
 
-	auto gain = static_cast<float>(std::clamp(volume, 0.0, 2.0) * 0.98);
 	for (size_t i = 0; i < sample_count; ++i)
-		process_buffer[i] = (float)source_buffer[i] * gain / 32768.0f;
+		process_buffer[i] = (float)source_buffer[i] * AudioSampleSafety::kSoundTouchInputHeadroom / 32768.0f;
 
 	processor->putSamples(process_buffer.data(), (unsigned int)frames);
 }
@@ -91,8 +92,10 @@ size_t SoundTouchAudioProcessor::Fill(void *dst, size_t frames_requested) {
 
 	if (std::abs(playback_speed - 1.0) < 0.001) {
 		auto available = (size_t)std::max<int64_t>(0, std::min<int64_t>((int64_t)frames_requested, end_frame - input_frame));
-		if (available)
-			provider->GetAudioWithVolume(dst, input_frame, available, volume);
+		if (available) {
+			provider->GetAudio(dst, input_frame, available);
+			AudioSampleSafety::ApplyGainLimiter(out, available * channels(), volume);
+		}
 		if (available < frames_requested)
 			memset(out + available * channels(), 0, (frames_requested - available) * bytes_per_frame);
 
@@ -109,10 +112,11 @@ size_t SoundTouchAudioProcessor::Fill(void *dst, size_t frames_requested) {
 	while (filled < frames_requested && !output_finished) {
 		auto got = processor->receiveSamples(output_buffer.data(), (unsigned int)(frames_requested - filled));
 		if (got) {
-			for (size_t i = 0; i < (size_t)got * channels(); ++i) {
-				auto sample = std::clamp(output_buffer[i], -1.0f, 1.0f);
-				out[filled * channels() + i] = (int16_t)std::lround(sample * 32767.0f);
-			}
+			AudioSampleSafety::ConvertFloatToInt16Limited(
+				out + filled * channels(),
+				output_buffer.data(),
+				(size_t)got * channels(),
+				volume);
 			filled += got;
 			continue;
 		}

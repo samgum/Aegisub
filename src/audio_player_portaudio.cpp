@@ -35,6 +35,7 @@
 #ifdef WITH_PORTAUDIO
 #include "audio_player_portaudio.h"
 
+#include "audio_sample_safety.h"
 #include "audio_controller.h"
 #include "compat.h"
 #include "options.h"
@@ -260,7 +261,11 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 
 	// Play something
 	if (lenAvailable > 0 && player->playback_speed == 1.0) {
-		player->provider->GetAudioWithVolume(outputBuffer, player->current, lenAvailable, player->GetVolume());
+		player->provider->GetAudio(outputBuffer, player->current, lenAvailable);
+		AudioSampleSafety::ApplyGainLimiter(
+			static_cast<int16_t *>(outputBuffer),
+			(size_t)lenAvailable * player->provider->GetChannels(),
+			player->GetVolume());
 
 		// Set play position
 		player->current += lenAvailable;
@@ -299,7 +304,11 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 		}
 
 		player->speed_buffer.resize(source_frames * bytes_per_frame);
-		player->provider->GetAudioWithVolume(player->speed_buffer.data(), player->current, source_frames, player->GetVolume());
+		player->provider->GetAudio(player->speed_buffer.data(), player->current, source_frames);
+		AudioSampleSafety::ApplyGainLimiter(
+			reinterpret_cast<int16_t *>(player->speed_buffer.data()),
+			(size_t)source_frames * player->provider->GetChannels(),
+			player->GetVolume());
 
 		auto out = static_cast<char *>(outputBuffer);
 		double source_position = player->speed_position;
