@@ -55,6 +55,25 @@ def test_volume_changes_reach_soundtouch_processors():
     assert "tempo_processor->SetVolume(vol);" in portaudio_h
 
 
+def test_openal_reports_source_playback_offset_not_prefill_position():
+    source = OPENAL.read_text(encoding="utf-8")
+    assert "alGetSourcei(source, AL_BUFFERS_PROCESSED, &processed)" in source
+    assert "alGetSourcei(source, AL_SAMPLE_OFFSET, &sample_offset)" in source
+    assert "cur_frame + extra * samplerate" not in source
+    assert "tempo_processor && tempo_processor->IsFinished())" not in source
+
+
+def test_portaudio_reopens_default_device_after_output_route_change():
+    source = PORTAUDIO.read_text(encoding="utf-8")
+    header = PORTAUDIO_H.read_text(encoding="utf-8")
+    assert "PaDeviceIndex active_device = paNoDevice" in header
+    assert "void RefreshDefaultDevice()" in header
+    assert "void PortAudioPlayer::RefreshDefaultDevice()" in source
+    assert "Pa_GetDefaultOutputDevice()" in source
+    assert "Pa_CloseStream(stream)" in source
+    assert "RefreshDefaultDevice();" in source
+
+
 def test_preview_output_uses_shared_peak_limiter():
     safety = SAMPLE_SAFETY.read_text(encoding="utf-8")
     openal = OPENAL.read_text(encoding="utf-8")
@@ -85,6 +104,8 @@ def main():
         test_portaudio_uses_safer_macos_latency_and_no_dither,
         test_soundtouch_avoids_preclipping_and_output_clipping,
         test_volume_changes_reach_soundtouch_processors,
+        test_openal_reports_source_playback_offset_not_prefill_position,
+        test_portaudio_reopens_default_device_after_output_route_change,
         test_preview_output_uses_shared_peak_limiter,
     ]
     for test in tests:

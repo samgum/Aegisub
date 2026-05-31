@@ -66,6 +66,70 @@ def test_line_break_preservation_is_separate_from_tag_stripping():
     assert "replace_all(std::move(text), \"\\\\N\", \" \")" in source
 
 
+def test_language_mode_style_and_font_controls_are_persisted():
+    source = TOOL.read_text(encoding="utf-8")
+    config = DEFAULT_CONFIG.read_text(encoding="utf-8")
+    assert "int language_mode = 1" in source
+    assert '"Language Mode" : 1' in config
+    assert '"Single Style" : ""' in config
+    assert '"Primary Style" : ""' in config
+    assert '"Secondary Style" : ""' in config
+    assert "settings.language_mode = opt_int(\"Tool/Lyric Scroll/Language Mode\", 0, 1)" in source
+    assert "settings.single_style = opt_string(\"Tool/Lyric Scroll/Single Style\")" in source
+    assert "settings.primary_style = opt_string(\"Tool/Lyric Scroll/Primary Style\")" in source
+    assert "settings.secondary_style = opt_string(\"Tool/Lyric Scroll/Secondary Style\")" in source
+    assert "language_mode->Append(_(\"Single language\"))" in source
+    assert "language_mode->Append(_(\"Bilingual\"))" in source
+    assert "Single lyric style" in source
+    assert "Primary lyric style" in source
+    assert "Secondary lyric style" in source
+    assert "single_style_choice->Enable(!bilingual)" in source
+    assert "primary_style_choice->Enable(bilingual)" in source
+    assert "secondary_style_choice->Enable(bilingual)" in source
+    assert "style_names = c->ass->GetStyles()" in source
+
+
+def test_font_controls_use_the_style_editor_font_source():
+    source = TOOL.read_text(encoding="utf-8")
+    config = DEFAULT_CONFIG.read_text(encoding="utf-8")
+    assert "DEFAULT_ACTIVE_PRIMARY_FONT = \"思源黑体 CN Heavy\"" in source
+    assert "DEFAULT_INACTIVE_PRIMARY_FONT = \"思源黑体 CN Medium\"" in source
+    assert '"Active Primary Font" : "思源黑体 CN Heavy"' in config
+    assert '"Active Secondary Font" : "思源黑体 CN Medium"' in config
+    assert '"Inactive Primary Font" : "思源黑体 CN Medium"' in config
+    assert '"Inactive Secondary Font" : "思源黑体 CN Medium"' in config
+    assert '#include <wx/arrstr.h>' in source
+    assert '#include <wx/fontenum.h>' in source
+    assert "font_names = wxFontEnumerator::GetFacenames()" in source
+    assert "font_names.Sort()" in source
+    assert "combo->Append(font_names)" in source
+    assert "Current main font" in source
+    assert "Current secondary font" in source
+    assert "Inactive main font" in source
+    assert "Inactive secondary font" in source
+    assert "\\\\fn\" + primary_font" in source
+    assert "\\\\fn\" + secondary_font" in source
+
+
+def test_bilingual_matching_does_not_require_identical_timestamps():
+    source = TOOL.read_text(encoding="utf-8")
+    assert "struct LyricSourceLine" in source
+    assert "int timing_match_score" in source
+    assert "best_secondary_match(primary, lyric_lines, secondary_style)" in source
+    assert "std::min(primary.end, secondary.end) - std::max(primary.start, secondary.start)" in source
+    assert "start_delta <= 750" in source
+    assert "settings.language_mode == 0" in source
+    assert "settings.language_mode == 1" in source
+
+
+def test_mojibake_repair_is_guarded_by_cjk_score():
+    source = TOOL.read_text(encoding="utf-8")
+    assert "repair_latin1_mojibake(text)" in source
+    assert "mojibake_marker_count(original) < 2" in source
+    assert "append_legacy_byte(bytes, cp)" in source
+    assert "cjk_score(repaired) <= cjk_score(original) + 1" in source
+
+
 def test_transition_uses_continuous_move_tags():
     source = TOOL.read_text(encoding="utf-8")
     assert "std::tuple<int, int, double, double>" in source
@@ -87,6 +151,10 @@ def main():
         test_dialog_has_style_preview_widgets,
         test_alignment_defaults_to_center_and_generates_anchor_tags,
         test_line_break_preservation_is_separate_from_tag_stripping,
+        test_language_mode_style_and_font_controls_are_persisted,
+        test_font_controls_use_the_style_editor_font_source,
+        test_bilingual_matching_does_not_require_identical_timestamps,
+        test_mojibake_repair_is_guarded_by_cjk_score,
         test_transition_uses_continuous_move_tags,
     ]
     for test in tests:

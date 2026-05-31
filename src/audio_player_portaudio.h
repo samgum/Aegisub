@@ -70,6 +70,7 @@ class PortAudioPlayer final : public AudioPlayer {
 	int64_t start = 0;   ///< Start position
 	int64_t end = 0;     ///< End position
 	PaTime pa_start;     ///< PortAudio internal start position
+	PaDeviceIndex active_device = paNoDevice; ///< Device used by the currently open stream
 	std::vector<char> speed_buffer; ///< Temporary buffer for speed-adjusted playback
 
 	PaStream *stream = nullptr; ///< PortAudio stream
@@ -105,6 +106,7 @@ class PortAudioPlayer final : public AudioPlayer {
 	void GatherDevices(PaHostApiIndex host_idx);
 
 	void OpenStream();
+	void RefreshDefaultDevice();
 
 public:
 	/// @brief Constructor

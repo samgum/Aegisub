@@ -179,6 +179,7 @@ void PortAudioPlayer::OpenStream() {
 		PaError err = Pa_OpenStream(&stream, nullptr, &pa_output_p, provider->GetSampleRate(), 0, paPrimeOutputBuffersUsingStreamCallback | paDitherOff, paCallback, this);
 
 		if (err == paNoError) {
+			active_device = pa_output_p.device;
 			LOG_D("audo/player/portaudio") << "Using device " << pa_output_p.device << " " << device_info->name << " " << Pa_GetHostApiInfo(device_info->hostApi)->name;
 			return;
 		}
@@ -194,11 +195,42 @@ void PortAudioPlayer::OpenStream() {
 	throw AudioPlayerOpenError("Failed initializing PortAudio stream: " + error);
 }
 
+void PortAudioPlayer::RefreshDefaultDevice() {
+	if (!provider || OPT_GET("Player/Audio/PortAudio/Device Name")->GetString() != "Default")
+		return;
+
+	PaDeviceIndex current_default = Pa_GetDefaultOutputDevice();
+	if (current_default == paNoDevice || current_default == active_device)
+		return;
+
+	bool was_playing = IsPlaying();
+	if (was_playing)
+		Stop();
+
+	if (stream) {
+		Pa_CloseStream(stream);
+		stream = nullptr;
+		active_device = paNoDevice;
+	}
+
+	devices.clear();
+	default_device.clear();
+	for (size_t i = 0; i < pa_host_api_priority_count; ++i) {
+		PaHostApiIndex host_idx = Pa_HostApiTypeIdToHostApiIndex(pa_host_api_priority[i]);
+		if (host_idx >= 0)
+			GatherDevices(host_idx);
+	}
+	GatherDevices(Pa_GetDefaultHostApi());
+	OpenStream();
+}
+
 void PortAudioPlayer::paStreamFinishedCallback(void *) {
 	LOG_D("audio/player/portaudio") << "stopping stream";
 }
 
 void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
+	RefreshDefaultDevice();
+
 	current = start_sample;
 	start = start_sample;
 	end = start_sample + count;

@@ -54,6 +54,8 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <set>
 #include <string>
@@ -61,10 +63,13 @@
 #include <utility>
 #include <vector>
 
+#include <wx/arrstr.h>
 #include <wx/checkbox.h>
 #include <wx/button.h>
 #include <wx/choice.h>
+#include <wx/combobox.h>
 #include <wx/dialog.h>
+#include <wx/fontenum.h>
 #include <wx/msgdlg.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
@@ -80,10 +85,15 @@ namespace {
 
 const char *LYRIC_SCROLL_GENERATED = "MusicScroll Generated";
 const char *LYRIC_SCROLL_SOURCE = "MusicScroll Source";
+const char *DEFAULT_ACTIVE_PRIMARY_FONT = "思源黑体 CN Heavy";
+const char *DEFAULT_ACTIVE_SECONDARY_FONT = "思源黑体 CN Medium";
+const char *DEFAULT_INACTIVE_PRIMARY_FONT = "思源黑体 CN Medium";
+const char *DEFAULT_INACTIVE_SECONDARY_FONT = "思源黑体 CN Medium";
 
 struct LyricScrollSettings {
 	int scope = 0;
 	int source_action = 1;
+	int language_mode = 1;
 	bool clear_previous = true;
 	bool strip_tags = true;
 	bool preserve_line_breaks = true;
@@ -109,6 +119,13 @@ struct LyricScrollSettings {
 	std::string active_color = "&HFFFFFF&";
 	std::string inactive_color = "&HD8D8D8&";
 	std::string outline_color = "&H000000&";
+	std::string single_style;
+	std::string primary_style;
+	std::string secondary_style;
+	std::string active_primary_font = DEFAULT_ACTIVE_PRIMARY_FONT;
+	std::string active_secondary_font = DEFAULT_ACTIVE_SECONDARY_FONT;
+	std::string inactive_primary_font = DEFAULT_INACTIVE_PRIMARY_FONT;
+	std::string inactive_secondary_font = DEFAULT_INACTIVE_SECONDARY_FONT;
 };
 
 struct ScrollResolution {
@@ -205,6 +222,23 @@ std::string trim_copy(std::string value) {
 	return value;
 }
 
+std::string opt_string(char const *name, char const *fallback = "") {
+	auto value = trim_copy(OPT_GET(name)->GetString());
+	return value.empty() ? fallback : value;
+}
+
+std::string font_or_default(std::string font, char const *fallback) {
+	font = trim_copy(std::move(font));
+	return font.empty() ? fallback : font;
+}
+
+std::string clean_ass_tag_value(std::string value) {
+	value.erase(std::remove_if(value.begin(), value.end(), [](char c) {
+		return c == '{' || c == '}' || c == '\\' || c == '\r' || c == '\n';
+	}), value.end());
+	return value;
+}
+
 bool is_hex_string(std::string const& value) {
 	return !value.empty() && std::all_of(value.begin(), value.end(), [](unsigned char c) { return std::isxdigit(c) != 0; });
 }
@@ -277,6 +311,114 @@ size_t utf8_char_len(unsigned char c) {
 	return 1;
 }
 
+bool decode_utf8(std::string const& text, std::vector<uint32_t>& codepoints) {
+	codepoints.clear();
+	for (size_t pos = 0; pos < text.size();) {
+		unsigned char first = static_cast<unsigned char>(text[pos]);
+		size_t len = utf8_char_len(first);
+		if (pos + len > text.size())
+			return false;
+
+		uint32_t cp = 0;
+		if (len == 1) {
+			cp = first;
+			if (first >= 0x80)
+				return false;
+		}
+		else {
+			cp = first & ((1 << (7 - len)) - 1);
+			for (size_t i = 1; i < len; ++i) {
+				unsigned char cont = static_cast<unsigned char>(text[pos + i]);
+				if ((cont & 0xC0) != 0x80)
+					return false;
+				cp = (cp << 6) | (cont & 0x3F);
+			}
+		}
+
+		codepoints.push_back(cp);
+		pos += len;
+	}
+	return true;
+}
+
+int cjk_score(std::vector<uint32_t> const& codepoints) {
+	int score = 0;
+	for (uint32_t cp : codepoints) {
+		if ((cp >= 0x3400 && cp <= 0x9FFF) || (cp >= 0x3040 && cp <= 0x30FF) || (cp >= 0xAC00 && cp <= 0xD7AF))
+			++score;
+	}
+	return score;
+}
+
+int mojibake_marker_count(std::vector<uint32_t> const& codepoints) {
+	int count = 0;
+	for (uint32_t cp : codepoints) {
+		if (cp == 0x00C2 || cp == 0x00C3 || cp == 0x00E2 || cp == 0x00E3 || cp == 0x00E6 || cp == 0x00E7 || cp == 0x00E8 || cp == 0x00E9)
+			++count;
+	}
+	return count;
+}
+
+bool append_legacy_byte(std::string& bytes, uint32_t cp) {
+	if (cp <= 0xFF) {
+		bytes.push_back(static_cast<char>(cp));
+		return true;
+	}
+
+	switch (cp) {
+		case 0x20AC: bytes.push_back(static_cast<char>(0x80)); return true;
+		case 0x201A: bytes.push_back(static_cast<char>(0x82)); return true;
+		case 0x0192: bytes.push_back(static_cast<char>(0x83)); return true;
+		case 0x201E: bytes.push_back(static_cast<char>(0x84)); return true;
+		case 0x2026: bytes.push_back(static_cast<char>(0x85)); return true;
+		case 0x2020: bytes.push_back(static_cast<char>(0x86)); return true;
+		case 0x2021: bytes.push_back(static_cast<char>(0x87)); return true;
+		case 0x02C6: bytes.push_back(static_cast<char>(0x88)); return true;
+		case 0x2030: bytes.push_back(static_cast<char>(0x89)); return true;
+		case 0x0160: bytes.push_back(static_cast<char>(0x8A)); return true;
+		case 0x2039: bytes.push_back(static_cast<char>(0x8B)); return true;
+		case 0x0152: bytes.push_back(static_cast<char>(0x8C)); return true;
+		case 0x017D: bytes.push_back(static_cast<char>(0x8E)); return true;
+		case 0x2018: bytes.push_back(static_cast<char>(0x91)); return true;
+		case 0x2019: bytes.push_back(static_cast<char>(0x92)); return true;
+		case 0x201C: bytes.push_back(static_cast<char>(0x93)); return true;
+		case 0x201D: bytes.push_back(static_cast<char>(0x94)); return true;
+		case 0x2022: bytes.push_back(static_cast<char>(0x95)); return true;
+		case 0x2013: bytes.push_back(static_cast<char>(0x96)); return true;
+		case 0x2014: bytes.push_back(static_cast<char>(0x97)); return true;
+		case 0x02DC: bytes.push_back(static_cast<char>(0x98)); return true;
+		case 0x2122: bytes.push_back(static_cast<char>(0x99)); return true;
+		case 0x0161: bytes.push_back(static_cast<char>(0x9A)); return true;
+		case 0x203A: bytes.push_back(static_cast<char>(0x9B)); return true;
+		case 0x0153: bytes.push_back(static_cast<char>(0x9C)); return true;
+		case 0x017E: bytes.push_back(static_cast<char>(0x9E)); return true;
+		case 0x0178: bytes.push_back(static_cast<char>(0x9F)); return true;
+		default: return false;
+	}
+}
+
+std::string repair_latin1_mojibake(std::string const& text) {
+	std::vector<uint32_t> original;
+	if (!decode_utf8(text, original) || mojibake_marker_count(original) < 2)
+		return text;
+
+	std::string bytes;
+	bytes.reserve(original.size());
+	for (uint32_t cp : original) {
+		if (!append_legacy_byte(bytes, cp))
+			return text;
+	}
+
+	std::vector<uint32_t> repaired;
+	if (!decode_utf8(bytes, repaired))
+		return text;
+
+	if (cjk_score(repaired) <= cjk_score(original) + 1)
+		return text;
+
+	return bytes;
+}
+
 std::string wrap_text(std::string text, int wrap_after) {
 	if (wrap_after <= 0)
 		return text;
@@ -321,6 +463,7 @@ LyricScrollSettings load_lyric_scroll_settings() {
 	LyricScrollSettings settings;
 	settings.scope = opt_int("Tool/Lyric Scroll/Scope", 0, 1);
 	settings.source_action = opt_int("Tool/Lyric Scroll/Source Action", 0, 2);
+	settings.language_mode = opt_int("Tool/Lyric Scroll/Language Mode", 0, 1);
 	settings.clear_previous = OPT_GET("Tool/Lyric Scroll/Clear Previous")->GetBool();
 	settings.strip_tags = OPT_GET("Tool/Lyric Scroll/Strip Tags")->GetBool();
 	settings.preserve_line_breaks = OPT_GET("Tool/Lyric Scroll/Preserve Line Breaks")->GetBool();
@@ -346,6 +489,13 @@ LyricScrollSettings load_lyric_scroll_settings() {
 	settings.active_color = opt_ass_color("Tool/Lyric Scroll/Active Color", "&HFFFFFF&");
 	settings.inactive_color = opt_ass_color("Tool/Lyric Scroll/Inactive Color", "&HD8D8D8&");
 	settings.outline_color = opt_ass_color("Tool/Lyric Scroll/Outline Color", "&H000000&");
+	settings.single_style = opt_string("Tool/Lyric Scroll/Single Style");
+	settings.primary_style = opt_string("Tool/Lyric Scroll/Primary Style");
+	settings.secondary_style = opt_string("Tool/Lyric Scroll/Secondary Style");
+	settings.active_primary_font = opt_string("Tool/Lyric Scroll/Active Primary Font", DEFAULT_ACTIVE_PRIMARY_FONT);
+	settings.active_secondary_font = opt_string("Tool/Lyric Scroll/Active Secondary Font", DEFAULT_ACTIVE_SECONDARY_FONT);
+	settings.inactive_primary_font = opt_string("Tool/Lyric Scroll/Inactive Primary Font", DEFAULT_INACTIVE_PRIMARY_FONT);
+	settings.inactive_secondary_font = opt_string("Tool/Lyric Scroll/Inactive Secondary Font", DEFAULT_INACTIVE_SECONDARY_FONT);
 
 	if (settings.center_x == 1920 && settings.center_y == 1120 && settings.line_gap == 150 &&
 		settings.active_size == 88 && settings.inactive_size == 62 && settings.visible_lines == 2 &&
@@ -372,6 +522,7 @@ LyricScrollSettings load_lyric_scroll_settings() {
 void save_lyric_scroll_settings(LyricScrollSettings const& settings) {
 	OPT_SET("Tool/Lyric Scroll/Scope")->SetInt(settings.scope);
 	OPT_SET("Tool/Lyric Scroll/Source Action")->SetInt(settings.source_action);
+	OPT_SET("Tool/Lyric Scroll/Language Mode")->SetInt(settings.language_mode);
 	OPT_SET("Tool/Lyric Scroll/Clear Previous")->SetBool(settings.clear_previous);
 	OPT_SET("Tool/Lyric Scroll/Strip Tags")->SetBool(settings.strip_tags);
 	OPT_SET("Tool/Lyric Scroll/Preserve Line Breaks")->SetBool(settings.preserve_line_breaks);
@@ -397,12 +548,23 @@ void save_lyric_scroll_settings(LyricScrollSettings const& settings) {
 	set_opt_ass_color("Tool/Lyric Scroll/Active Color", settings.active_color);
 	set_opt_ass_color("Tool/Lyric Scroll/Inactive Color", settings.inactive_color);
 	set_opt_ass_color("Tool/Lyric Scroll/Outline Color", settings.outline_color);
+	OPT_SET("Tool/Lyric Scroll/Single Style")->SetString(settings.single_style);
+	OPT_SET("Tool/Lyric Scroll/Primary Style")->SetString(settings.primary_style);
+	OPT_SET("Tool/Lyric Scroll/Secondary Style")->SetString(settings.secondary_style);
+	OPT_SET("Tool/Lyric Scroll/Active Primary Font")->SetString(font_or_default(settings.active_primary_font, DEFAULT_ACTIVE_PRIMARY_FONT));
+	OPT_SET("Tool/Lyric Scroll/Active Secondary Font")->SetString(font_or_default(settings.active_secondary_font, DEFAULT_ACTIVE_SECONDARY_FONT));
+	OPT_SET("Tool/Lyric Scroll/Inactive Primary Font")->SetString(font_or_default(settings.inactive_primary_font, DEFAULT_INACTIVE_PRIMARY_FONT));
+	OPT_SET("Tool/Lyric Scroll/Inactive Secondary Font")->SetString(font_or_default(settings.inactive_secondary_font, DEFAULT_INACTIVE_SECONDARY_FONT));
 }
 
 class DialogLyricScroll final : public wxDialog {
 	agi::Context *context = nullptr;
 	wxRadioBox *scope = nullptr;
 	wxChoice *source_action = nullptr;
+	wxChoice *language_mode = nullptr;
+	wxChoice *single_style_choice = nullptr;
+	wxChoice *primary_style_choice = nullptr;
+	wxChoice *secondary_style_choice = nullptr;
 	wxChoice *resolution_preset = nullptr;
 	wxChoice *horizontal_alignment = nullptr;
 	wxCheckBox *clear_previous = nullptr;
@@ -428,11 +590,17 @@ class DialogLyricScroll final : public wxDialog {
 	wxTextCtrl *active_color = nullptr;
 	wxTextCtrl *inactive_color = nullptr;
 	wxTextCtrl *outline_color = nullptr;
+	wxComboBox *active_primary_font = nullptr;
+	wxComboBox *active_secondary_font = nullptr;
+	wxComboBox *inactive_primary_font = nullptr;
+	wxComboBox *inactive_secondary_font = nullptr;
 	SubtitlesPreview *active_preview = nullptr;
 	SubtitlesPreview *inactive_preview = nullptr;
 	LyricScrollSettings settings;
 	int script_width = 3840;
 	int script_height = 2160;
+	std::vector<std::string> style_names;
+	wxArrayString font_names;
 
 	wxSpinCtrl *spin(wxWindow *parent, int value, int min_value, int max_value) {
 		return new wxSpinCtrl(parent, -1, "", wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, min_value, max_value, value);
@@ -441,6 +609,44 @@ class DialogLyricScroll final : public wxDialog {
 	void add_row(wxWindow *parent, wxFlexGridSizer *grid, wxString const& label, wxWindow *ctrl) {
 		grid->Add(new wxStaticText(parent, -1, label), wxSizerFlags().Center().Right());
 		grid->Add(ctrl, wxSizerFlags(1).Expand());
+	}
+
+	void FillStyleChoice(wxChoice *choice, std::string const& selected) {
+		choice->Append(_("Auto"));
+		int selected_index = 0;
+		for (size_t i = 0; i < style_names.size(); ++i) {
+			choice->Append(to_wx(style_names[i]));
+			if (style_names[i] == selected)
+				selected_index = static_cast<int>(i + 1);
+		}
+		choice->SetSelection(selected_index);
+	}
+
+	std::string SelectedStyle(wxChoice *choice) const {
+		int selection = choice->GetSelection();
+		if (selection <= 0 || static_cast<size_t>(selection - 1) >= style_names.size())
+			return "";
+		return style_names[selection - 1];
+	}
+
+	wxComboBox *FontCombo(wxWindow *parent, std::string value, char const *fallback) {
+		value = font_or_default(std::move(value), fallback);
+		auto combo = new wxComboBox(parent, -1, to_wx(value), wxDefaultPosition, wxDefaultSize, 0, nullptr, wxCB_DROPDOWN);
+		combo->Append(font_names);
+		combo->SetValue(to_wx(value));
+		return combo;
+	}
+
+	void UpdateLanguageMode() {
+		if (!language_mode)
+			return;
+
+		bool bilingual = language_mode->GetSelection() == 1;
+		if (single_style_choice) single_style_choice->Enable(!bilingual);
+		if (primary_style_choice) primary_style_choice->Enable(bilingual);
+		if (secondary_style_choice) secondary_style_choice->Enable(bilingual);
+		if (active_secondary_font) active_secondary_font->Enable(bilingual);
+		if (inactive_secondary_font) inactive_secondary_font->Enable(bilingual);
 	}
 
 	void UpdateResolutionPreset() {
@@ -484,6 +690,10 @@ class DialogLyricScroll final : public wxDialog {
 	void CaptureSettings() {
 		settings.scope = scope->GetSelection();
 		settings.source_action = source_action->GetSelection();
+		settings.language_mode = language_mode->GetSelection();
+		settings.single_style = SelectedStyle(single_style_choice);
+		settings.primary_style = SelectedStyle(primary_style_choice);
+		settings.secondary_style = SelectedStyle(secondary_style_choice);
 		settings.clear_previous = clear_previous->GetValue();
 		settings.strip_tags = strip_tags->GetValue();
 		settings.preserve_line_breaks = preserve_line_breaks->GetValue();
@@ -509,6 +719,10 @@ class DialogLyricScroll final : public wxDialog {
 		settings.active_color = normalize_ass_color(from_wx(active_color->GetValue()), "&HFFFFFF&");
 		settings.inactive_color = normalize_ass_color(from_wx(inactive_color->GetValue()), "&HD8D8D8&");
 		settings.outline_color = normalize_ass_color(from_wx(outline_color->GetValue()), "&H000000&");
+		settings.active_primary_font = font_or_default(from_wx(active_primary_font->GetValue()), DEFAULT_ACTIVE_PRIMARY_FONT);
+		settings.active_secondary_font = font_or_default(from_wx(active_secondary_font->GetValue()), DEFAULT_ACTIVE_SECONDARY_FONT);
+		settings.inactive_primary_font = font_or_default(from_wx(inactive_primary_font->GetValue()), DEFAULT_INACTIVE_PRIMARY_FONT);
+		settings.inactive_secondary_font = font_or_default(from_wx(inactive_secondary_font->GetValue()), DEFAULT_INACTIVE_SECONDARY_FONT);
 	}
 
 	void OnOK(wxCommandEvent&) {
@@ -517,21 +731,10 @@ class DialogLyricScroll final : public wxDialog {
 		EndModal(wxID_OK);
 	}
 
-	std::string PreviewFont(char const *fallback) {
-		auto selected = context->selectionController->GetSortedSelection();
-		for (auto line : selected) {
-			if (auto style = context->ass->GetStyle(line->Style))
-				return style->font;
-		}
-
-		for (auto const& line : context->ass->Events) {
-			if (!line.Comment) {
-				if (auto style = context->ass->GetStyle(line.Style))
-					return style->font;
-			}
-		}
-
-		return fallback;
+	std::string PreviewFont(bool current) const {
+		return current ?
+			font_or_default(settings.active_primary_font, DEFAULT_ACTIVE_PRIMARY_FONT) :
+			font_or_default(settings.inactive_primary_font, DEFAULT_INACTIVE_PRIMARY_FONT);
 	}
 
 	std::string PreviewText(bool current) {
@@ -567,7 +770,7 @@ class DialogLyricScroll final : public wxDialog {
 		int source_size = current ? layout_settings.active_size : layout_settings.inactive_size;
 
 		AssStyle style;
-		style.font = PreviewFont("Arial");
+		style.font = PreviewFont(current);
 		style.fontsize = std::max(10, std::min(44, static_cast<int>(std::lround(source_size * preview_scale * 1.2))));
 		style.primary = agi::Color(current ? layout_settings.active_color : layout_settings.inactive_color);
 		style.secondary = agi::Color("&H000000FF");
@@ -608,6 +811,9 @@ public:
 		c->ass->GetResolution(script_width, script_height);
 		if (script_width <= 0) script_width = 3840;
 		if (script_height <= 0) script_height = 2160;
+		style_names = c->ass->GetStyles();
+		font_names = wxFontEnumerator::GetFacenames();
+		font_names.Sort();
 
 		auto notebook = new wxNotebook(this, -1);
 		auto common_page = new wxPanel(notebook);
@@ -622,6 +828,18 @@ public:
 		source_action->Append(_("Comment-hide originals (recommended)"));
 		source_action->Append(_("Delete original subtitles"));
 		source_action->SetSelection(settings.source_action);
+
+		language_mode = new wxChoice(common_page, -1);
+		language_mode->Append(_("Single language"));
+		language_mode->Append(_("Bilingual"));
+		language_mode->SetSelection(settings.language_mode);
+
+		single_style_choice = new wxChoice(common_page, -1);
+		FillStyleChoice(single_style_choice, settings.single_style);
+		primary_style_choice = new wxChoice(common_page, -1);
+		FillStyleChoice(primary_style_choice, settings.primary_style);
+		secondary_style_choice = new wxChoice(common_page, -1);
+		FillStyleChoice(secondary_style_choice, settings.secondary_style);
 
 		resolution_preset = new wxChoice(common_page, -1);
 		resolution_preset->Append(_("Script PlayRes"));
@@ -667,10 +885,18 @@ public:
 		active_color = new wxTextCtrl(advanced_page, -1, to_wx(settings.active_color));
 		inactive_color = new wxTextCtrl(advanced_page, -1, to_wx(settings.inactive_color));
 		outline_color = new wxTextCtrl(advanced_page, -1, to_wx(settings.outline_color));
+		active_primary_font = FontCombo(advanced_page, settings.active_primary_font, DEFAULT_ACTIVE_PRIMARY_FONT);
+		active_secondary_font = FontCombo(advanced_page, settings.active_secondary_font, DEFAULT_ACTIVE_SECONDARY_FONT);
+		inactive_primary_font = FontCombo(advanced_page, settings.inactive_primary_font, DEFAULT_INACTIVE_PRIMARY_FONT);
+		inactive_secondary_font = FontCombo(advanced_page, settings.inactive_secondary_font, DEFAULT_INACTIVE_SECONDARY_FONT);
 
 		auto common_grid = new wxFlexGridSizer(2, 8, 8);
 		common_grid->AddGrowableCol(1, 1);
 		add_row(common_page, common_grid, _("Source subtitle handling"), source_action);
+		add_row(common_page, common_grid, _("Lyric language mode"), language_mode);
+		add_row(common_page, common_grid, _("Single lyric style"), single_style_choice);
+		add_row(common_page, common_grid, _("Primary lyric style"), primary_style_choice);
+		add_row(common_page, common_grid, _("Secondary lyric style"), secondary_style_choice);
 		add_row(common_page, common_grid, _("Output resolution"), resolution_preset);
 		add_row(common_page, common_grid, _("Output width"), target_width);
 		add_row(common_page, common_grid, _("Output height"), target_height);
@@ -702,6 +928,10 @@ public:
 		add_row(advanced_page, advanced_grid, _("Active line alpha"), active_alpha);
 		add_row(advanced_page, advanced_grid, _("Inactive line alpha"), inactive_alpha);
 		add_row(advanced_page, advanced_grid, _("Layer"), layer);
+		add_row(advanced_page, advanced_grid, _("Current main font"), active_primary_font);
+		add_row(advanced_page, advanced_grid, _("Current secondary font"), active_secondary_font);
+		add_row(advanced_page, advanced_grid, _("Inactive main font"), inactive_primary_font);
+		add_row(advanced_page, advanced_grid, _("Inactive secondary font"), inactive_secondary_font);
 		add_row(advanced_page, advanced_grid, _("Active line color"), active_color);
 		add_row(advanced_page, advanced_grid, _("Inactive line color"), inactive_color);
 		add_row(advanced_page, advanced_grid, _("Border size"), outline_size);
@@ -735,6 +965,8 @@ public:
 		Bind(wxEVT_BUTTON, &DialogLyricScroll::OnOK, this, wxID_OK);
 		Bind(wxEVT_BUTTON, &DialogLyricScroll::OnPreview, this, wxID_APPLY);
 		resolution_preset->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { UpdateResolutionPreset(); });
+		language_mode->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { UpdateLanguageMode(); });
+		UpdateLanguageMode();
 		UpdateStylePreview();
 	}
 
@@ -823,6 +1055,7 @@ std::string collapse_spaces_preserving_line_breaks(std::string text) {
 
 std::string plain_lyric_text(AssDialogue *line, LyricScrollSettings const& settings) {
 	std::string text = settings.strip_tags ? line->GetStrippedText() : clean_motion_conflicts(line->Text.get());
+	text = repair_latin1_mojibake(text);
 	if (settings.preserve_line_breaks)
 		return wrap_text(collapse_spaces_preserving_line_breaks(normalize_line_breaks(std::move(text))), settings.wrap_after);
 
@@ -857,10 +1090,62 @@ struct CreditRow {
 	AssDialogue *line = nullptr;
 };
 
-std::string most_common_style(std::map<std::string, int> const& counts) {
-	return std::max_element(counts.begin(), counts.end(), [](auto const& a, auto const& b) {
-		return a.second < b.second;
-	})->first;
+struct LyricSourceLine {
+	int start = 0;
+	int end = 0;
+	std::string style;
+	std::string text;
+	AssDialogue *line = nullptr;
+};
+
+std::string most_common_style_except(std::map<std::string, int> const& counts, std::string const& excluded) {
+	auto best = counts.end();
+	for (auto it = counts.begin(); it != counts.end(); ++it) {
+		if (it->first == excluded)
+			continue;
+		if (best == counts.end() || it->second > best->second)
+			best = it;
+	}
+	return best == counts.end() ? "" : best->first;
+}
+
+std::string choose_style(std::set<std::string> const& styles_seen, std::map<std::string, int> const& counts, std::string const& configured, std::initializer_list<char const *> preferred, std::string const& excluded = "") {
+	if (!configured.empty() && configured != excluded && styles_seen.count(configured))
+		return configured;
+
+	for (auto style : preferred) {
+		std::string style_name = style;
+		if (style_name != excluded && styles_seen.count(style_name))
+			return style_name;
+	}
+
+	return most_common_style_except(counts, excluded);
+}
+
+int timing_match_score(LyricSourceLine const& primary, LyricSourceLine const& secondary) {
+	int overlap = std::min(primary.end, secondary.end) - std::max(primary.start, secondary.start);
+	int start_delta = std::abs(primary.start - secondary.start);
+	int end_delta = std::abs(primary.end - secondary.end);
+	if (overlap > 0)
+		return 1000000 + overlap - start_delta / 4 - end_delta / 8;
+	if (start_delta <= 750)
+		return 100000 - start_delta - end_delta / 4;
+	return -1;
+}
+
+LyricSourceLine const *best_secondary_match(LyricSourceLine const& primary, std::vector<LyricSourceLine> const& lines, std::string const& secondary_style) {
+	LyricSourceLine const *best = nullptr;
+	int best_score = -1;
+	for (auto const& line : lines) {
+		if (line.style != secondary_style)
+			continue;
+		int score = timing_match_score(primary, line);
+		if (score > best_score) {
+			best = &line;
+			best_score = score;
+		}
+	}
+	return best;
 }
 
 void normalize_row_end_times(std::vector<LyricRow>& rows, int default_duration_ms) {
@@ -875,7 +1160,7 @@ void normalize_row_end_times(std::vector<LyricRow>& rows, int default_duration_m
 void build_lyric_rows(std::vector<AssDialogue *> const& sources, LyricScrollSettings const& settings, std::vector<LyricRow>& rows, std::vector<CreditRow>& credits, std::string& primary_style, std::string& secondary_style, std::string& credit_style) {
 	std::set<std::string> styles_seen;
 	std::map<std::string, int> style_counts;
-	std::map<std::pair<int, int>, std::map<std::string, std::pair<std::string, AssDialogue *>>> grouped;
+	std::vector<LyricSourceLine> lyric_lines;
 	credit_style = "制作人员";
 
 	for (auto line : sources) {
@@ -891,40 +1176,41 @@ void build_lyric_rows(std::vector<AssDialogue *> const& sources, LyricScrollSett
 		}
 
 		++style_counts[style];
-		grouped[{static_cast<int>(line->Start), static_cast<int>(line->End)}][style] = {text, line};
+		lyric_lines.push_back({static_cast<int>(line->Start), static_cast<int>(line->End), style, text, line});
 	}
 
-	if (styles_seen.count("中"))
-		primary_style = "中";
-	else if (!style_counts.empty())
-		primary_style = most_common_style(style_counts);
+	std::sort(lyric_lines.begin(), lyric_lines.end(), [](auto const& a, auto const& b) {
+		return std::tie(a.start, a.end, a.style) < std::tie(b.start, b.end, b.style);
+	});
 
-	if (styles_seen.count("英") && primary_style != "英")
-		secondary_style = "英";
+	if (settings.language_mode == 0) {
+		primary_style = choose_style(styles_seen, style_counts, settings.single_style, {"中", "中文", "Chinese", "CHS", "zh"});
+		secondary_style.clear();
+	}
+	else {
+		primary_style = choose_style(styles_seen, style_counts, settings.primary_style, {"中", "中文", "Chinese", "CHS", "zh"});
+		secondary_style = choose_style(styles_seen, style_counts, settings.secondary_style, {"英", "英文", "English", "ENG", "EN", "日", "日文", "日语", "Japanese", "JP", "罗马音", "Romaji", "原文", "Original"}, primary_style);
+	}
 
-	for (auto const& group : grouped) {
-		auto const& by_style = group.second;
-		auto primary_it = by_style.find(primary_style);
-		if (primary_it == by_style.end()) {
-			if (primary_style.empty() && !by_style.empty())
-				primary_it = by_style.begin();
-			else
-				continue;
-		}
+	if (primary_style.empty())
+		return;
+
+	for (auto const& primary : lyric_lines) {
+		if (primary.style != primary_style)
+			continue;
 
 		std::string secondary;
-		if (!secondary_style.empty()) {
-			auto secondary_it = by_style.find(secondary_style);
-			if (secondary_it != by_style.end())
-				secondary = secondary_it->second.first;
+		if (settings.language_mode == 1 && !secondary_style.empty()) {
+			if (auto match = best_secondary_match(primary, lyric_lines, secondary_style))
+				secondary = match->text;
 		}
 
 		rows.push_back({
-			group.first.first,
-			group.first.second,
-			primary_it->second.first,
+			primary.start,
+			primary.end,
+			primary.text,
 			secondary,
-			primary_it->second.second
+			primary.line
 		});
 	}
 
@@ -1023,12 +1309,6 @@ void upsert_scroll_style(AssFile *ass, std::string const& name, std::string cons
 	style->Margin[2] = 0;
 	style->encoding = 1;
 	style->UpdateData();
-}
-
-std::string style_font(AssFile *ass, std::string const& style_name, char const *fallback) {
-	if (auto style = ass->GetStyle(style_name))
-		return style->font;
-	return fallback;
 }
 
 double lyric_wrap_unit(std::string const& ch) {
@@ -1165,19 +1445,25 @@ std::string build_body(LyricRow const& row, bool current, LyricScrollSettings co
 	std::string primary = escape_ass_text(wrapped_primary(row, layout));
 	std::string secondary = escape_ass_text(wrapped_secondary(row, layout));
 	std::string alignment = "\\an" + std::to_string(lyric_ass_alignment(settings));
+	std::string primary_font = clean_ass_tag_value(current ?
+		font_or_default(settings.active_primary_font, DEFAULT_ACTIVE_PRIMARY_FONT) :
+		font_or_default(settings.inactive_primary_font, DEFAULT_INACTIVE_PRIMARY_FONT));
+	std::string secondary_font = clean_ass_tag_value(current ?
+		font_or_default(settings.active_secondary_font, DEFAULT_ACTIVE_SECONDARY_FONT) :
+		font_or_default(settings.inactive_secondary_font, DEFAULT_INACTIVE_SECONDARY_FONT));
 	if (current) {
-		std::string body = "{" + alignment + "\\blur0.5\\fsp0}" + primary;
+		std::string body = "{" + alignment + "\\blur0.5\\fsp0\\fn" + primary_font + "}" + primary;
 		if (!secondary.empty()) {
 			int secondary_size = std::max(6, static_cast<int>(std::lround(settings.active_size * 72.0 / 165.0)));
-			body += "\\N{\\fs" + std::to_string(secondary_size) + "\\alpha&H42&}" + secondary;
+			body += "\\N{\\fn" + secondary_font + "\\fs" + std::to_string(secondary_size) + "\\alpha&H42&}" + secondary;
 		}
 		return body;
 	}
 
-	std::string body = "{" + alignment + "\\blur1\\fsp0}" + primary;
+	std::string body = "{" + alignment + "\\blur1\\fsp0\\fn" + primary_font + "}" + primary;
 	if (!secondary.empty()) {
 		int secondary_size = std::max(6, static_cast<int>(std::lround(settings.inactive_size * 58.0 / 128.0)));
-		body += "\\N{\\fs" + std::to_string(secondary_size) + "\\alpha&H78&}" + secondary;
+		body += "\\N{\\fn" + secondary_font + "\\fs" + std::to_string(secondary_size) + "\\alpha&H78&}" + secondary;
 	}
 	return body;
 }
@@ -1350,11 +1636,11 @@ void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
 	}
 	auto layout_settings = resolve_layout_settings(settings, resolution);
 
-	std::string primary_font = style_font(c->ass.get(), primary_style, "思源黑体 CN Heavy");
-	std::string secondary_font = style_font(c->ass.get(), secondary_style, "思源黑体 CN Medium");
+	std::string primary_font = font_or_default(settings.active_primary_font, DEFAULT_ACTIVE_PRIMARY_FONT);
+	std::string inactive_font = font_or_default(settings.inactive_primary_font, DEFAULT_INACTIVE_PRIMARY_FONT);
 	int alignment = lyric_ass_alignment(layout_settings);
 	upsert_scroll_style(c->ass.get(), "ScrollCurrent", primary_font, layout_settings.active_size, layout_settings.active_color, layout_settings.margin_lr, layout_settings.outline_size, layout_settings.shadow_size, layout_settings.outline_color, alignment);
-	upsert_scroll_style(c->ass.get(), "ScrollDim", secondary_font.empty() ? primary_font : secondary_font, layout_settings.inactive_size, layout_settings.inactive_color, layout_settings.margin_lr, layout_settings.outline_size, layout_settings.shadow_size, layout_settings.outline_color, alignment);
+	upsert_scroll_style(c->ass.get(), "ScrollDim", inactive_font, layout_settings.inactive_size, layout_settings.inactive_color, layout_settings.margin_lr, layout_settings.outline_size, layout_settings.shadow_size, layout_settings.outline_color, alignment);
 	upsert_scroll_style(c->ass.get(), "ScrollCredit", primary_font, std::max(18, static_cast<int>(std::lround(layout_settings.active_size * 120.0 / 165.0))), layout_settings.active_color, layout_settings.margin_lr, layout_settings.outline_size, layout_settings.shadow_size, layout_settings.outline_color, alignment);
 	generate_scroll_events(c, rows, credits, layout_settings, new_selection, new_active);
 

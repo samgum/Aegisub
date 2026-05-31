@@ -53,12 +53,13 @@ else
   git_revision=0
 fi
 git_version_str=$(git describe --tags --exact-match 2> /dev/null)
-installer_version='0.0.0'
-resource_version='0, 0, 0'
+meson_version=$(sed -n "s/.*version: '\([0-9][0-9.]*\)'.*/\1/p" "${srcdir}/meson.build" | head -n 1)
+installer_version="${meson_version:-0.0.0.0}"
+resource_version=$(echo "$installer_version" | sed 's/\./, /g')
 if test x$git_version_str != x; then
   git_version_str="${git_version_str##v}"
   tagged_release=1
-  if [ $(echo $git_version_str | grep '^[0-9]\.[0-9]\.[0-9]$') ]; then
+  if echo "$git_version_str" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
     installer_version=$git_version_str
     resource_version=$(echo $git_version_str | sed 's/\./, /g')
   fi

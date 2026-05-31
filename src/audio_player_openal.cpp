@@ -347,14 +347,6 @@ void OpenALPlayer::Notify()
 
 	LOG_D("player/audio/openal") << "frames played=" << (buffers_played - num_buffers) * decode_buffer.size() / bpf << " num frames=" << end_frame - start_frame;
 
-#ifdef WITH_SOUNDTOUCH
-	// Check if SoundTouch processor has finished outputting all audio
-	if (tempo_processor && tempo_processor->IsFinished()) {
-		Stop();
-		return;
-	}
-#endif
-
 	// Check that all of the selected audio plus one full set of buffers has been queued
 	if ((buffers_played - num_buffers) * (int64_t)decode_buffer.size() > (end_frame - start_frame) * bpf) {
 		Stop();
@@ -405,17 +397,24 @@ void OpenALPlayer::SetPlaybackSpeed(double speed)
 
 int64_t OpenALPlayer::GetCurrentPosition()
 {
+	if (!playing || !context)
+		return start_frame;
+
+	alcMakeContextCurrent(context);
+	ALint processed = 0;
+	ALint sample_offset = 0;
+	alGetSourcei(source, AL_BUFFERS_PROCESSED, &processed);
+	alGetSourcei(source, AL_SAMPLE_OFFSET, &sample_offset);
+
+	int64_t buffer_frames = decode_buffer.size() / bpf;
+	int64_t output_frames = (buffers_played + std::max<ALint>(0, processed)) * buffer_frames + std::max<ALint>(0, sample_offset);
+
 #ifdef WITH_SOUNDTOUCH
-	if (tempo_processor) {
-		// Use cur_frame (SoundTouch input position) as base, plus fractional time since last buffer fill
-		long extra = playback_segment_timer.Time();
-		return cur_frame + extra * samplerate * playback_speed / 1000;
-	}
+	if (tempo_processor)
+		output_frames = static_cast<int64_t>(std::lround(output_frames * playback_speed));
 #endif
-	// FIXME: this should be based on not duration played but actual sample being heard
-	// (during video playback, cur_frame might get changed to resync)
-	long extra = playback_segment_timer.Time();
-	return buffers_played * decode_buffer.size() / bpf + start_frame + extra * samplerate * playback_speed / 1000;
+
+	return std::max<int64_t>(start_frame, start_frame + output_frames);
 }
 }
 

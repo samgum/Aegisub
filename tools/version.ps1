@@ -11,8 +11,8 @@ $lastSvnRevision = 6962
 $lastSvnHash = '16cd907fe7482cb54a7374cd28b8501f138116be'
 $defineNumberMatch = [regex] '^#define\s+(\w+)\s+(\d+)$'
 $defineStringMatch = [regex] "^#define\s+(\w+)\s+[`"']?(.+?)[`"']?$"
-$semVerMatch = [regex] 'v?(\d+)\.(\d+).(\d+)(?:-(\w+))?'
-$mesonVersionMatch = [regex] "version:\s*'(\d+)\.(\d+)\.(\d+)'"
+$semVerMatch = [regex] '^v?(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?(?:-(\w+))?$'
+$mesonVersionMatch = [regex] "version:\s*'(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?'"
 
 $repositoryRootPath = Join-Path $PSScriptRoot .. | Resolve-Path
 if (!(git -C $repositoryRootPath rev-parse --is-inside-work-tree 2>$null)) {
@@ -49,38 +49,53 @@ $gitBranch = git -C $repositoryRootPath symbolic-ref --short HEAD 2>$null
 $gitHash = git -C $repositoryRootPath rev-parse --short HEAD 2>$null
 $gitVersionString = $gitRevision, $gitBranch, $gitHash -join '-'
 $exactGitTag = git -C $repositoryRootPath describe --exact-match --tags 2>$null
+$mesonVersionParts = $null
+$mesonBuildPath = Join-Path $repositoryRootPath 'meson.build'
+$mesonBuild = Get-Content $mesonBuildPath -Raw
+if ($mesonBuild -match $mesonVersionMatch) {
+  $mesonVersionParts = @($Matches[1], $Matches[2], $Matches[3])
+  if ($Matches[4]) { $mesonVersionParts += $Matches[4] }
+}
 
 if ($gitVersionString -eq $version['BUILD_GIT_VERSION_STRING']) {
   exit 0
 }
 
 if ($exactGitTag -match $semVerMatch) {
+  $versionParts = @($Matches[1], $Matches[2], $Matches[3])
+  if ($Matches[4]) { $versionParts += $Matches[4] }
   $version['TAGGED_RELEASE'] = $true
-  $version['RESOURCE_BASE_VERSION'] = $Matches[1..3]
-  $version['INSTALLER_VERSION'] = $gitVersionString = ($Matches[1..3] -join '.') + @("-$($Matches[4])",'')[!$Matches[4]]
+  $version['RESOURCE_BASE_VERSION'] = $versionParts
+  $version['INSTALLER_VERSION'] = $gitVersionString = ($versionParts -join '.') + @("-$($Matches[5])",'')[!$Matches[5]]
 } else {
-  foreach ($rev in (git -C $repositoryRootPath rev-list --tags 2>$null)) {
-    $tag = git -C $repositoryRootPath describe --exact-match --tags $rev 2>$null
-    if ($tag -match $semVerMatch) {#
-      $version['TAGGED_RELEASE'] = $false
-      $version['RESOURCE_BASE_VERSION'] = $Matches[1..3]
-      $version['INSTALLER_VERSION'] = ($Matches[1..3] -join '.')
-      break;
+  if ($mesonVersionParts) {
+    $version['TAGGED_RELEASE'] = $false
+    $version['RESOURCE_BASE_VERSION'] = $mesonVersionParts
+    $version['INSTALLER_VERSION'] = ($mesonVersionParts -join '.')
+  } else {
+    foreach ($rev in (git -C $repositoryRootPath rev-list --tags 2>$null)) {
+      $tag = git -C $repositoryRootPath describe --exact-match --tags $rev 2>$null
+      if ($tag -match $semVerMatch) {#
+        $versionParts = @($Matches[1], $Matches[2], $Matches[3])
+        if ($Matches[4]) { $versionParts += $Matches[4] }
+        $version['TAGGED_RELEASE'] = $false
+        $version['RESOURCE_BASE_VERSION'] = $versionParts
+        $version['INSTALLER_VERSION'] = ($versionParts -join '.')
+        break;
+      }
     }
   }
 }
 
 if (!$version.ContainsKey('RESOURCE_BASE_VERSION')) {
-  $mesonBuildPath = Join-Path $repositoryRootPath 'meson.build'
-  $mesonBuild = Get-Content $mesonBuildPath -Raw
-  if ($mesonBuild -match $mesonVersionMatch) {
+  if ($mesonVersionParts) {
     $version['TAGGED_RELEASE'] = $false
-    $version['RESOURCE_BASE_VERSION'] = $Matches[1..3]
-    $version['INSTALLER_VERSION'] = ($Matches[1..3] -join '.')
+    $version['RESOURCE_BASE_VERSION'] = $mesonVersionParts
+    $version['INSTALLER_VERSION'] = ($mesonVersionParts -join '.')
   } else {
     $version['TAGGED_RELEASE'] = $false
-    $version['RESOURCE_BASE_VERSION'] = 0, 0, 0
-    $version['INSTALLER_VERSION'] = '0.0.0'
+    $version['RESOURCE_BASE_VERSION'] = 0, 0, 0, 0
+    $version['INSTALLER_VERSION'] = '0.0.0.0'
   }
 }
 
