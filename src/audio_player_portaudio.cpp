@@ -77,15 +77,7 @@ PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(pro
 	if (err != paNoError)
 		throw AudioPlayerOpenError(std::string("Failed opening PortAudio: ") + Pa_GetErrorText(err));
 
-	// Build a list of host API-specific devices we can use
-	// Some host APIs may not support all audio formats, so build a priority
-	// list of host APIs for each device rather than just always using the best
-	for (size_t i = 0; i < pa_host_api_priority_count; ++i) {
-		PaHostApiIndex host_idx = Pa_HostApiTypeIdToHostApiIndex(pa_host_api_priority[i]);
-		if (host_idx >= 0)
-			GatherDevices(host_idx);
-	}
-	GatherDevices(Pa_GetDefaultHostApi());
+	RebuildDeviceList();
 
 	if (devices.empty())
 		throw AudioPlayerOpenError("No PortAudio output devices found");
@@ -123,21 +115,60 @@ void PortAudioPlayer::GatherDevices(PaHostApiIndex host_idx) {
 			--dev_it;
 		}
 
-		dev_it->second.push_back(real_idx);
-		if (real_idx == host_info->defaultOutputDevice)
+		if (std::find(dev_it->second.begin(), dev_it->second.end(), real_idx) == dev_it->second.end())
+			dev_it->second.push_back(real_idx);
+		if (real_idx == host_info->defaultOutputDevice && std::find(default_device.begin(), default_device.end(), real_idx) == default_device.end())
 			default_device.push_back(real_idx);
 	}
 }
 
 PortAudioPlayer::~PortAudioPlayer() {
-	if (stream) {
-		Stop();
-		Pa_CloseStream(stream);
-	}
+	CloseStream();
 #ifdef WITH_SOUNDTOUCH
 	tempo_processor.reset();
 #endif
 	Pa_Terminate();
+}
+
+void PortAudioPlayer::RebuildDeviceList() {
+	devices.clear();
+	default_device.clear();
+
+	// Build a list of host API-specific devices we can use
+	// Some host APIs may not support all audio formats, so build a priority
+	// list of host APIs for each device rather than just always using the best
+	for (size_t i = 0; i < pa_host_api_priority_count; ++i) {
+		PaHostApiIndex host_idx = Pa_HostApiTypeIdToHostApiIndex(pa_host_api_priority[i]);
+		if (host_idx >= 0)
+			GatherDevices(host_idx);
+	}
+	GatherDevices(Pa_GetDefaultHostApi());
+
+	// On macOS the route can move between speakers, headphone jack and external
+	// devices without preserving our cached host-api priority order. Prefer the
+	// system's live default output device whenever the user selected Default.
+	PaDeviceIndex current_default = Pa_GetDefaultOutputDevice();
+	const PaDeviceInfo *current_default_info = current_default == paNoDevice ? nullptr : Pa_GetDeviceInfo(current_default);
+	if (current_default_info && current_default_info->maxOutputChannels > 0) {
+		auto it = std::find(default_device.begin(), default_device.end(), current_default);
+		if (it == default_device.end())
+			default_device.insert(default_device.begin(), current_default);
+		else if (it != default_device.begin())
+			std::rotate(default_device.begin(), it, it + 1);
+	}
+}
+
+void PortAudioPlayer::CloseStream() {
+	if (!stream)
+		return;
+
+	PaError active = Pa_IsStreamActive(stream);
+	if (active == 1)
+		Pa_StopStream(stream);
+
+	Pa_CloseStream(stream);
+	stream = nullptr;
+	active_device = paNoDevice;
 }
 
 void PortAudioPlayer::OpenStream() {
@@ -195,32 +226,20 @@ void PortAudioPlayer::OpenStream() {
 	throw AudioPlayerOpenError("Failed initializing PortAudio stream: " + error);
 }
 
-void PortAudioPlayer::RefreshDefaultDevice() {
+void PortAudioPlayer::RefreshDefaultDevice(bool force) {
 	if (!provider || OPT_GET("Player/Audio/PortAudio/Device Name")->GetString() != "Default")
 		return;
 
 	PaDeviceIndex current_default = Pa_GetDefaultOutputDevice();
-	if (current_default == paNoDevice || current_default == active_device)
+	if (!force && (current_default == paNoDevice || current_default == active_device))
 		return;
 
 	bool was_playing = IsPlaying();
 	if (was_playing)
 		Stop();
 
-	if (stream) {
-		Pa_CloseStream(stream);
-		stream = nullptr;
-		active_device = paNoDevice;
-	}
-
-	devices.clear();
-	default_device.clear();
-	for (size_t i = 0; i < pa_host_api_priority_count; ++i) {
-		PaHostApiIndex host_idx = Pa_HostApiTypeIdToHostApiIndex(pa_host_api_priority[i]);
-		if (host_idx >= 0)
-			GatherDevices(host_idx);
-	}
-	GatherDevices(Pa_GetDefaultHostApi());
+	CloseStream();
+	RebuildDeviceList();
 	OpenStream();
 }
 
@@ -230,15 +249,10 @@ void PortAudioPlayer::paStreamFinishedCallback(void *) {
 
 void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 #ifdef __APPLE__
-	// Force recreating the stream to let CoreAudio pick up headphone jack transition without rebuilding devices
-	if (OPT_GET("Player/Audio/PortAudio/Device Name")->GetString() == "Default") {
-		if (stream) {
-			Pa_CloseStream(stream);
-			stream = nullptr;
-			active_device = paNoDevice;
-		}
-		OpenStream();
-	}
+	// CoreAudio can keep the same PortAudio device index while the route moves
+	// between speakers, headphone jack and external devices. Reopen Default
+	// against a fresh device list before each play command.
+	RefreshDefaultDevice(true);
 #else
 	RefreshDefaultDevice();
 #endif
@@ -273,7 +287,8 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 }
 
 void PortAudioPlayer::Stop() {
-	Pa_StopStream(stream);
+	if (stream)
+		Pa_StopStream(stream);
 }
 
 int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
@@ -441,7 +456,7 @@ wxArrayString PortAudioPlayer::GetOutputDevices() {
 }
 
 bool PortAudioPlayer::IsPlaying() {
-	return !!Pa_IsStreamActive(stream);
+	return stream && Pa_IsStreamActive(stream) == 1;
 }
 
 void PortAudioPlayer::SetPlaybackSpeed(double speed) {

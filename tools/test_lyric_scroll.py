@@ -5,6 +5,34 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "src" / "command" / "tool.cpp"
 DEFAULT_CONFIG = ROOT / "src" / "libresrc" / "default_config.json"
+POT = ROOT / "po" / "aegisub.pot"
+ZH_CN = ROOT / "po" / "zh_CN.po"
+ZH_TW = ROOT / "po" / "zh_TW.po"
+
+
+LYRIC_SCROLL_UI_STRINGS = [
+    "Single language",
+    "Bilingual",
+    "Center",
+    "Preserve manual \\\\N line breaks",
+    "Lyric language mode",
+    "Single lyric style",
+    "Primary lyric style",
+    "Secondary lyric style",
+    "Output resolution",
+    "Current lyric Y position (0 auto)",
+    "Active line font size (0 auto)",
+    "Inactive line font size (0 auto)",
+    "Style preview",
+    "Current main font",
+    "Current secondary font",
+    "Inactive main font",
+    "Inactive secondary font",
+    "Border size",
+    "Shadow size",
+    "Border color",
+    "Update Preview",
+]
 
 
 def test_dialog_preview_does_not_write_subtitles():
@@ -30,6 +58,8 @@ def test_dialog_has_style_preview_widgets():
     assert "Current lyric line\\\\NTranslated line" in source
     assert "UpdateStylePreview()" in source
     assert "Update Preview" in source
+    assert "wxID_APPLY" not in source
+    assert "wxWindow::NewControlId()" in source
     assert "void SetStyle(AssStyle const& style, bool force_center = true)" in preview_header
     assert "void SubtitlesPreview::SetStyle(AssStyle const& new_style, bool force_center)" in preview_cpp
 
@@ -145,6 +175,20 @@ def test_transition_uses_continuous_move_tags():
     assert "target_y = is_visible" in source
 
 
+def test_lyric_scroll_ui_strings_are_localized():
+    pot = POT.read_text(encoding="utf-8")
+    zh_cn = ZH_CN.read_text(encoding="utf-8")
+    zh_tw = ZH_TW.read_text(encoding="utf-8")
+    for text in LYRIC_SCROLL_UI_STRINGS:
+        msgid = f'msgid "{text}"'
+        assert msgid in pot
+        assert msgid in zh_cn
+        assert msgid in zh_tw
+
+    assert 'msgid "Update Preview"\nmsgstr "更新预览"' in zh_cn
+    assert 'msgid "Update Preview"\nmsgstr "更新預覽"' in zh_tw
+
+
 def main():
     tests = [
         test_dialog_preview_does_not_write_subtitles,
@@ -156,6 +200,7 @@ def main():
         test_bilingual_matching_does_not_require_identical_timestamps,
         test_lyric_scroll_does_not_rewrite_text_encoding,
         test_transition_uses_continuous_move_tags,
+        test_lyric_scroll_ui_strings_are_localized,
     ]
     for test in tests:
         test()

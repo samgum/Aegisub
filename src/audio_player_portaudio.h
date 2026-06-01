@@ -106,8 +106,10 @@ class PortAudioPlayer final : public AudioPlayer {
 	/// @param host_idx Host API ID
 	void GatherDevices(PaHostApiIndex host_idx);
 
+	void RebuildDeviceList();
+	void CloseStream();
 	void OpenStream();
-	void RefreshDefaultDevice();
+	void RefreshDefaultDevice(bool force = false);
 
 public:
 	/// @brief Constructor

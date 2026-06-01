@@ -154,6 +154,8 @@ wxDialog (c->parent, -1, _("Select"), wxDefaultPosition, wxDefaultSize, wxCAPTIO
 	}
 
 	main_sizer->Add(CreateButtonSizer(wxOK | wxCANCEL | wxAPPLY | wxHELP), main_flags);
+	if (auto apply_button = FindWindow(wxID_APPLY))
+		apply_button->SetLabel(_("Apply"));
 
 	SetSizerAndFit(main_sizer);
 	CenterOnParent();

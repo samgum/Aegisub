@@ -845,7 +845,8 @@ public:
 		auto main = new wxBoxSizer(wxVERTICAL);
 		main->Add(notebook, wxSizerFlags(1).Expand().Border());
 		auto button_sizer = new wxBoxSizer(wxHORIZONTAL);
-		button_sizer->Add(new wxButton(this, wxID_APPLY, _("Update Preview")), wxSizerFlags().Border(wxRIGHT));
+		int update_preview_id = wxWindow::NewControlId();
+		button_sizer->Add(new wxButton(this, update_preview_id, _("Update Preview")), wxSizerFlags().Border(wxRIGHT));
 		button_sizer->AddStretchSpacer();
 		button_sizer->Add(new wxButton(this, wxID_OK), wxSizerFlags().Border(wxRIGHT));
 		button_sizer->Add(new wxButton(this, wxID_CANCEL));
@@ -854,7 +855,7 @@ public:
 		SetMinSize(wxSize(540, -1));
 		CenterOnParent();
 		Bind(wxEVT_BUTTON, &DialogLyricScroll::OnOK, this, wxID_OK);
-		Bind(wxEVT_BUTTON, &DialogLyricScroll::OnPreview, this, wxID_APPLY);
+		Bind(wxEVT_BUTTON, &DialogLyricScroll::OnPreview, this, update_preview_id);
 		resolution_preset->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { UpdateResolutionPreset(); });
 		language_mode->Bind(wxEVT_CHOICE, [this](wxCommandEvent&) { UpdateLanguageMode(); });
 		UpdateLanguageMode();

@@ -67,11 +67,20 @@ def test_portaudio_reopens_default_device_after_output_route_change():
     source = PORTAUDIO.read_text(encoding="utf-8")
     header = PORTAUDIO_H.read_text(encoding="utf-8")
     assert "PaDeviceIndex active_device = paNoDevice" in header
-    assert "void RefreshDefaultDevice()" in header
-    assert "void PortAudioPlayer::RefreshDefaultDevice()" in source
+    assert "void RebuildDeviceList()" in header
+    assert "void CloseStream()" in header
+    assert "void RefreshDefaultDevice(bool force = false)" in header
+    assert "void PortAudioPlayer::RebuildDeviceList()" in source
+    assert "void PortAudioPlayer::CloseStream()" in source
+    assert "void PortAudioPlayer::RefreshDefaultDevice(bool force)" in source
     assert "Pa_GetDefaultOutputDevice()" in source
     assert "Pa_CloseStream(stream)" in source
+    assert "current_default_info && current_default_info->maxOutputChannels > 0" in source
+    assert "std::find(default_device.begin(), default_device.end(), real_idx) == default_device.end()" in source
+    assert "std::rotate(default_device.begin(), it, it + 1)" in source
+    assert "RefreshDefaultDevice(true);" in source
     assert "RefreshDefaultDevice();" in source
+    assert "return stream && Pa_IsStreamActive(stream) == 1" in source
 
 
 def test_preview_output_uses_shared_peak_limiter():

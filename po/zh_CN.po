@@ -6887,7 +6887,7 @@ msgstr "宏和导出滤镜通过模版语言来应用卡拉OK特效"
 
 #: ../automation/autoload/kara-templater.lua:860
 msgid "Apply karaoke template"
-msgstr "Apply karaoke template - 应用卡拉OK模版"
+msgstr "应用卡拉OK模板"
 
 #: ../automation/autoload/kara-templater.lua:860
 msgid "Applies karaoke effects from templates"
@@ -7770,3 +7770,87 @@ msgstr "清理音乐歌词滚动"
 #: ../src/command/tool.cpp:0
 msgid "music lyric scroll"
 msgstr "音乐歌词滚动"
+
+#: ../src/command/tool.cpp:0
+msgid "Single language"
+msgstr "单语"
+
+#: ../src/command/tool.cpp:0
+msgid "Bilingual"
+msgstr "双语"
+
+#: ../src/command/tool.cpp:0
+msgid "Center"
+msgstr "居中"
+
+#: ../src/command/tool.cpp:0
+msgid "Preserve manual \\N line breaks"
+msgstr "保留手动 \\N 换行"
+
+#: ../src/command/tool.cpp:0
+msgid "Lyric language mode"
+msgstr "歌词语言模式"
+
+#: ../src/command/tool.cpp:0
+msgid "Single lyric style"
+msgstr "单语歌词样式"
+
+#: ../src/command/tool.cpp:0
+msgid "Primary lyric style"
+msgstr "主歌词样式"
+
+#: ../src/command/tool.cpp:0
+msgid "Secondary lyric style"
+msgstr "副歌词样式"
+
+#: ../src/command/tool.cpp:0
+msgid "Output resolution"
+msgstr "输出分辨率"
+
+#: ../src/command/tool.cpp:0
+msgid "Current lyric Y position (0 auto)"
+msgstr "当前歌词 Y 位置（0 为自动）"
+
+#: ../src/command/tool.cpp:0
+msgid "Active line font size (0 auto)"
+msgstr "当前行字号（0 为自动）"
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive line font size (0 auto)"
+msgstr "未显示行字号（0 为自动）"
+
+#: ../src/command/tool.cpp:0
+msgid "Style preview"
+msgstr "样式预览"
+
+#: ../src/command/tool.cpp:0
+msgid "Current main font"
+msgstr "当前主字体"
+
+#: ../src/command/tool.cpp:0
+msgid "Current secondary font"
+msgstr "当前副字体"
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive main font"
+msgstr "未显示主字体"
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive secondary font"
+msgstr "未显示副字体"
+
+#: ../src/command/tool.cpp:0
+msgid "Border size"
+msgstr "边框大小"
+
+#: ../src/command/tool.cpp:0
+msgid "Shadow size"
+msgstr "阴影大小"
+
+#: ../src/command/tool.cpp:0
+msgid "Border color"
+msgstr "边框颜色"
+
+#: ../src/command/tool.cpp:0
+msgid "Update Preview"
+msgstr "更新预览"

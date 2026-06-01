@@ -7120,3 +7120,87 @@ msgstr ""
 #: ../src/command/tool.cpp:0
 msgid "music lyric scroll"
 msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Single language"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Bilingual"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Center"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Preserve manual \\N line breaks"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Lyric language mode"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Single lyric style"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Primary lyric style"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Secondary lyric style"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Output resolution"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Current lyric Y position (0 auto)"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Active line font size (0 auto)"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive line font size (0 auto)"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Style preview"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Current main font"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Current secondary font"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive main font"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Inactive secondary font"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Border size"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Shadow size"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Border color"
+msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Update Preview"
+msgstr ""
