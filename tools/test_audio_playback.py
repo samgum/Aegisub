@@ -78,9 +78,41 @@ def test_portaudio_reopens_default_device_after_output_route_change():
     assert "current_default_info && current_default_info->maxOutputChannels > 0" in source
     assert "std::find(default_device.begin(), default_device.end(), real_idx) == default_device.end()" in source
     assert "std::rotate(default_device.begin(), it, it + 1)" in source
-    assert "RefreshDefaultDevice(true);" in source
     assert "RefreshDefaultDevice();" in source
     assert "return stream && Pa_IsStreamActive(stream) == 1" in source
+
+
+def test_portaudio_macos_route_change_is_exception_safe():
+    """macOS Play() must not crash when the output route changes: reopening the
+    stream happens through an exception-safe helper and only when the live
+    default device has actually moved, instead of unconditionally on every
+    Play() call."""
+    source = PORTAUDIO.read_text(encoding="utf-8")
+    header = PORTAUDIO_H.read_text(encoding="utf-8")
+    # Exception-safe helper declared and defined
+    assert "bool EnsureStreamForDefaultDevice();" in header
+    assert "bool PortAudioPlayer::EnsureStreamForDefaultDevice()" in source
+    # Play() uses the helper instead of the throwing RefreshDefaultDevice(true)
+    assert "EnsureStreamForDefaultDevice()" in source
+    assert "RefreshDefaultDevice(true);" not in source
+    # Fast path: skip the rebuild while the default device is unchanged
+    assert "current_default == active_device" in source
+    # Route-change reopen must be wrapped so failures never escape Play()
+    assert "catch (AudioPlayerOpenError const& err)" in source
+    assert "return false;" in source
+    # pa_start must be initialized so the first position query is deterministic
+    assert "PaTime pa_start = 0.0;" in header
+
+
+def test_portaudio_play_guards_null_stream():
+    """Play() must never hand a null stream to PortAudio: it bails out early
+    when no usable stream is open, instead of dereferencing it below."""
+    source = PORTAUDIO.read_text(encoding="utf-8")
+    assert "if (!stream)" in source
+    assert "Play called without an open stream" in source
+    # Play() must still use the null-safe active check before restarting,
+    # not a bare Pa_IsStreamStopped that would ignore the error recovery case.
+    assert "if (!IsPlaying())" in source
 
 
 def test_preview_output_uses_shared_peak_limiter():
@@ -115,6 +147,8 @@ def main():
         test_volume_changes_reach_soundtouch_processors,
         test_openal_reports_source_playback_offset_not_prefill_position,
         test_portaudio_reopens_default_device_after_output_route_change,
+        test_portaudio_macos_route_change_is_exception_safe,
+        test_portaudio_play_guards_null_stream,
         test_preview_output_uses_shared_peak_limiter,
     ]
     for test in tests:

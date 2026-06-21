@@ -243,19 +243,73 @@ void PortAudioPlayer::RefreshDefaultDevice(bool force) {
 	OpenStream();
 }
 
+bool PortAudioPlayer::EnsureStreamForDefaultDevice() {
+	// Only applies when the user selected "Default" output. Named devices are
+	// opened once in the constructor and left alone.
+	if (!provider || OPT_GET("Player/Audio/PortAudio/Device Name")->GetString() != "Default")
+		return stream != nullptr;
+
+	PaDeviceIndex current_default = Pa_GetDefaultOutputDevice();
+
+	// Fast path: the stream we already hold is still on the live default
+	// device. CoreAudio keeps the same PortAudio device index while the route
+	// sits still, so we can skip the (expensive) full device enumeration.
+	if (stream && current_default != paNoDevice && current_default == active_device)
+		return true;
+
+	// The output route moved (headphones plugged/unplugged, Bluetooth headset
+	// connected, etc.). Tear down and reopen against the fresh default device.
+	bool was_playing = IsPlaying();
+	if (was_playing)
+		Stop();
+
+	CloseStream();
+
+	try {
+		RebuildDeviceList();
+		OpenStream();
+	}
+	catch (AudioPlayerOpenError const& err) {
+		// Never let a route-change hiccup propagate out of Play(): the
+		// previous stream is already closed, so report failure and let the
+		// caller fall back gracefully instead of crashing the app.
+		LOG_E("audio/player/portaudio") << "Failed to reopen stream after route change: " << err.GetMessage();
+		return false;
+	}
+	catch (...) {
+		LOG_E("audio/player/portaudio") << "Unknown error reopening stream after route change";
+		return false;
+	}
+
+	return stream != nullptr;
+}
+
 void PortAudioPlayer::paStreamFinishedCallback(void *) {
 	LOG_D("audio/player/portaudio") << "stopping stream";
 }
 
 void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 #ifdef __APPLE__
-	// CoreAudio can keep the same PortAudio device index while the route moves
-	// between speakers, headphone jack and external devices. Reopen Default
-	// against a fresh device list before each play command.
-	RefreshDefaultDevice(true);
+	// CoreAudio can keep the same PortAudio device index while the route sits
+	// still, but the live default device changes when the user plugs/unplugs
+	// headphones or connects a Bluetooth output. Only pay the cost of
+	// reopening the stream when the default device has actually moved, and do
+	// it through the exception-safe helper so a transient open failure can
+	// never crash Play().
+	if (!EnsureStreamForDefaultDevice()) {
+		LOG_D("audio/player/portaudio") << "no usable output stream; aborting Play";
+		return;
+	}
 #else
 	RefreshDefaultDevice();
 #endif
+
+	// Defensive guard: if for any reason there is no live stream, bail out
+	// instead of handing a null pointer to PortAudio below.
+	if (!stream) {
+		LOG_D("audio/player/portaudio") << "Play called without an open stream";
+		return;
+	}
 
 	current = start_sample;
 	start = start_sample;
@@ -269,7 +323,10 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 		tempo_processor->Reset(start_sample, start_sample + count, playback_speed, volume);
 #endif
 
-	// Start playing
+	// Restart the callback if it had previously completed (paComplete stops
+	// invoking the callback but leaves the stream open). IsPlaying() is false
+	// both for a never-started stream and for one that stopped after the
+	// callback returned paComplete, and also covers the error recovery case.
 	if (!IsPlaying()) {
 		PaError err = Pa_SetStreamFinishedCallback(stream, paStreamFinishedCallback);
 		if (err != paNoError) {
@@ -279,7 +336,7 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 
 		err = Pa_StartStream(stream);
 		if (err != paNoError) {
-			LOG_D("audio/player/portaudio") << "error playing stream";
+			LOG_D("audio/player/portaudio") << "error playing stream: " << Pa_GetErrorText(err);
 			return;
 		}
 	}

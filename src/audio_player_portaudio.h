@@ -69,7 +69,7 @@ class PortAudioPlayer final : public AudioPlayer {
 	int64_t current = 0; ///< Current position
 	int64_t start = 0;   ///< Start position
 	int64_t end = 0;     ///< End position
-	PaTime pa_start;     ///< PortAudio internal start position
+	PaTime pa_start = 0.0;     ///< PortAudio internal start position
 	PaDeviceIndex active_device = paNoDevice; ///< Device used by the currently open stream
 	std::vector<char> speed_buffer; ///< Temporary buffer for speed-adjusted playback
 	int64_t last_position = 0; ///< Last returned playback position for monotonic stability
@@ -110,6 +110,12 @@ class PortAudioPlayer final : public AudioPlayer {
 	void CloseStream();
 	void OpenStream();
 	void RefreshDefaultDevice(bool force = false);
+
+	/// Reopen the stream against the current system default device without
+	/// throwing. Returns true if a usable stream is open afterwards. This is
+	/// the safe entry point used from the playback hot path on macOS, where an
+	/// output route change must never propagate an exception into Play().
+	bool EnsureStreamForDefaultDevice();
 
 public:
 	/// @brief Constructor
