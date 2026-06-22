@@ -132,8 +132,25 @@ std::string colormatrix_description(int cs, int cr) {
 			return str + ".601";
 		case AGI_CS_SMPTE240M:
 			return str + ".240M";
+		case AGI_CS_BT2020_NCL:
+		case AGI_CS_BT2020_CL:
+			// BT.2020 is used by UHD/4K HDR content. Aegisub's resolution
+			// resampler has no native BT.2020 matrix, so downstream it is
+			// treated the same as BT.709, but it must still produce a name
+			// here so the video can be opened instead of being rejected as
+			// an "unknown color space".
+			return str + ".2020";
+		case AGI_CS_UNSPECIFIED:
+			// Handled by the caller (defaulted before we get here), but keep
+			// an explicit branch so future colorspaces are caught explicitly.
+			return str + ".709";
 		default:
-			throw VideoOpenError("Unknown video color space");
+			// YCOCG, SMPTE2085, chromaticity-derived, ICTcp and anything else
+			// libavutil may report. Rather than refusing to open the video,
+			// fall back to the closest standard matrix the resampler supports.
+			// This preserves the old behavior for known-but-unmapped spaces
+			// while no longer hard-failing on them.
+			return str + ".709";
 	}
 }
 
