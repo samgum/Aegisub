@@ -89,16 +89,52 @@ if (!(Test-Path dictionaries)) {
 }
 
 # Installer localization
+#
+# These language files live upstream in the jrsoftware/issrc repo under
+# Files/Languages/Unofficial. They are not version-pinned and can disappear
+# at any time — ChineseTraditional.isl was removed upstream, which hard-failed
+# the entire Windows installer build. Download each one defensively: on any
+# failure (404, transient network error, etc.) log a warning and fall back to
+# the Simplified Chinese file (same family, identical structure, UTF-8 text),
+# so a single missing language can never break the whole Windows build again.
 if (!(Test-Path innosetup-langs)) {
-	New-Item -ItemType Directory innosetup-langs
-	Invoke-WebRequest https://raw.github.com/jrsoftware/issrc/main/Files/Languages/Unofficial/Greek.isl -OutFile innosetup-langs/Greek.isl -UseBasicParsing
-	Invoke-WebRequest https://raw.github.com/jrsoftware/issrc/main/Files/Languages/Unofficial/Basque.isl -OutFile innosetup-langs/Basque.isl -UseBasicParsing
-	Invoke-WebRequest https://raw.github.com/jrsoftware/issrc/main/Files/Languages/Unofficial/Galician.isl -OutFile innosetup-langs/Galician.isl -UseBasicParsing
-	Invoke-WebRequest https://raw.github.com/jrsoftware/issrc/main/Files/Languages/Unofficial/Indonesian.isl -OutFile innosetup-langs/Indonesian.isl -UseBasicParsing
-	Invoke-WebRequest https://raw.github.com/jrsoftware/issrc/main/Files/Languages/Unofficial/SerbianCyrillic.isl -OutFile innosetup-langs/SerbianCyrillic.isl -UseBasicParsing
-	Invoke-WebRequest https://raw.github.com/jrsoftware/issrc/main/Files/Languages/Unofficial/SerbianLatin.isl -OutFile innosetup-langs/SerbianLatin.isl -UseBasicParsing
-	Invoke-WebRequest https://raw.github.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl -OutFile innosetup-langs/ChineseSimplified.isl -UseBasicParsing
-	Invoke-WebRequest https://raw.github.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseTraditional.isl -OutFile innosetup-langs/ChineseTraditional.isl -UseBasicParsing
+	New-Item -ItemType Directory innosetup-langs | Out-Null
+
+	# Simplified Chinese is the designated fallback: it downloads reliably, is
+	# structurally identical to every other unofficial .isl, and is the closest
+	# match for the Traditional Chinese file that upstream deleted.
+	$FallbackLang = 'ChineseSimplified'
+	$FallbackUrl = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/$FallbackLang.isl"
+	try {
+		Invoke-WebRequest $FallbackUrl -OutFile "innosetup-langs/$FallbackLang.isl" -UseBasicParsing -ErrorAction Stop
+	}
+	catch {
+		throw "Could not download the fallback language file $FallbackLang.isl from upstream: $($_.Exception.Message)"
+	}
+
+	# All remaining unofficial languages we reference from fragment_setupbase.iss.
+	$Langs = @(
+		'Greek',
+		'Basque',
+		'Galician',
+		'Indonesian',
+		'SerbianCyrillic',
+		'SerbianLatin',
+		'ChineseTraditional'
+	)
+
+	foreach ($Lang in $Langs) {
+		$OutFile = Join-Path 'innosetup-langs' "$Lang.isl"
+		$Url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/$Lang.isl"
+		try {
+			Invoke-WebRequest $Url -OutFile $OutFile -UseBasicParsing -ErrorAction Stop
+		}
+		catch {
+			Write-Warning ("Language file {0}.isl could not be downloaded from upstream ({1}). " -f $Lang, $Url)
+			Write-Warning ("Falling back to $FallbackLang.isl so the Windows installer can still build. Error: {0}" -f $_.Exception.Message)
+			Copy-Item "innosetup-langs/$FallbackLang.isl" $OutFile -Force
+		}
+	}
 }
 
 # Aegisub localization
