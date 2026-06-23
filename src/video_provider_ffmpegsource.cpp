@@ -34,6 +34,7 @@
 
 #ifdef WITH_FFMS2
 #include "ffmpegsource_common.h"
+#include "hdr_tonemap.h"
 #include "include/aegisub/video_provider.h"
 
 #include "options.h"
@@ -73,6 +74,13 @@ class FFmpegSourceVideoProvider final : public VideoProvider, FFmpegSourceProvid
 	int Height = -1;                ///< height in pixels
 	int CS = -1;                    ///< Reported colorspace of first frame
 	int CR = -1;                    ///< Reported colorrange of first frame
+	// HDR metadata, captured from the first frame so the provider can decide
+	// whether to tone-map. NOTE: FFMS2 spells TransferCharateristics without
+	// the second 'c' in 'cteristics' — this matches the upstream ffms.h.
+	int Transfer = -1;              ///< Reported transfer characteristics (AVColorTransferCharacteristic)
+	int Primaries = -1;             ///< Reported color primaries (AVColorPrimaries)
+	int MaxCLL = 0;                 ///< Max content light level (nits); 0 = unavailable
+	bool IsHDR = false;             ///< True when this source needs HDR tone-mapping on the CPU
 	double DAR;                     ///< display aspect ratio
 	std::vector<int> KeyFramesList; ///< list of keyframes
 	agi::vfr::Framerate Timecodes;  ///< vfr object
@@ -271,6 +279,20 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 	int VideoCS = CS = TempFrame->ColorSpace;
 	CR = TempFrame->ColorRange;
 
+	// Capture HDR transfer/primaries so we can decide whether the display
+	// pipeline needs a CPU tone-map. Aegisub renders to 8-bit BGRA, so HDR
+	// (PQ/HLG) footage must be tone-mapped here or it shows up near-black.
+	// FFMS2's field name is intentionally misspelled in the upstream header
+	// ("TransferCharateristics"); keep the typo to match.
+	Transfer = TempFrame->TransferCharateristics;
+	Primaries = TempFrame->ColorPrimaries;
+	// FFMS_Frame exposes flat fields (not a nested struct): ContentLightLevelMax.
+	MaxCLL = TempFrame->HasContentLightLevel ? static_cast<int>(TempFrame->ContentLightLevelMax) : 0;
+	IsHDR = HDRTonemap::IsHDRSource(Transfer, Primaries);
+	if (IsHDR)
+		LOG_I("video/provider/ffmpegsource") << "HDR source detected (transfer=" << Transfer
+			<< ", primaries=" << Primaries << ", maxCLL=" << MaxCLL << "); enabling CPU tone-mapping";
+
 	if (CS == AGI_CS_UNSPECIFIED)
 		CS = Width > 1024 || Height >= 600 ? AGI_CS_BT709 : AGI_CS_BT470BG;
 	RealColorSpace = ColorSpace = colormatrix_description(CS, CR);
@@ -285,7 +307,13 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 			throw VideoOpenError(std::string("Failed to set input format: ") + ErrInfo.Buffer);
 	}
 
-	const int TargetFormat[] = { FFMS_GetPixFmt("bgra"), -1 };
+	// For HDR sources request 16-bit rgb48le so we can tone-map from full
+	// precision before quantizing to 8-bit; for SDR keep the original bgra
+	// path (zero overhead, unchanged behaviour). bgra is always the fallback
+	// so a decoder that can't produce rgb48le still opens the file.
+	const int rgb48_fmt = FFMS_GetPixFmt("rgb48le");
+	const int bgra_fmt = FFMS_GetPixFmt("bgra");
+	const int TargetFormat[] = { IsHDR ? rgb48_fmt : bgra_fmt, bgra_fmt, -1 };
 	if (FFMS_SetOutputFormatV2(VideoSource, TargetFormat, Width, Height, FFMS_RESIZER_BICUBIC, &ErrInfo))
 		throw VideoOpenError(std::string("Failed to set output format: ") + ErrInfo.Buffer);
 
@@ -325,24 +353,42 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 	if (!frame)
 		throw VideoDecodeError(std::string("Failed to retrieve frame: ") +  ErrInfo.Buffer);
 
-	out.data.assign(frame->Data[0], frame->Data[0] + frame->Linesize[0] * Height);
 	out.flipped = false;
 	out.width = Width;
 	out.height = Height;
-	out.pitch = frame->Linesize[0];
 
-	// Handle flip
+	if (IsHDR) {
+		// FFMS delivered 16-bit rgb48le (6 bytes/pixel). Tone-map the full
+		// precision data down to 8-bit BGRA so highlight detail survives, and
+		// emit a tightly-packed 4-bytes/pixel buffer for the flip/rotation
+		// code below (which assumes exactly that layout).
+		const size_t pixels = static_cast<size_t>(Width) * static_cast<size_t>(Height);
+		out.data.assign(pixels * 4, 0);
+		HDRTonemap::ToneMapRGB48toBGRA8(
+			reinterpret_cast<const uint16_t *>(frame->Data[0]),
+			out.data.data(), pixels, Transfer, Primaries, MaxCLL);
+		out.pitch = 4 * Width;
+	}
+	else {
+		// SDR path: FFMS already gave us 8-bit BGRA; copy it straight through.
+		out.data.assign(frame->Data[0], frame->Data[0] + frame->Linesize[0] * Height);
+		out.pitch = frame->Linesize[0];
+	}
+
+	// Handle flip — use out.pitch (not frame->Linesize[0]) so this is correct
+	// for both the HDR tone-mapped buffer (pitch == 4*Width) and the raw SDR
+	// buffer (pitch == Linesize[0]); the two only coincidentally match for SDR.
 	if (VideoInfo->Flip > 0)
 		for (int x = 0; x < Height; ++x)
 			for (int y = 0; y < Width / 2; ++y)
 				for (int ch = 0; ch < 4; ++ch)
-					std::swap(out.data[frame->Linesize[0] * x + 4 * y + ch], out.data[frame->Linesize[0] * x + 4 * (Width - 1 - y) + ch]);
+					std::swap(out.data[out.pitch * x + 4 * y + ch], out.data[out.pitch * x + 4 * (Width - 1 - y) + ch]);
 
 	else if (VideoInfo->Flip < 0)
 		for (int x = 0; x < Height / 2; ++x)
 			for (int y = 0; y < Width; ++y)
 				for (int ch = 0; ch < 4; ++ch)
-					std::swap(out.data[frame->Linesize[0] * x + 4 * y + ch], out.data[frame->Linesize[0] * (Height - 1 - x) + 4 * y + ch]);
+					std::swap(out.data[out.pitch * x + 4 * y + ch], out.data[out.pitch * (Height - 1 - x) + 4 * y + ch]);
 
 	// Handle rotation
 	if (VideoInfo->Rotation % 360 == 180 || VideoInfo->Rotation % 360 == -180) {
@@ -351,7 +397,7 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 		for (int x = 0; x < Height; ++x)
 			for (int y = 0; y < Width; ++y)
 				for (int ch = 0; ch < 4; ++ch)
-					out.data[4 * (Width * x + y) + ch] = data[frame->Linesize[0] * (Height - 1 - x) + 4 * (Width - 1 - y) + ch];
+					out.data[4 * (Width * x + y) + ch] = data[out.pitch * (Height - 1 - x) + 4 * (Width - 1 - y) + ch];
 		out.pitch = 4 * Width;
 	}
 	else if (VideoInfo->Rotation % 180 == 90 || VideoInfo->Rotation % 360 == -270) {
@@ -360,7 +406,7 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 		for (int x = 0; x < Width; ++x)
 			for (int y = 0; y < Height; ++y)
 				for (int ch = 0; ch < 4; ++ch)
-					out.data[4 * (Height * x + y) + ch] = data[frame->Linesize[0] * y + 4 * (Width - 1 - x) + ch];
+					out.data[4 * (Height * x + y) + ch] = data[out.pitch * y + 4 * (Width - 1 - x) + ch];
 		out.width = Height;
 		out.height = Width;
 		out.pitch = 4 * Height;
@@ -371,7 +417,7 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 		for (int x = 0; x < Width; ++x)
 			for (int y = 0; y < Height; ++y)
 				for (int ch = 0; ch < 4; ++ch)
-					out.data[4 * (Height * x + y) + ch] = data[frame->Linesize[0] * (Height - 1 - y) + 4 * x + ch];
+					out.data[4 * (Height * x + y) + ch] = data[out.pitch * (Height - 1 - y) + 4 * x + ch];
 		out.width = Height;
 		out.height = Width;
 		out.pitch = 4 * Height;
