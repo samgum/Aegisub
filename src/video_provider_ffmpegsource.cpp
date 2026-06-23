@@ -82,6 +82,10 @@ class FFmpegSourceVideoProvider final : public VideoProvider, FFmpegSourceProvid
 	int Primaries = -1;             ///< Reported color primaries (AVColorPrimaries)
 	int MaxCLL = 0;                 ///< Max content light level (nits); 0 = unavailable
 	bool IsHDR = false;             ///< True when this source needs HDR tone-mapping on the CPU
+	/// Precomputed EOTF/gamma lookup tables for the current HDR source. Built
+	/// once in LoadVideo and reused for every frame so the per-frame hot path
+	/// does no transcendentals (4K would otherwise be ~9 std::pow per pixel).
+	std::unique_ptr<HDRTonemap::ToneMapper> ToneMap;
 	double DAR;                     ///< display aspect ratio
 	std::vector<int> KeyFramesList; ///< list of keyframes
 	agi::vfr::Framerate Timecodes;  ///< vfr object
@@ -290,9 +294,15 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 	// FFMS_Frame exposes flat fields (not a nested struct): ContentLightLevelMax.
 	MaxCLL = TempFrame->HasContentLightLevel ? static_cast<int>(TempFrame->ContentLightLevelMax) : 0;
 	IsHDR = HDRTonemap::IsHDRSource(Transfer, Primaries);
-	if (IsHDR)
+	if (IsHDR) {
 		LOG_I("video/provider/ffmpegsource") << "HDR source detected (transfer=" << Transfer
 			<< ", primaries=" << Primaries << ", maxCLL=" << MaxCLL << "); enabling CPU tone-mapping";
+		// Build the EOTF/gamma lookup tables once for the whole source so the
+		// per-frame loop contains no std::pow calls (4K would otherwise be
+		// ~9 transcendentals per pixel and stall playback).
+		ToneMap = std::make_unique<HDRTonemap::ToneMapper>(
+			HDRTonemap::BuildToneMapper(Transfer, Primaries, MaxCLL));
+	}
 
 	if (CS == AGI_CS_UNSPECIFIED)
 		CS = Width > 1024 || Height >= 600 ? AGI_CS_BT709 : AGI_CS_BT470BG;
@@ -362,12 +372,16 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 		// FFMS delivered 16-bit rgb48le (6 bytes/pixel). Tone-map the full
 		// precision data down to 8-bit BGRA so highlight detail survives, and
 		// emit a tightly-packed 4-bytes/pixel buffer for the flip/rotation
-		// code below (which assumes exactly that layout).
+		// code below (which assumes exactly that layout). ToneMap holds
+		// precomputed EOTF/gamma LUTs, so this hot path has no transcendentals.
 		const size_t pixels = static_cast<size_t>(Width) * static_cast<size_t>(Height);
-		out.data.assign(pixels * 4, 0);
+		// resize (not assign with a fill value) avoids writing zeros we are
+		// about to overwrite; every byte is filled by ToneMapRGB48toBGRA8.
+		out.data.resize(pixels * 4);
 		HDRTonemap::ToneMapRGB48toBGRA8(
+			*ToneMap,
 			reinterpret_cast<const uint16_t *>(frame->Data[0]),
-			out.data.data(), pixels, Transfer, Primaries, MaxCLL);
+			out.data.data(), pixels);
 		out.pitch = 4 * Width;
 	}
 	else {

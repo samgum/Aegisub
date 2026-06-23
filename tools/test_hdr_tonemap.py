@@ -27,11 +27,25 @@ def test_tonemap_header_exists_with_core_api():
     assert "inline double PQEOTF(double e)" in source
     assert "inline double HLGOOTF(double e)" in source
     assert "inline double ToneMapReinhardt(double l, double peak)" in source
-    assert "inline void ToneMapRGB48toBGRA8(" in source
+    assert "inline ToneMapper BuildToneMapper(int transfer, int primaries, int max_cll)" in source
+    assert "inline void ToneMapRGB48toBGRA8(const ToneMapper &tm," in source
     # The transfer-function constants must match libavutil's values.
     assert "kTransferPQ        = 16" in source
     assert "kTransferHLG       = 18" in source
     assert "kPrimariesBT2020   = 9" in source
+
+
+def test_tonemap_uses_luts_not_per_pixel_pow():
+    """The per-frame hot path must use precomputed lookup tables so 4K HDR
+    preview is not stalled by ~9 std::pow calls per pixel. The EOTF LUT folds
+    in PQ/HLG decode + tone-map; the gamma LUT folds in display encoding."""
+    source = TONEMAP.read_text(encoding="utf-8")
+    assert "std::vector<float> eotf_lut" in source
+    assert "std::vector<uint8_t> gamma_lut" in source
+    assert "struct ToneMapper" in source
+    # The hot loop reads channels from the EOTF LUT, never calling PQEOTF /
+    # HLGOOTF directly (those are only used to build the LUT).
+    assert "tm.EOTF(src" in source
 
 
 def test_tonemap_is_hdr_keyed_off_transfer_not_primaries():
@@ -90,15 +104,29 @@ def test_flip_and_rotation_use_pitch_not_linesize():
     assert "data[out.pitch *" in source
 
 
+def test_provider_builds_tonemapper_once_not_per_frame():
+    """The EOTF/gamma LUTs are expensive to build (~5ms) and must be
+    constructed once per source (in LoadVideo) and reused per frame, otherwise
+    4K playback rebuilds 65536-entry tables on every GetFrame."""
+    source = FFMPEGSOURCE.read_text(encoding="utf-8")
+    assert "std::unique_ptr<HDRTonemap::ToneMapper> ToneMap" in source
+    assert "HDRTonemap::BuildToneMapper(Transfer, Primaries, MaxCLL)" in source
+    # Per-frame call must take the prebuilt mapper, not rebuild it.
+    assert "HDRTonemap::ToneMapRGB48toBGRA8(\n\t\t\t*ToneMap," in source or \
+           "*ToneMap," in source
+
+
 def main():
     tests = [
         test_tonemap_header_exists_with_core_api,
+        test_tonemap_uses_luts_not_per_pixel_pow,
         test_tonemap_is_hdr_keyed_off_transfer_not_primaries,
         test_tonemap_has_bt2020_to_709_gamut_matrix,
         test_provider_reads_hdr_metadata_from_first_frame,
         test_provider_requests_16_bit_for_hdr_and_bgra_for_sdr,
         test_getframe_tonemaps_hdr_and_passes_sdr_through,
         test_flip_and_rotation_use_pitch_not_linesize,
+        test_provider_builds_tonemapper_once_not_per_frame,
     ]
     for test in tests:
         test()
