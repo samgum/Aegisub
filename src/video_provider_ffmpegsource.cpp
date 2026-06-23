@@ -42,6 +42,7 @@
 #include "video_frame.h"
 
 #include <libaegisub/fs.h>
+#include <libaegisub/log.h>
 
 #include <string_view>
 
