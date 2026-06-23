@@ -43,9 +43,19 @@ def test_tonemap_uses_luts_not_per_pixel_pow():
     assert "std::vector<float> eotf_lut" in source
     assert "std::vector<uint8_t> gamma_lut" in source
     assert "struct ToneMapper" in source
-    # The hot loop reads channels from the EOTF LUT, never calling PQEOTF /
-    # HLGOOTF directly (those are only used to build the LUT).
-    assert "tm.EOTF(src" in source
+    # The hot loop reads channels from the EOTF LUT (cached as a raw pointer
+    # for speed), never calling PQEOTF / HLGOOTF directly in the per-frame path.
+    assert "el[sp[0]]" in source
+
+
+def test_tonemap_hot_path_runs_entirely_in_float():
+    """The per-frame loop must avoid double<->float conversions so the
+    compiler can vectorize it (SSE/AVX process float at 2x the bandwidth of
+    double). The gamut matrix and gamma encode both take float."""
+    source = TONEMAP.read_text(encoding="utf-8")
+    assert "inline void ApplyGamut(float &r, float &g, float &b, const float *m)" in source
+    assert "inline uint8_t Encode(float l) const" in source
+    assert "std::array<float, 9> gamut" in source
 
 
 def test_tonemap_is_hdr_keyed_off_transfer_not_primaries():
@@ -120,6 +130,7 @@ def main():
     tests = [
         test_tonemap_header_exists_with_core_api,
         test_tonemap_uses_luts_not_per_pixel_pow,
+        test_tonemap_hot_path_runs_entirely_in_float,
         test_tonemap_is_hdr_keyed_off_transfer_not_primaries,
         test_tonemap_has_bt2020_to_709_gamut_matrix,
         test_provider_reads_hdr_metadata_from_first_frame,

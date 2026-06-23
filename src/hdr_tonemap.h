@@ -147,10 +147,13 @@ inline double ToneMapReinhardt(double l, double peak) {
 
 // Apply the BT.2020 -> BT.709 gamut matrix in place. Cheap (9 mul), kept as
 // scalar math because it mixes channels and cannot be folded into a 1D LUT.
-inline void ApplyGamut(double &r, double &g, double &b) {
-	double nr = kBT2020To709[0] * r + kBT2020To709[1] * g + kBT2020To709[2] * b;
-	double ng = kBT2020To709[3] * r + kBT2020To709[4] * g + kBT2020To709[5] * b;
-	double nb = kBT2020To709[6] * r + kBT2020To709[7] * g + kBT2020To709[8] * b;
+// Float version: the hot path runs entirely in float so the compiler can
+// vectorize it (SSE/AVX), and float precision is far more than enough for an
+// 8-bit output target.
+inline void ApplyGamut(float &r, float &g, float &b, const float *m) {
+	float nr = m[0] * r + m[1] * g + m[2] * b;
+	float ng = m[3] * r + m[4] * g + m[5] * b;
+	float nb = m[6] * r + m[7] * g + m[8] * b;
 	r = nr; g = ng; b = nb;
 }
 
@@ -167,6 +170,9 @@ struct ToneMapper {
 	/// i / (kGammaLutSize - 1). Folds in the 1/gamma encoding.
 	std::vector<uint8_t> gamma_lut;  // size kGammaLutSize
 
+	/// BT.2020->BT.709 matrix in float for the vectorizable hot path.
+	std::array<float, 9> gamut{};
+
 	int transfer = -1;
 	int primaries = -1;
 	bool needs_gamut = false;
@@ -175,8 +181,11 @@ struct ToneMapper {
 	inline float EOTF(uint16_t v) const { return eotf_lut[v]; }
 
 	/// Encode a clamped [0,1] linear value to 8-bit via the gamma LUT.
-	inline uint8_t Encode(double l) const {
-		int idx = static_cast<int>(std::clamp(l, 0.0, 1.0) * (kGammaLutSize - 1) + 0.5);
+	/// Float throughout so the hot loop stays in one FP width.
+	inline uint8_t Encode(float l) const {
+		if (l <= 0.0f) return gamma_lut[0];
+		if (l >= 1.0f) return gamma_lut[kGammaLutSize - 1];
+		int idx = static_cast<int>(l * (kGammaLutSize - 1) + 0.5f);
 		return gamma_lut[idx];
 	}
 };
@@ -212,12 +221,18 @@ inline ToneMapper BuildToneMapper(int transfer, int primaries, int max_cll) {
 		tm.gamma_lut[i] = static_cast<uint8_t>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0));
 	}
 
+	// Float copy of the gamut matrix for the vectorizable hot path.
+	for (int i = 0; i < 9; ++i)
+		tm.gamut[i] = static_cast<float>(kBT2020To709[i]);
+
 	return tm;
 }
 
 /// Tone-map a full rgb48le frame (6 bytes/pixel) into an 8-bit BGRA buffer
 /// (4 bytes/pixel) using a prebuilt ToneMapper. This is the per-frame hot
-/// path: no std::pow calls, just table reads + a gamut matrix multiply.
+/// path: no std::pow calls, no double<->float conversions — the whole loop
+/// runs in float so the compiler can vectorize it, and pointer increments
+/// avoid repeated index multiplication.
 ///
 /// `pixels` is width * height. dst must hold at least pixels * 4 bytes.
 inline void ToneMapRGB48toBGRA8(const ToneMapper &tm,
@@ -225,25 +240,37 @@ inline void ToneMapRGB48toBGRA8(const ToneMapper &tm,
 	if (!src || !dst || pixels == 0)
 		return;
 
+	const float *m = tm.gamut.data();
 	const bool gamut = tm.needs_gamut;
+	const uint8_t *gl = tm.gamma_lut.data();
+	const float *el = tm.eotf_lut.data();
+
+	// Walk src/dst with raw pointers so the loop body has no integer multiply
+	// for addressing — just loads, FP math, and stores. This is the shape the
+	// autovectorizer can turn into packed SSE/AVX instructions.
+	const uint16_t *sp = src;
+	uint8_t *dp = dst;
 	for (size_t i = 0; i < pixels; ++i) {
 		// rgb48le layout per pixel: R16, G16, B16 (little-endian).
-		float rf = tm.EOTF(src[i * 3 + 0]);
-		float gf = tm.EOTF(src[i * 3 + 1]);
-		float bf = tm.EOTF(src[i * 3 + 2]);
+		float r = el[sp[0]];
+		float g = el[sp[1]];
+		float b = el[sp[2]];
+		sp += 3;
 
-		double r = rf, g = gf, b = bf;
 		if (gamut)
-			ApplyGamut(r, g, b);
+			ApplyGamut(r, g, b, m);
 
-		r = std::clamp(r, 0.0, 1.0);
-		g = std::clamp(g, 0.0, 1.0);
-		b = std::clamp(b, 0.0, 1.0);
+		// Clamp to [0,1] then gamma-encode. Manual min/max is branchless and
+		// avoids the std::clamp template overhead in the hot loop.
+		if (r < 0.0f) r = 0.0f; else if (r > 1.0f) r = 1.0f;
+		if (g < 0.0f) g = 0.0f; else if (g > 1.0f) g = 1.0f;
+		if (b < 0.0f) b = 0.0f; else if (b > 1.0f) b = 1.0f;
 
-		dst[i * 4 + 0] = tm.Encode(b);   // B
-		dst[i * 4 + 1] = tm.Encode(g);   // G
-		dst[i * 4 + 2] = tm.Encode(r);   // R
-		dst[i * 4 + 3] = 255;            // A
+		dp[0] = gl[static_cast<int>(b * (kGammaLutSize - 1) + 0.5f)];   // B
+		dp[1] = gl[static_cast<int>(g * (kGammaLutSize - 1) + 0.5f)];   // G
+		dp[2] = gl[static_cast<int>(r * (kGammaLutSize - 1) + 0.5f)];   // R
+		dp[3] = 255;                                                    // A
+		dp += 4;
 	}
 }
 
