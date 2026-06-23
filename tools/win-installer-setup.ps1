@@ -90,76 +90,68 @@ if (!(Test-Path dictionaries)) {
 
 # Installer localization
 #
-# These language files live upstream in the jrsoftware/issrc repo under
-# Files/Languages/Unofficial. They are NOT version-pinned and individual files
-# disappear without warning — both ChineseSimplified.isl and
-# ChineseTraditional.isl have been removed upstream at different times, and each
-# removal previously hard-failed the entire Windows installer build.
+# These language files come from jrsoftware/issrc. A given language can be in
+# either the Official or the Unofficial directory, and upstream moves files
+# between them without notice: ChineseSimplified.isl and ChineseTraditional.isl
+# were promoted from Unofficial/ to Official/, which 404'd the old Unofficial-
+# only download and previously made the installer fall back to the wrong
+# language (Chinese UI showed Greek) or hard-failed the build.
 #
-# Design rule: no single language file is ever load-bearing. We try a chain of
-# candidate fallback sources, and if every network source fails we write a tiny
-# self-contained English .isl so iscc always has something valid to read. A
-# missing upstream language may downgrade that one installer language to
-# English, but it can never break the build.
+# Design rules:
+#   1. Each language downloads from its own real content. We never fill a
+#      missing Chinese file with Greek content again — that produces a broken,
+#      misleading installer.
+#   2. Each language has a list of candidate URLs (Official, then Unofficial,
+#      then the jrsoftware istrans mirror) tried in order.
+#   3. If a language genuinely cannot be obtained from any source, it falls
+#      back to English content (not another random language), and the build
+#      still succeeds.
 if (!(Test-Path innosetup-langs)) {
 	New-Item -ItemType Directory innosetup-langs | Out-Null
 
-	# All unofficial languages we reference from fragment_setupbase.iss, in the
-	# order we want to try them. The first one that downloads successfully
-	# becomes the fallback content used for any later missing file.
-	$Langs = @(
-		'Greek',
-		'Basque',
-		'Galician',
-		'Indonesian',
-		'SerbianCyrillic',
-		'SerbianLatin',
-		'ChineseSimplified',
-		'ChineseTraditional'
-	)
+	$Base = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages"
+	$Mirror = "https://jrsoftware.org/files/istrans"
 
-	$FallbackFile = $null  # path to the first .isl we successfully obtained
-
-	foreach ($Lang in $Langs) {
-		$OutFile = Join-Path 'innosetup-langs' "$Lang.isl"
-		$Url = "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/$Lang.isl"
-		try {
-			Invoke-WebRequest $Url -OutFile $OutFile -UseBasicParsing -ErrorAction Stop
-			if (-not $FallbackFile) { $FallbackFile = $OutFile }
-		}
-		catch {
-			if ($FallbackFile) {
-				Write-Warning ("Language file {0}.isl could not be downloaded from upstream ({1}). " -f $Lang, $Url)
-				Write-Warning ("Falling back to an already-downloaded language so the installer still builds. Error: {0}" -f $_.Exception.Message)
-				Copy-Item $FallbackFile $OutFile -Force
-			}
-			else {
-				Write-Warning ("Language file {0}.isl could not be downloaded and no fallback is available yet. Will retry later languages. Error: {1}" -f $Lang, $_.Exception.Message)
-			}
-		}
+	# Each entry: language name -> ordered candidate URLs. Languages promoted
+	# to Official are listed Official-first; purely-Unofficial ones still try
+	# Official first harmlessly (404) before hitting their real location.
+	$LangUrls = @{
+		'Greek'              = @("$Base/Greek.isl", "$Base/Unofficial/Greek.isl", "$Mirror/Greek.isl")
+		'Basque'             = @("$Base/Basque.isl", "$Base/Unofficial/Basque.isl", "$Mirror/Basque.isl")
+		'Galician'           = @("$Base/Galician.isl", "$Base/Unofficial/Galician.isl", "$Mirror/Galician.isl")
+		'Indonesian'         = @("$Base/Indonesian.isl", "$Base/Unofficial/Indonesian.isl", "$Mirror/Indonesian.isl")
+		'SerbianCyrillic'    = @("$Base/SerbianCyrillic.isl", "$Base/Unofficial/SerbianCyrillic.isl", "$Mirror/SerbianCyrillic.isl")
+		'SerbianLatin'       = @("$Base/SerbianLatin.isl", "$Base/Unofficial/SerbianLatin.isl", "$Mirror/SerbianLatin.isl")
+		'ChineseSimplified'  = @("$Base/ChineseSimplified.isl", "$Base/Unofficial/ChineseSimplified.isl", "$Mirror/ChineseSimplified.isl")
+		'ChineseTraditional' = @("$Base/ChineseTraditional.isl", "$Base/Unofficial/ChineseTraditional.isl", "$Mirror/ChineseTraditional.isl")
 	}
 
-	# Absolute last-resort fallback: if nothing downloaded (e.g. upstream repo
-	# moved, runner is offline, etc.), synthesize a minimal valid English .isl
-	# so iscc can always parse the [Languages] entries. The text below is the
-	# minimum iscc needs: a [LangOptions] section with the language name.
-	if (-not $FallbackFile) {
-		Write-Warning "No upstream language file could be downloaded; writing a minimal English fallback."
-		$Minimal = @"
+	# Minimal English .isl used only if every source for a language fails —
+	# keeps iscc happy and the build green without ever showing the wrong
+	# language's strings.
+	$EnglishFallback = @"
 [LangOptions]
 LanguageName=English
-LanguageID=$0409
+LanguageID=`$0409
 LanguageCodePage=0
 "@
-		$MinimalFile = Join-Path 'innosetup-langs' 'Greek.isl'
-		$Minimal | Out-File -FilePath $MinimalFile -Encoding UTF8
-		$FallbackFile = $MinimalFile
-		# Ensure every referenced language file exists so iscc finds them all.
-		foreach ($Lang in $Langs) {
-			$OutFile = Join-Path 'innosetup-langs' "$Lang.isl"
-			if (-not (Test-Path $OutFile)) {
-				Copy-Item $FallbackFile $OutFile -Force
+
+	foreach ($Lang in $LangUrls.Keys) {
+		$OutFile = Join-Path 'innosetup-langs' "$Lang.isl"
+		$Got = $false
+		foreach ($Url in $LangUrls[$Lang]) {
+			try {
+				Invoke-WebRequest $Url -OutFile $OutFile -UseBasicParsing -ErrorAction Stop
+				$Got = $true
+				break
 			}
+			catch {
+				# try next candidate URL
+			}
+		}
+		if (-not $Got) {
+			Write-Warning ("Could not download $Lang.isl from any source; using English fallback so the installer still builds.")
+			$EnglishFallback | Out-File -FilePath $OutFile -Encoding UTF8
 		}
 	}
 }
