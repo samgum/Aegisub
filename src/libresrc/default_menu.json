@@ -25,13 +25,6 @@
         { "command" : "edit/line/paste" },
         { "command" : "edit/line/paste/over" },
         {},
-        { "command" : "edit/text/trim" },
-        { "command" : "edit/text/collapse_spaces" },
-        { "command" : "edit/text/cycle_case" },
-        { "command" : "edit/text/fullwidth_to_halfwidth" },
-        { "command" : "edit/text/halfwidth_to_fullwidth" },
-        { "command" : "edit/text/strip_tags" },
-        {},
         { "command" : "edit/line/delete" }
     ],
     "main" : "[Dummy, set in platform configs]",
