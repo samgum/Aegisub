@@ -970,6 +970,87 @@ msgstr "在光标位置添加删除线标签(\\s)"
 msgid "toggle strikeout"
 msgstr "删除线"
 
+#: ../src/command/edit.cpp
+msgid "Trim Whitespace"
+msgstr "去除首尾空白"
+
+#: ../src/command/edit.cpp
+msgid ""
+"Remove leading and trailing spaces, tabs, and full-width spaces from the "
+"selected lines"
+msgstr "去除所选行首尾的空格、制表符和全角空格"
+
+#: ../src/command/edit.cpp
+msgid "trim whitespace"
+msgstr "去除首尾空白"
+
+#: ../src/command/edit.cpp
+msgid "Full-width to Half-width"
+msgstr "全角转半角"
+
+#: ../src/command/edit.cpp
+msgid ""
+"Convert full-width ASCII letters, digits and punctuation to half-width; "
+"useful for cleaning up CJK subtitles"
+msgstr "将全角英文字母、数字和标点转换为半角；适用于清理中日韩字幕"
+
+#: ../src/command/edit.cpp
+msgid "full-width to half-width"
+msgstr "全角转半角"
+
+#: ../src/command/edit.cpp
+msgid "Half-width to Full-width"
+msgstr "半角转全角"
+
+#: ../src/command/edit.cpp
+msgid ""
+"Convert ASCII letters, digits and punctuation to full-width; useful for CJK "
+"typography"
+msgstr "将半角英文字母、数字和标点转换为全角；适用于中日韩排版"
+
+#: ../src/command/edit.cpp
+msgid "half-width to full-width"
+msgstr "半角转全角"
+
+#: ../src/command/edit.cpp
+msgid "Collapse Spaces"
+msgstr "合并多余空格"
+
+#: ../src/command/edit.cpp
+msgid "Collapse runs of multiple spaces and tabs into a single space"
+msgstr "将连续的多个空格和制表符合并为单个空格"
+
+#: ../src/command/edit.cpp
+msgid "collapse spaces"
+msgstr "合并多余空格"
+
+#: ../src/command/edit.cpp
+msgid "Strip All Tags"
+msgstr "清除所有特效标签"
+
+#: ../src/command/edit.cpp
+msgid ""
+"Remove all {...} override tags from the selected lines, leaving only plain "
+"text"
+msgstr "移除所选行所有 {...} 覆盖标签，仅保留纯文本"
+
+#: ../src/command/edit.cpp
+msgid "strip tags"
+msgstr "清除特效标签"
+
+#: ../src/command/edit.cpp
+msgid "Cycle Case"
+msgstr "切换大小写"
+
+#: ../src/command/edit.cpp
+msgid ""
+"Cycle the ASCII case of selected lines: lowercase -> UPPERCASE -> Title Case"
+msgstr "循环切换所选行的英文大小写：小写 -> 大写 -> 首字母大写"
+
+#: ../src/command/edit.cpp
+msgid "cycle case"
+msgstr "切换大小写"
+
 #: ../src/command/edit.cpp:487
 msgid "Font Face..."
 msgstr "字体…"

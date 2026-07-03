@@ -138,6 +138,10 @@ class SubsEditBox final : public wxPanel {
 	wxTextCtrl *MakeMarginCtrl(wxString const& tooltip, int margin, wxString const& commit_msg);
 	TimeEdit *MakeTimeCtrl(wxString const& tooltip, TimeField field);
 	void MakeButton(const char *cmd_name);
+	/// Create a small text-labeled toolbar button bound to a command. Used for
+	/// features that don't have a dedicated bitmap icon; matches the AI button
+	/// styling already present on this toolbar.
+	wxButton *MakeTextButton(const char *cmd_name, wxString const& label);
 	wxButton *MakeBottomButton(const char *cmd_name);
 	wxComboBox *MakeComboBox(wxString const& initial_text, int style, void (SubsEditBox::*handler)(wxCommandEvent&), wxString const& tooltip);
 	wxRadioButton *MakeRadio(wxString const& text, bool start, wxString const& tooltip);

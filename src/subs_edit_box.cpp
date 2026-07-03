@@ -183,6 +183,15 @@ SubsEditBox::SubsEditBox(wxWindow *parent, agi::Context *context)
 	MakeButton("grid/line/next/create");
 	middle_right_sizer->AddSpacer(10);
 
+	// Text-transform buttons for the edit-box toolbar. These are text-labeled
+	// (no bitmap icon needed) and cover common CJK/Latin subtitle cleanup tasks.
+	MakeTextButton("edit/text/trim", "Trim");
+	MakeTextButton("edit/text/cycle_case", "Aa");
+	MakeTextButton("edit/text/fullwidth_to_halfwidth", "全→半");
+	MakeTextButton("edit/text/halfwidth_to_fullwidth", "半→全");
+	MakeTextButton("edit/text/collapse_spaces", "␣");
+	MakeTextButton("edit/text/strip_tags", "Plain");
+
 	by_time = MakeRadio(_("T&ime"), true, _("Time by h:mm:ss.cs"));
 	by_frame = MakeRadio(_("F&rame"), false, _("Time by frame number"));
 	by_frame->Enable(false);
@@ -293,6 +302,16 @@ void SubsEditBox::MakeButton(const char *cmd_name) {
 
 	middle_right_sizer->Add(btn, wxSizerFlags().Expand());
 	btn->Bind(wxEVT_BUTTON, std::bind(&SubsEditBox::CallCommand, this, cmd_name));
+}
+
+wxButton *SubsEditBox::MakeTextButton(const char *cmd_name, wxString const& label) {
+	cmd::Command *command = cmd::get(cmd_name);
+	wxButton *btn = new wxButton(this, -1, label);
+	tool_tip_bindings.emplace_back(btn, command->StrHelp(), "Subtitle Edit Box", cmd_name);
+
+	middle_right_sizer->Add(btn, wxSizerFlags().Center().Border(wxRIGHT, 2));
+	btn->Bind(wxEVT_BUTTON, std::bind(&SubsEditBox::CallCommand, this, cmd_name));
+	return btn;
 }
 
 wxButton *SubsEditBox::MakeBottomButton(const char *cmd_name) {

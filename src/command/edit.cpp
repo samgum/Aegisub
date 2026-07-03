@@ -1266,6 +1266,267 @@ struct edit_insert_original final : public Command {
 	}
 };
 
+// --- Text transform helpers -------------------------------------------------
+// Apply a pure-string transform to every selected dialogue line, then commit
+// as a single undoable text change. Mirrors the update_lines() pattern but
+// without selection bookkeeping, since these operate on whole-line text.
+
+template<typename Func>
+void transform_selected_lines(const agi::Context *c, wxString const& undo_msg, Func&& f) {
+	const auto active_line = c->selectionController->GetActiveLine();
+	for (const auto line : c->selectionController->GetSelectedSet())
+		line->Text = f(line->Text.get());
+	auto const& sel = c->selectionController->GetSelectedSet();
+	c->ass->Commit(undo_msg, AssFile::COMMIT_DIAG_TEXT, -1,
+		sel.size() == 1 ? *sel.begin() : nullptr);
+}
+
+// Strip leading/trailing whitespace from a string, including the full-width
+// space (U+3000) common in CJK subtitles.
+std::string trim_text(std::string s) {
+	const auto is_space = [](unsigned char c, char prev) {
+		// ASCII space, tab, CR, LF, NBSP (0xA0), and the UTF-8 bytes of U+3000
+		// full-width space (E3 80 80). prev is used to detect the 2nd/3rd byte.
+		if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == 0xA0) return true;
+		if (c == 0xE3) return true;  // lead byte of U+3000
+		if (prev == static_cast<char>(0xE3) && c == 0x80) return true;
+		if (prev == static_cast<char>(0x80) && c == 0x80) return true;
+		return false;
+	};
+
+	size_t b = 0, e = s.size();
+	char prev = 0;
+	while (b < e && is_space(static_cast<unsigned char>(s[b]), prev)) { prev = s[b]; ++b; }
+	size_t end = e;
+	prev = 0;
+	while (end > b) {
+		unsigned char c = s[end - 1];
+		// U+3000 is 3 bytes; check it as a unit when trimming the tail.
+		if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == 0xA0) { --end; continue; }
+		if (end >= 3 && static_cast<unsigned char>(s[end - 3]) == 0xE3
+		    && static_cast<unsigned char>(s[end - 2]) == 0x80
+		    && static_cast<unsigned char>(s[end - 1]) == 0x80) {
+			end -= 3; continue;
+		}
+		break;
+	}
+	return s.substr(b, end - b);
+}
+
+// Convert full-width ASCII letters/digits/punct (U+FF01..U+FF5E) to half-width
+// (ASCII), and U+3000 full-width space to a regular space. Leaves CJK alone.
+//
+// Authoritative UTF-8 mapping (verified against Python's codec):
+//   EF BC 81..BF -> ASCII 0x21..0x5F  (third byte - 0x60)
+//   EF BD 80..9E -> ASCII 0x60..0x7E  (third byte - 0x20)
+std::string fullwidth_to_halfwidth(std::string s) {
+	std::string out;
+	out.reserve(s.size());
+	for (size_t i = 0; i < s.size(); ) {
+		unsigned char c = static_cast<unsigned char>(s[i]);
+		// U+3000 full-width space: E3 80 80.
+		if (i + 2 < s.size() && c == 0xE3
+		    && static_cast<unsigned char>(s[i + 1]) == 0x80
+		    && static_cast<unsigned char>(s[i + 2]) == 0x80) {
+			out.push_back(' ');
+			i += 3;
+			continue;
+		}
+		// Full-width range U+FF01..U+FF5E: EF BC/BD xx.
+		if (i + 2 < s.size() && c == 0xEF) {
+			unsigned char b1 = static_cast<unsigned char>(s[i + 1]);
+			unsigned char b2 = static_cast<unsigned char>(s[i + 2]);
+			if (b1 == 0xBC && b2 >= 0x81 && b2 <= 0xBF) {
+				out.push_back(static_cast<char>(b2 - 0x60));
+				i += 3;
+				continue;
+			}
+			if (b1 == 0xBD && b2 >= 0x80 && b2 <= 0x9E) {
+				out.push_back(static_cast<char>(b2 - 0x20));
+				i += 3;
+				continue;
+			}
+		}
+		out.push_back(s[i]);
+		++i;
+	}
+	return out;
+}
+
+// Convert ASCII letters/digits/punct (0x21..0x7E) to full-width
+// (U+FF01..U+FF5E), and regular spaces to full-width U+3000. For CJK
+// typography that requires full-width punctuation.
+//
+// Authoritative UTF-8 mapping (verified against Python's codec):
+//   ASCII 0x21..0x5F -> U+FF01..FF3F -> EF BC (c+0x60)
+//   ASCII 0x60..0x7E -> U+FF40..FF5E -> EF BD (c+0x20)
+std::string halfwidth_to_fullwidth(std::string s) {
+	std::string out;
+	out.reserve(s.size() * 3);
+	for (size_t i = 0; i < s.size(); ++i) {
+		unsigned char c = static_cast<unsigned char>(s[i]);
+		if (c == ' ') {
+			out.append("\xE3\x80\x80");  // U+3000
+		}
+		else if (c >= 0x21 && c <= 0x5F) {
+			out.append("\xEF\xBC");
+			out.push_back(static_cast<char>(c + 0x60));
+		}
+		else if (c >= 0x60 && c <= 0x7E) {
+			out.append("\xEF\xBD");
+			out.push_back(static_cast<char>(c + 0x20));
+		}
+		else {
+			out.push_back(s[i]);
+		}
+	}
+	return out;
+}
+
+// Collapse runs of spaces/tabs into a single space.
+std::string collapse_spaces(std::string s) {
+	std::string out;
+	out.reserve(s.size());
+	bool in_run = false;
+	for (char c : s) {
+		if (c == ' ' || c == '\t') {
+			if (!in_run) { out.push_back(' '); in_run = true; }
+		}
+		else {
+			in_run = false;
+			out.push_back(c);
+		}
+	}
+	return out;
+}
+
+// Strip every {...} override block, leaving only plain text.
+std::string strip_override_tags(std::string s) {
+	std::string out;
+	out.reserve(s.size());
+	bool in_tag = false;
+	for (char c : s) {
+		if (c == '{') { in_tag = true; continue; }
+		if (c == '}' && in_tag) { in_tag = false; continue; }
+		if (!in_tag) out.push_back(c);
+	}
+	return out;
+}
+
+// Cycle the ASCII case of the whole line: lower -> UPPER -> Title -> lower.
+std::string cycle_ascii_case(std::string s) {
+	// Detect current dominant case by scanning ASCII letters.
+	int lower = 0, upper = 0;
+	for (char c : s) {
+		if (c >= 'a' && c <= 'z') ++lower;
+		else if (c >= 'A' && c <= 'Z') ++upper;
+	}
+	// Decide next mode: if mostly/lower-present -> UPPER; if UPPER -> Title; else -> lower.
+	enum { to_upper, to_title, to_lower } mode;
+	if (lower >= upper)
+		mode = to_upper;
+	else
+		mode = (upper > 0) ? to_title : to_lower;
+
+	std::string out;
+	out.reserve(s.size());
+	bool start_word = true;
+	for (char c : s) {
+		if (mode == to_upper) {
+			if (c >= 'a' && c <= 'z') c -= 32;
+		}
+		else if (mode == to_lower) {
+			if (c >= 'A' && c <= 'Z') c += 32;
+		}
+		else { // to_title
+			if (start_word && c >= 'a' && c <= 'z') c -= 32;
+			else if (!start_word && c >= 'A' && c <= 'Z') c += 32;
+		}
+		// A word boundary is any non-alphanumeric ASCII char.
+		start_word = !(c >= 'A' && c <= 'Z') && !(c >= 'a' && c <= 'z') && !(c >= '0' && c <= '9');
+		out.push_back(c);
+	}
+	return out;
+}
+
+struct edit_text_trim final : public validate_sel_nonempty {
+	CMD_NAME("edit/text/trim")
+	STR_DISP("Trim Whitespace")
+	STR_MENU("Trim Whitespace")
+	STR_HELP("Remove leading and trailing spaces, tabs, and full-width spaces from the selected lines")
+
+	void operator()(agi::Context *c) override {
+		transform_selected_lines(c, _("trim whitespace"), [](const std::string &t) {
+			return trim_text(t);
+		});
+	}
+};
+
+struct edit_text_fullwidth_to_halfwidth final : public validate_sel_nonempty {
+	CMD_NAME("edit/text/fullwidth_to_halfwidth")
+	STR_DISP("Full-width to Half-width")
+	STR_MENU("Full-width to Half-width")
+	STR_HELP("Convert full-width ASCII letters, digits and punctuation to half-width; useful for cleaning up CJK subtitles")
+
+	void operator()(agi::Context *c) override {
+		transform_selected_lines(c, _("full-width to half-width"), [](const std::string &t) {
+			return fullwidth_to_halfwidth(t);
+		});
+	}
+};
+
+struct edit_text_halfwidth_to_fullwidth final : public validate_sel_nonempty {
+	CMD_NAME("edit/text/halfwidth_to_fullwidth")
+	STR_DISP("Half-width to Full-width")
+	STR_MENU("Half-width to Full-width")
+	STR_HELP("Convert ASCII letters, digits and punctuation to full-width; useful for CJK typography")
+
+	void operator()(agi::Context *c) override {
+		transform_selected_lines(c, _("half-width to full-width"), [](const std::string &t) {
+			return halfwidth_to_fullwidth(t);
+		});
+	}
+};
+
+struct edit_text_collapse_spaces final : public validate_sel_nonempty {
+	CMD_NAME("edit/text/collapse_spaces")
+	STR_DISP("Collapse Spaces")
+	STR_MENU("Collapse Spaces")
+	STR_HELP("Collapse runs of multiple spaces and tabs into a single space")
+
+	void operator()(agi::Context *c) override {
+		transform_selected_lines(c, _("collapse spaces"), [](const std::string &t) {
+			return collapse_spaces(t);
+		});
+	}
+};
+
+struct edit_text_strip_tags final : public validate_sel_nonempty {
+	CMD_NAME("edit/text/strip_tags")
+	STR_DISP("Strip All Tags")
+	STR_MENU("Strip All Tags")
+	STR_HELP("Remove all {...} override tags from the selected lines, leaving only plain text")
+
+	void operator()(agi::Context *c) override {
+		transform_selected_lines(c, _("strip tags"), [](const std::string &t) {
+			return strip_override_tags(t);
+		});
+	}
+};
+
+struct edit_text_cycle_case final : public validate_sel_nonempty {
+	CMD_NAME("edit/text/cycle_case")
+	STR_DISP("Cycle Case")
+	STR_MENU("Cycle Case")
+	STR_HELP("Cycle the ASCII case of selected lines: lowercase -> UPPERCASE -> Title Case")
+
+	void operator()(agi::Context *c) override {
+		transform_selected_lines(c, _("cycle case"), [](const std::string &t) {
+			return cycle_ascii_case(t);
+		});
+	}
+};
+
 }
 
 namespace cmd {
@@ -1296,6 +1557,12 @@ namespace cmd {
 		reg(std::make_unique<edit_style_italic>());
 		reg(std::make_unique<edit_style_underline>());
 		reg(std::make_unique<edit_style_strikeout>());
+		reg(std::make_unique<edit_text_trim>());
+		reg(std::make_unique<edit_text_fullwidth_to_halfwidth>());
+		reg(std::make_unique<edit_text_halfwidth_to_fullwidth>());
+		reg(std::make_unique<edit_text_collapse_spaces>());
+		reg(std::make_unique<edit_text_strip_tags>());
+		reg(std::make_unique<edit_text_cycle_case>());
 		reg(std::make_unique<edit_redo>());
 		reg(std::make_unique<edit_undo>());
 		reg(std::make_unique<edit_revert>());
