@@ -1772,6 +1772,18 @@ struct tool_text_furigana final : public Command {
 	}
 };
 
+struct tool_time_fix_common_errors final : public Command {
+	CMD_NAME("tool/time/fix_common_errors")
+	CMD_ICON(timing_processor_toolbutton)
+	STR_MENU("Fix &Common Errors...")
+	STR_DISP("Fix Common Errors")
+	STR_HELP("Batch-fix overlapping times, short gaps, short/long durations, empty lines and trailing whitespace (modeled on Subtitle Edit)")
+
+	void operator()(agi::Context *c) override {
+		ShowFixCommonErrorsDialog(c);
+	}
+};
+
 struct tool_time_postprocess final : public Command {
 	CMD_NAME("tool/time/postprocess")
 	CMD_ICON(timing_processor_toolbutton)
@@ -1885,6 +1897,7 @@ namespace cmd {
 		reg(std::make_unique<tool_text_pair_check>());
 		reg(std::make_unique<tool_ai_analysis_settings>());
 		reg(std::make_unique<tool_text_furigana>());
+		reg(std::make_unique<tool_time_fix_common_errors>());
 		reg(std::make_unique<tool_time_postprocess>());
 		reg(std::make_unique<tool_translation_assistant>());
 		reg(std::make_unique<tool_translation_assistant_commit>());

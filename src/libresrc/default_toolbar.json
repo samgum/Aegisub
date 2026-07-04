@@ -51,6 +51,7 @@
         "am/meta",
         "",
         "time/shift",
+        "tool/time/fix_common_errors",
         "tool/style/assistant",
         "tool/translation_assistant",
         "tool/resampleres",

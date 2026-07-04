@@ -7117,6 +7117,108 @@ msgid "Stitch adjacent subtitle timing gaps"
 msgstr "拼接相邻字幕行的时间间隙"
 
 #: ../src/command/tool.cpp:0
+msgid "Fix &Common Errors..."
+msgstr "修复常见错误(&C)..."
+
+#: ../src/command/tool.cpp:0 ../src/dialog_timing_tools.cpp:0
+msgid "Fix Common Errors"
+msgstr "修复常见错误"
+
+#: ../src/command/tool.cpp:0
+msgid ""
+"Batch-fix overlapping times, short gaps, short/long durations, empty lines "
+"and trailing whitespace (modeled on Subtitle Edit)"
+msgstr "批量修复重叠时间、过短间隔、过短/过长时长、空行和尾部空白（参考 Subtitle Edit）"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Fix Common Subtitle Errors"
+msgstr "修复常见字幕错误"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Fix overlapping display times (trim end to next start)"
+msgstr "修复重叠显示时间（截到下一行开始）"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Fix short gaps between lines"
+msgstr "修复行间过短间隔"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Fix short durations (extend to minimum)"
+msgstr "修复过短时长（延长到最小值）"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Fix long durations (trim to maximum)"
+msgstr "修复过长时长（截到最大值）"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Remove empty / whitespace-only lines"
+msgstr "删除空行或仅含空白的行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Strip trailing whitespace from text"
+msgstr "去除文本尾部空白"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Fixes"
+msgstr "修复项"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Min gap (ms):"
+msgstr "最小间隔(毫秒):"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Min duration (ms):"
+msgstr "最小时长(毫秒):"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Max duration (ms):"
+msgstr "最大时长(毫秒):"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No fixes are selected."
+msgstr "未选择任何修复项。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Fixed %d lines."
+msgstr "已修复 %d 行。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "\n  Overlaps trimmed: %d"
+msgstr "\n  重叠已截断: %d"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "\n  Short gaps fixed: %d"
+msgstr "\n  过短间隔已修复: %d"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "\n  Short durations extended: %d"
+msgstr "\n  过短时长已延长: %d"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "\n  Long durations trimmed: %d"
+msgstr "\n  过长时长已截断: %d"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "\n  Empty lines removed: %d"
+msgstr "\n  空行已删除: %d"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "\n  Trailing whitespace stripped: %d"
+msgstr "\n  尾部空白已清除: %d"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No problems found — nothing to fix."
+msgstr "未发现问题，无需修复。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (timing)"
+msgstr "修复常见错误（时间）"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (text)"
+msgstr "修复常见错误（文本）"
+
+#: ../src/command/tool.cpp:0
 msgid "Check &Style Overlaps..."
 msgstr "检查样式重叠(&O)..."
 

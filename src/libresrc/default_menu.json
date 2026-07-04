@@ -127,6 +127,7 @@
     "main/tools" : [
         { "command" : "tool/lyrics_scroll" },
         {},
+        { "command" : "tool/time/fix_common_errors" },
         { "command" : "tool/time/stitch" },
         { "command" : "tool/style/overlap_check" },
         { "command" : "tool/text/cleanup" },

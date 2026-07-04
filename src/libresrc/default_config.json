@@ -553,6 +553,12 @@
 			"Style Only" : false,
 			"Style" : ""
 		},
+		"Fix Errors" : {
+			"Min Gap" : 100,
+			"Min Duration" : 1000,
+			"Max Duration" : 7000,
+			"Selection Only" : false
+		},
 		"AI Analysis" : {
 			"Enabled" : false,
 			"Provider" : 0,

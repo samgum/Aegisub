@@ -79,6 +79,7 @@ void ShowSubtitleTextCleanupDialog(agi::Context *c);
 void ShowChineseConversionDialog(agi::Context *c);
 void ShowPairCheckDialog(agi::Context *c);
 void ShowJapaneseFuriganaDialog(agi::Context *c);
+void ShowFixCommonErrorsDialog(agi::Context *c);
 void ShowAIAnalysisDialog(agi::Context *c, std::string const& text = std::string());
 void ShowAIAnalysisSettingsDialog(wxWindow *parent);
 void ShowStyleManagerDialog(agi::Context *c);

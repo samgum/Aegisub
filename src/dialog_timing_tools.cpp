@@ -2586,6 +2586,260 @@ void ShowSubtitleTextCleanupDialog(agi::Context *c) {
 	DialogTextCleaner(c).ShowModal();
 }
 
+// --- Fix Common Errors -----------------------------------------------------
+// Modeled on Subtitle Edit's Tools -> Fix common errors. Runs a batch of
+// independent checks/fixes against the dialogue in one pass, reports how many
+// lines were touched, and commits a single undo step per active category.
+// Each fix is opt-in via a checkbox so the user controls what changes.
+
+class DialogFixCommonErrors final : public wxDialog {
+	agi::Context *context;
+
+	wxCheckBox *fix_overlaps;
+	wxCheckBox *fix_short_gaps;
+	wxCheckBox *fix_short_durations;
+	wxCheckBox *fix_long_durations;
+	wxCheckBox *remove_empty;
+	wxCheckBox *strip_trailing_space;
+	wxRadioBox *selection_mode;
+	wxSpinCtrl *min_gap_ms;
+	wxSpinCtrl *min_duration_ms;
+	wxSpinCtrl *max_duration_ms;
+
+	void Process(wxCommandEvent&);
+
+public:
+	DialogFixCommonErrors(agi::Context *context);
+};
+
+DialogFixCommonErrors::DialogFixCommonErrors(agi::Context *context)
+: wxDialog(context->parent, -1, _("Fix Common Subtitle Errors"))
+, context(context)
+{
+	SetIcons(GETICONS(shift_times_toolbutton));
+
+	wxString selection_vals[] = { _("All rows"), _("Selected rows") };
+	selection_mode = new wxRadioBox(this, -1, _("Affect"), wxDefaultPosition, wxDefaultSize, 2, selection_vals, 1);
+
+	fix_overlaps        = new wxCheckBox(this, -1, _("Fix overlapping display times (trim end to next start)"));
+	fix_short_gaps      = new wxCheckBox(this, -1, _("Fix short gaps between lines"));
+	fix_short_durations = new wxCheckBox(this, -1, _("Fix short durations (extend to minimum)"));
+	fix_long_durations  = new wxCheckBox(this, -1, _("Fix long durations (trim to maximum)"));
+	remove_empty        = new wxCheckBox(this, -1, _("Remove empty / whitespace-only lines"));
+	strip_trailing_space= new wxCheckBox(this, -1, _("Strip trailing whitespace from text"));
+
+	min_gap_ms       = new wxSpinCtrl(this, -1, wxString::Format("%d", OPT_GET("Tool/Fix Errors/Min Gap")->GetInt()), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 2000, 100);
+	min_duration_ms  = new wxSpinCtrl(this, -1, wxString::Format("%d", OPT_GET("Tool/Fix Errors/Min Duration")->GetInt()), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 100, 10000, 1000);
+	max_duration_ms  = new wxSpinCtrl(this, -1, wxString::Format("%d", OPT_GET("Tool/Fix Errors/Max Duration")->GetInt()), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 1000, 60000, 7000);
+
+	fix_overlaps->SetValue(true);
+	fix_short_gaps->SetValue(true);
+	fix_short_durations->SetValue(true);
+
+	auto options_box = new wxStaticBoxSizer(wxVERTICAL, this, _("Fixes"));
+	options_box->Add(fix_overlaps, wxSizerFlags().Border(wxALL, 3));
+	options_box->Add(fix_short_gaps, wxSizerFlags().Border(wxALL, 3));
+	options_box->Add(fix_short_durations, wxSizerFlags().Border(wxALL, 3));
+	options_box->Add(fix_long_durations, wxSizerFlags().Border(wxALL, 3));
+	options_box->Add(remove_empty, wxSizerFlags().Border(wxALL, 3));
+	options_box->Add(strip_trailing_space, wxSizerFlags().Border(wxALL, 3));
+
+	auto thresh_grid = new wxFlexGridSizer(3, 5, 5);
+	thresh_grid->Add(new wxStaticText(this, -1, _("Min gap (ms):")), wxSizerFlags().Center().Right());
+	thresh_grid->Add(min_gap_ms, wxSizerFlags().Expand());
+	thresh_grid->Add(new wxStaticText(this, -1, _("Min duration (ms):")), wxSizerFlags().Center().Right());
+	thresh_grid->Add(min_duration_ms, wxSizerFlags().Expand());
+	thresh_grid->Add(new wxStaticText(this, -1, _("Max duration (ms):")), wxSizerFlags().Center().Right());
+	thresh_grid->Add(max_duration_ms, wxSizerFlags().Expand());
+	options_box->AddSpacer(5);
+	options_box->Add(thresh_grid, wxSizerFlags().Expand().Border(wxALL, 3));
+
+	auto button_sizer = new wxStdDialogButtonSizer();
+	button_sizer->AddButton(new wxButton(this, wxID_OK));
+	button_sizer->AddButton(new wxButton(this, wxID_CANCEL));
+	button_sizer->Realize();
+
+	auto sizer = new wxBoxSizer(wxVERTICAL);
+	sizer->Add(selection_mode, wxSizerFlags().Expand().Border(wxALL, 5));
+	sizer->Add(options_box, wxSizerFlags().Expand().Border(wxALL, 5));
+	sizer->Add(button_sizer, wxSizerFlags().Right().Border(wxALL, 5));
+
+	SetSizerAndFit(sizer);
+	CenterOnParent();
+
+	Bind(wxEVT_BUTTON, &DialogFixCommonErrors::Process, this, wxID_OK);
+}
+
+void DialogFixCommonErrors::Process(wxCommandEvent&) {
+	bool do_overlaps   = fix_overlaps->GetValue();
+	bool do_short_gap  = fix_short_gaps->GetValue();
+	bool do_short_dur  = fix_short_durations->GetValue();
+	bool do_long_dur   = fix_long_durations->GetValue();
+	bool do_empty      = remove_empty->GetValue();
+	bool do_trim       = strip_trailing_space->GetValue();
+
+	if (!do_overlaps && !do_short_gap && !do_short_dur && !do_long_dur && !do_empty && !do_trim) {
+		wxMessageBox(_("No fixes are selected."), _("Fix Common Subtitle Errors"), wxICON_EXCLAMATION);
+		return;
+	}
+
+	// Gather target lines, preserving order.
+	std::vector<AssDialogue *> lines;
+	if (selection_mode->GetSelection() == 1) {
+		lines = context->selectionController->GetSortedSelection();
+	} else {
+		for (auto& line : context->ass->Events)
+			lines.push_back(&line);
+	}
+
+	int min_gap = min_gap_ms->GetValue();
+	int min_dur = min_duration_ms->GetValue();
+	int max_dur = max_duration_ms->GetValue();
+
+	int n_overlap = 0, n_gap = 0, n_short = 0, n_long = 0, n_empty = 0, n_trim = 0;
+
+	// --- Timing fixes: need the full ordered event list to compare neighbours.
+	// Build an index of every dialogue (not just the selection) so we can find
+	// the next line after each target even when only some rows are selected.
+	std::vector<AssDialogue *> all;
+	all.reserve(context->ass->Events.size());
+	for (auto& line : context->ass->Events)
+		all.push_back(&line);
+
+	auto in_target = [&](AssDialogue *d) {
+		if (selection_mode->GetSelection() == 0) return true;
+		return std::find(lines.begin(), lines.end(), d) != lines.end();
+	};
+
+	if (do_overlaps || do_short_gap) {
+		for (size_t i = 0; i + 1 < all.size(); ++i) {
+			AssDialogue *cur = all[i];
+			AssDialogue *nxt = all[i + 1];
+			int cur_end = cur->End;
+			int nxt_start = nxt->Start;
+			if (cur->Comment || nxt->Comment)
+				continue;
+
+			// Overlap: current end is after next start.
+			if (do_overlaps && cur_end > nxt_start) {
+				if (in_target(cur)) {
+					cur->End = nxt_start;
+					++n_overlap;
+				}
+				cur_end = nxt_start;
+			}
+
+			// Short gap: the (possibly corrected) gap is below the minimum.
+			int gap = nxt_start - cur_end;
+			if (do_short_gap && gap >= 0 && gap < min_gap) {
+				// Trim the current line's end back so the gap reaches min_gap,
+				// but never below the current start.
+				int new_end = nxt_start - min_gap;
+				int cur_start = cur->Start;
+				if (new_end > cur_start && in_target(cur)) {
+					cur->End = new_end;
+					++n_gap;
+				}
+			}
+		}
+	}
+
+	// --- Per-line duration + text fixes.
+	for (auto line : lines) {
+		int start = line->Start;
+		int end = line->End;
+		int dur = end - start;
+
+		if (do_short_dur && dur < min_dur) {
+			line->End = start + min_dur;
+			++n_short;
+		}
+		if (do_long_dur && dur > max_dur) {
+			line->End = start + max_dur;
+			++n_long;
+		}
+
+		if (do_trim) {
+			std::string text = line->Text.get();
+			// Strip trailing ASCII spaces/tabs/CR/LF and full-width U+3000.
+			size_t endpos = text.size();
+			while (endpos > 0) {
+				char c = text[endpos - 1];
+				if (c == ' ' || c == '\t' || c == '\r' || c == '\n') { --endpos; continue; }
+				if (endpos >= 3 && static_cast<unsigned char>(text[endpos - 3]) == 0xE3
+				    && static_cast<unsigned char>(text[endpos - 2]) == 0x80
+				    && static_cast<unsigned char>(text[endpos - 1]) == 0x80) {
+					endpos -= 3; continue;
+				}
+				break;
+			}
+			if (endpos != text.size()) {
+				line->Text = text.substr(0, endpos);
+				++n_trim;
+			}
+		}
+	}
+
+	// --- Remove empty lines.
+	// Erase from the intrusive list first, then dispose. Defer the actual
+	// delete so we never touch freed memory while still iterating 'lines'.
+	std::vector<AssDialogue *> disposed;
+	if (do_empty) {
+		for (auto line : lines) {
+			auto text = line->Text.get();
+			bool only_ws = true;
+			for (char c : text) {
+				if (c != ' ' && c != '\t' && c != '\r' && c != '\n') { only_ws = false; break; }
+			}
+			if (only_ws) {
+				// Drop the active/selection references to this line first so the
+				// selection controller never holds a dangling pointer.
+				context->selectionController->SetActiveLine(nullptr);
+				context->ass->Events.erase(context->ass->iterator_to(*line));
+				disposed.push_back(line);
+			}
+		}
+		n_empty = (int)disposed.size();
+	}
+
+	// Commit. Time fixes use COMMIT_DIAG_TIME; row removal uses ADDREM; text
+	// fixes use COMMIT_DIAG_TEXT. Each is its own undo step so the user can
+	// selectively undo one category.
+	bool changed_time = do_overlaps || do_short_gap || do_short_dur || do_long_dur;
+	bool changed_text = do_trim;
+	bool changed_rows = !disposed.empty();
+	if (changed_time)
+		context->ass->Commit(_("fix common errors (timing)"), AssFile::COMMIT_DIAG_TIME);
+	if (changed_text)
+		context->ass->Commit(_("fix common errors (text)"), AssFile::COMMIT_DIAG_TEXT);
+	if (changed_rows) {
+		context->ass->Commit(_("fix common errors (remove empty)"), AssFile::COMMIT_DIAG_ADDREM | AssFile::COMMIT_DIAG_FULL);
+		// Now safe to free the detached dialogue objects.
+		for (auto line : disposed)
+			delete line;
+	}
+
+	// Report.
+	wxString report = wxString::Format(_("Fixed %d lines."), n_overlap + n_gap + n_short + n_long + n_empty + n_trim);
+	wxString detail;
+	if (n_overlap) detail += wxString::Format(_("\n  Overlaps trimmed: %d"), n_overlap);
+	if (n_gap)     detail += wxString::Format(_("\n  Short gaps fixed: %d"), n_gap);
+	if (n_short)   detail += wxString::Format(_("\n  Short durations extended: %d"), n_short);
+	if (n_long)    detail += wxString::Format(_("\n  Long durations trimmed: %d"), n_long);
+	if (n_empty)   detail += wxString::Format(_("\n  Empty lines removed: %d"), n_empty);
+	if (n_trim)    detail += wxString::Format(_("\n  Trailing whitespace stripped: %d"), n_trim);
+
+	if (detail.empty())
+		report = _("No problems found — nothing to fix.");
+
+	wxMessageBox(report + detail, _("Fix Common Subtitle Errors"), wxICON_INFORMATION);
+	Close();
+}
+
+void ShowFixCommonErrorsDialog(agi::Context *c) {
+	DialogFixCommonErrors(c).ShowModal();
+}
+
 void ShowChineseConversionDialog(agi::Context *c) {
 	DialogChineseConverter(c).ShowModal();
 }
