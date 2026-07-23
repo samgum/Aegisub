@@ -6650,3 +6650,87 @@ msgstr ""
 
 #~ msgid "Drawings"
 #~ msgstr "Малювання"
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "Авто"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "PlayRes скрипта"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 вертикально"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 вертикально"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "Ширина виводу"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "Висота виводу"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "Горизонтальне вирівнювання"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "Міжрядковий інтервал (0 = авто)"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "Позиція якоря X (0 = авто)"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "Ліве/праве поле (0 = авто)"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "Вибрані рядки"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "Усі рядки"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "Перевірити"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "У поточному файлі субтитрів немає доступних стилів."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "Виберіть стиль для анотацій фурігани:"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "Фільтр стилів"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "Пропущено за стилем"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "Виправити часті помилки (видалити порожні)"

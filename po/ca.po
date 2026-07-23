@@ -7308,3 +7308,87 @@ msgstr ""
 "càrrecs, però també que no es proporciona cap mena de garantia.%n%nVegeu el "
 "lloc web de l’Aegisub per a obtenir informació sobre com obtenir-ne el codi "
 "font."
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "Automàtic"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "PlayRes de l'script"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 vertical"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 vertical"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "Amplada de sortida"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "Alçada de sortida"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "Alineació horitzontal"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "Espaiat de línia (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "Posició d'ancoratge X (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "Marge esquerre/dret (0 = auto)"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "Files seleccionades"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "Totes les files"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "Comprova"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "No hi ha estils disponibles al fitxer de subtítols actual."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "Trieu un estil per a les anotacions furigana:"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "Filtre d'estil"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "Omès per estil"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "Corregeix errors comuns (suprimeix buides)"

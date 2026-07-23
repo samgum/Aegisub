@@ -6684,3 +6684,87 @@ msgstr ""
 
 #~ msgid "Drawings"
 #~ msgstr "Mã hình vẽ"
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "Tự động"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "PlayRes kịch bản"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 dọc"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 dọc"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "Chiều rộng đầu ra"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "Chiều cao đầu ra"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "Căn ngang"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "Khoảng cách dòng (0 = tự động)"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "Vị trí neo X (0 = tự động)"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "Lề trái/phải (0 = tự động)"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "Dòng đã chọn"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "Tất cả dòng"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "Kiểm tra"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "Không có kiểu dáng nào khả dụng trong tệp phụ đề hiện tại."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "Chọn kiểu dáng để áp dụng chú thích furigana:"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "Bộ lọc kiểu dáng"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "Bỏ qua theo kiểu dáng"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "Sửa lỗi phổ biến (xóa dòng trống)"

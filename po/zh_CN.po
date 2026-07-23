@@ -7956,3 +7956,87 @@ msgstr "边框颜色"
 #: ../src/command/tool.cpp:0
 msgid "Update Preview"
 msgstr "更新预览"
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "自动"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "脚本 PlayRes"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 竖屏"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 竖屏"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "输出宽度"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "输出高度"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "水平对齐"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "行距（0 为自动）"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "X 锚点位置（0 为自动）"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "左右边距（0 为自动）"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "选中行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "全部行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "检查"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "当前字幕文件中没有可用的样式。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "选择要应用假名标注的样式："
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "样式筛选"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "按样式跳过"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "修复常见错误（删除空行）"

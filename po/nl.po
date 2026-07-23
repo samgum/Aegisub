@@ -6634,3 +6634,87 @@ msgid ""
 "no warranties of any kind are given either.%n%nSee the Aegisub website for "
 "information on obtaining the source code."
 msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "Automatisch"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "Script PlayRes"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 verticaal"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 verticaal"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "Uitvoerbreedte"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "Uitvoerhoogte"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "Horizontale uitlijning"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "Regelafstand (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "X-ankerpositie (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "Linker/rechtermarge (0 = auto)"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "Geselecteerde rijen"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "Alle rijen"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "Controleren"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "Er zijn geen stijlen beschikbaar in het huidige ondertitelbestand."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "Kies een stijl voor furigana-annotaties:"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "Stijlfilter"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "Overgeslagen op stijl"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "Veelvoorkomende fouten herstellen (lege verwijderen)"

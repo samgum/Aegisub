@@ -6601,3 +6601,87 @@ msgid ""
 "no warranties of any kind are given either.%n%nSee the Aegisub website for "
 "information on obtaining the source code."
 msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "Automaticky"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "PlayRes skriptu"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 na výšku"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 na výšku"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "Šířka výstupu"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "Výška výstupu"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "Vodorovné zarovnání"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "Mezera mezi řádky (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "Pozice kotvy X (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "Levý/pravý okraj (0 = auto)"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "Vybrané řádky"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "Všechny řádky"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "Zkontrolovat"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "V aktuálním souboru titulků nejsou dostupné žádné styly."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "Zvolte styl pro furigana poznámky:"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "Filtr stylů"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "Přeskočeno podle stylu"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "Opravit časté chyby (odstranit prázdné)"

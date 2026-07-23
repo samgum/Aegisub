@@ -6731,3 +6731,87 @@ msgstr ""
 "κάθε σκοπό χωρίς χρέωση, αλλά δεν υπάρχουν εγγυήσεις καμίας φύσης.%n%nΔείτε "
 "την ιστοσελίδα του Aegisub για πληροφορίες σχετικά με την απόκτηση του "
 "πηγαίου κώδικα."
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "Αυτόματο"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "PlayRes σεναρίου"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 κάθετα"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 κάθετα"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "Πλάτος εξόδου"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "Ύψος εξόδου"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "Οριζόντια στοίχιση"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "Διάκενο γραμμής (0 = αυτόματο)"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "Θέση αγκύρωσης X (0 = αυτόματο)"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "Αριστερό/δεξί περιθώριο (0 = αυτόματο)"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "Επιλεγμένες γραμμές"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "Όλες οι γραμμές"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "Έλεγχος"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "Δεν υπάρχουν διαθέσιμα στυλ στο τρέχον αρχείο υποτίτλων."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "Επιλέξτε ένα στυλ για σημειώσεις furigana:"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "Φίλτρο στυλ"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "Παραλείφθηκε βάσει στυλ"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "Διόρθωση συχνών σφαλμάτων (αφαίρεση κενών)"

@@ -6671,3 +6671,87 @@ msgstr ""
 
 #~ msgid "Drawings"
 #~ msgstr "Marrazkiak"
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "Automatikoa"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "Scriptaren PlayRes"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 bertikal"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 bertikal"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "Irteerako zabalera"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "Irteerako altuera"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "Lerrokatze horizontala"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "Lerro tartea (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "X aingura posizioa (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "Ezker/eskuin marjina (0 = auto)"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "Hautatutako errenkadak"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "Errenkada guztiak"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "Egiaztatu"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "Ez dago estilorik erabilgarri uneko azpititulu fitxategian."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "Aukeratu estilo bat furigana oharpenak aplikatzeko:"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "Estilo iragazkia"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "Estiloaren arabera saltatuta"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "Konpondu akats arruntak (ezabatu hutsak)"

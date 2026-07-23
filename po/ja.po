@@ -6530,3 +6530,87 @@ msgid ""
 "no warranties of any kind are given either.%n%nSee the Aegisub website for "
 "information on obtaining the source code."
 msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "自動"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "スクリプト PlayRes"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 縦型"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 縦型"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "出力幅"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "出力高さ"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "水平方向の配置"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "行間隔（0=自動）"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "Xアンカー位置（0=自動）"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "左右余白（0=自動）"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "選択行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "すべての行"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "確認"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "現在の字幕ファイルに使用可能なスタイルがありません。"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "ふりがな注釈を適用するスタイルを選択："
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "スタイルフィルター"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "スタイルによりスキップ"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "一般的なエラーを修正（空行を削除）"

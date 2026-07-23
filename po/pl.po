@@ -6523,3 +6523,87 @@ msgid ""
 "no warranties of any kind are given either.%n%nSee the Aegisub website for "
 "information on obtaining the source code."
 msgstr ""
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "Automatycznie"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "PlayRes skryptu"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 pionowo"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 pionowo"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "Szerokość wyjścia"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "Wysokość wyjścia"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "Wyrównanie poziome"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "Odstęp wierszy (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "Pozycja kotwicy X (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "Lewy/prawy margines (0 = auto)"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "Wybrane wiersze"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "Wszystkie wiersze"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "Sprawdź"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "W bieżącym pliku napisów nie ma dostępnych stylów."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "Wybierz styl dla adnotacji furigana:"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "Filtr stylów"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "Pominięte według stylu"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "Napraw częste błędy (usuń puste)"

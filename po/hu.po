@@ -6649,3 +6649,87 @@ msgstr ""
 
 #~ msgid "Drawings"
 #~ msgstr "Rajzok"
+
+#: ../src/command/tool.cpp:0
+msgid "Auto"
+msgstr "Automatikus"
+
+#: ../src/command/tool.cpp:0
+msgid "Script PlayRes"
+msgstr "Szkript PlayRes"
+
+#: ../src/command/tool.cpp:0
+msgid "2160p / 4K"
+msgstr "2160p / 4K"
+
+#: ../src/command/tool.cpp:0
+msgid "1080p"
+msgstr "1080p"
+
+#: ../src/command/tool.cpp:0
+msgid "720p"
+msgstr "720p"
+
+#: ../src/command/tool.cpp:0
+msgid "1080x1920 vertical"
+msgstr "1080x1920 függőleges"
+
+#: ../src/command/tool.cpp:0
+msgid "720x1280 vertical"
+msgstr "720x1280 függőleges"
+
+#: ../src/command/tool.cpp:0
+msgid "Output width"
+msgstr "Kimeneti szélesség"
+
+#: ../src/command/tool.cpp:0
+msgid "Output height"
+msgstr "Kimeneti magasság"
+
+#: ../src/command/tool.cpp:0
+msgid "Horizontal alignment"
+msgstr "Vízszintes igazítás"
+
+#: ../src/command/tool.cpp:0
+msgid "Line gap (0 auto)"
+msgstr "Sorköz (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "X anchor position (0 auto)"
+msgstr "X horgony pozíció (0 = auto)"
+
+#: ../src/command/tool.cpp:0
+msgid "Left/right margin (0 auto)"
+msgstr "Bal/jobb margó (0 = auto)"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "selected rows"
+msgstr "Kijelölt sorok"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "all rows"
+msgstr "Összes sor"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Check"
+msgstr "Ellenőrzés"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "No styles are available in the current subtitle file."
+msgstr "Nincsenek elérhető stílusok a jelenlegi feliratfájlban."
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Choose a style to apply furigana annotations to:"
+msgstr "Válasszon stílust a furigana jegyzetekhez:"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Style filter"
+msgstr "Stílusszűrő"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Skipped by style"
+msgstr "Stílus alapján kihagyva"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "fix common errors (remove empty)"
+msgstr "Gyakori hibák javítása (üresek törlése)"
