@@ -1,10 +1,81 @@
-# Aegisub
+# Aegisub SGMY
 
-For binaries and general information [see the homepage](http://aegisub.org).
+[中文说明](README_CN.md) | English
 
-The bug tracker can be found at https://github.com/TypesettingTools/Aegisub/issues.
+A customized fork of [Aegisub](http://aegisub.org) focused on practical
+subtitle-production workflows — HDR/Dolby Vision preview, CJK text tools,
+audio stability, and batch timing fixes.
 
-Support is available on [Discord](https://discord.com/invite/AZaVyPr) or [IRC](irc://irc.rizon.net/aegisub).
+Pre-built binaries (Windows installer/portable, macOS DMG for Intel and Apple
+Silicon) are available on the [Releases page](https://github.com/samgum/Aegisub/releases).
+
+---
+
+## What's new in this fork
+
+### HDR & Dolby Vision video support
+- **Open HDR/BT.2020 video** — the original Aegisub rejected 4K HDR sources
+  with "Unknown video color space". This fork recognises BT.2020 and all
+  modern color spaces so UHD/HDR/Dolby Vision files open normally.
+- **CPU HDR tone-mapping** — PQ (SMPTE ST 2084) and HLG (ARIB STD-B67) sources
+  are decoded at 16-bit precision and tone-mapped to a viewable SDR/BT.709
+  preview, so HDR footage no longer appears near-black or washed out. The
+  tone-map uses precomputed lookup tables (no `std::pow` in the per-frame loop)
+  and runs entirely in `float` for autovectorization.
+- **Decode-time downscaling** — 4K HDR sources are subsampled to a 1920-wide
+  preview at decode time, cutting CPU/memory ~4× so playback stays responsive
+  instead of freezing the whole machine.
+- SDR video is completely untouched (zero overhead, same behavior as upstream).
+
+### Fix Common Errors (Subtitle Edit-style batch fixer)
+A new toolbar tool (Tools → Fix Common Errors) that batch-fixes the most
+common subtitle problems in one pass, each opt-in via checkbox:
+- Fix overlapping display times (trim end to next start)
+- Fix short gaps between lines (configurable minimum)
+- Fix short / long durations (configurable thresholds)
+- Remove empty / whitespace-only lines
+- Strip trailing whitespace (including full-width U+3000)
+
+Affects all rows or selected rows. Each category is its own undo step with
+the correct commit type (timing / text / add-remove).
+
+### CJK text tools (Tools menu)
+- **Chinese Simplified ↔ Traditional conversion** — ICU-based, with per-style
+  filtering and selection scope.
+- **Subtitle text cleanup** — fix full-width commas, spacing around periods,
+  smart quotes, and double spaces.
+- **Paired punctuation checker** — validates quotes, brackets, and CJK
+  book-title / corner / angle brackets for pairing problems.
+- **Japanese furigana annotation** — add editable ruby-text annotations above
+  or below kanji, with per-occurrence readings and style-scoped application.
+
+### Music lyrics scroll generator
+Generate music-player-style scrolling lyric subtitles with live preview,
+multi-language (single / bilingual) support, resolution presets (2160p /
+1080p / 720p / vertical / custom), and independent styling for current and
+upcoming lines.
+
+### Audio playback improvements
+- **Playback speed control** with pitch preservation (SoundTouch), 0.25×–4.0×,
+  with Ctrl+hotkey overrides.
+- **macOS PortAudio stability** — lazy route-change detection (only rebuild
+  the stream when the default device actually moves), exception-safe reopen,
+  so headphone/Bluetooth/speaker switching no longer crashes or silences.
+- **DirectSound position jitter fix** — playback position no longer jumps
+  backward on Windows.
+- **96 kHz / 24-bit Hi-Res audio** support.
+
+### Other
+- **Subtitle overflow highlighting** — highlights lines whose rendered text
+  exceeds the video frame, using libass bounds.
+- **AI subtitle analysis** — optional AI-assisted line analysis (configurable
+  in Preferences).
+- **31-language localization** — complete translations for all new features
+  in Simplified Chinese, Traditional Chinese, and 22 other languages.
+- **Robust Windows installer** — fault-tolerant language-file download that
+  survives upstream Inno Setup changes.
+
+---
 
 ## Building Aegisub
 
@@ -28,7 +99,7 @@ All other dependencies are either stored in the repository or are included as su
 
 Building:
 
-1. Clone Aegisub's repository: `git clone https://github.com/TypesettingTools/Aegisub.git`
+1. Clone Aegisub's repository: `git clone https://github.com/samgum/Aegisub.git`
 2. From the Visual Studio "x64 Native Tools Command Prompt", generate the build directory: `meson build -Ddefault_library=static` (if building for release, add `--buildtype=release`)
 3. Build with `cd build` and `ninja`
 
@@ -40,14 +111,14 @@ You can generate the installer with `ninja win-installer` after a successful bui
 
 You can generate the portable zip with `ninja win-portable` after a successful build.
 
-### OS X
+### macOS
 
 A vaguely recent version of Xcode and the corresponding command-line tools are required.
 
 For personal usage, you can use pip and homebrew to install almost all of Aegisub's dependencies:
 
     pip3 install meson      # or brew install meson if you installed Python via brew
-    brew install cmake ninja pkg-config  libass boost zlib ffms2 fftw hunspell uchardet
+    brew install cmake ninja pkg-config libass boost zlib ffms2 fftw hunspell uchardet
     export LDFLAGS="-L/usr/local/opt/icu4c/lib"
     export CPPFLAGS="-I/usr/local/opt/icu4c/include"
     export PKG_CONFIG_PATH="/usr/local/opt/icu4c/lib/pkgconfig"
@@ -66,7 +137,7 @@ meson compile osx-bundle -C build_static
 meson compile osx-build-dmg -C build_static
 ```
 
-### Linux or other
+### Linux
 
 #### Build dependencies for Debian-based systems
 
