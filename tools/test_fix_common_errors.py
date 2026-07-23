@@ -98,12 +98,14 @@ def test_overlap_fix_logic_correct():
 
 def test_empty_removal_is_safe():
     """Empty-line removal must erase from the list before deleting the object,
-    and must clear the active line first to avoid a dangling selection."""
+    and must rebuild the selection from survivors (SetSelectionAndActive) so
+    the selection controller never holds a dangling pointer to a freed line."""
     src = DIALOG_CPP.read_text(encoding="utf-8")
     idx = src.index("DialogFixCommonErrors::Process")
     proc = src[idx:]
     assert "Events.erase" in proc
-    assert "SetActiveLine(nullptr)" in proc
+    # Must rebuild selection from survivors, not just clear the active line.
+    assert "SetSelectionAndActive" in proc
 
 
 def test_chinese_translations():

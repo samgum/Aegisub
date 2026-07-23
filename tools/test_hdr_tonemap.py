@@ -104,6 +104,18 @@ def test_getframe_tonemaps_hdr_and_passes_sdr_through():
     assert "out.data.assign(frame->Data[0]" in source
 
 
+def test_tonemap_uses_source_stride_for_padded_rows():
+    """swscale usually pads each rgb48le row to a SIM alignment boundary, so
+    Linesize[0] can be > 6*Width. The tone-map must read with a per-row stride
+    (frame->Linesize[0]) or every row after the first is misaligned."""
+    tonemap = TONEMAP.read_text(encoding="utf-8")
+    provider = FFMPEGSOURCE.read_text(encoding="utf-8")
+    # The function signature must accept a stride.
+    assert "size_t src_stride_bytes" in tonemap
+    # The provider must pass frame->Linesize[0] as that stride.
+    assert "frame->Linesize[0]," in provider
+
+
 def test_flip_and_rotation_use_pitch_not_linesize():
     """flip/rotation must use out.pitch (which is correct for both the
     tone-mapped buffer and the raw SDR buffer), not frame->Linesize[0] which
@@ -136,6 +148,7 @@ def main():
         test_provider_reads_hdr_metadata_from_first_frame,
         test_provider_requests_16_bit_for_hdr_and_bgra_for_sdr,
         test_getframe_tonemaps_hdr_and_passes_sdr_through,
+        test_tonemap_uses_source_stride_for_padded_rows,
         test_flip_and_rotation_use_pitch_not_linesize,
         test_provider_builds_tonemapper_once_not_per_frame,
     ]

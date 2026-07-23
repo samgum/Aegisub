@@ -2781,9 +2781,12 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 	}
 
 	// --- Remove empty lines.
-	// Erase from the intrusive list first, then dispose. Defer the actual
-	// delete so we never touch freed memory while still iterating 'lines'.
-	std::vector<AssDialogue *> disposed;
+	// We must keep the selection controller's selection set free of any pointer
+	// we are about to delete, or it holds a dangling AssDialogue* (UAF on the
+	// next operation that touches the selection). The safe pattern, mirroring
+	// command/edit.cpp delete_lines, is: collect survivors, erase+commit, then
+	// atomically replace the selection with the survivors, then delete.
+	std::vector<AssDialogue *> to_delete;
 	if (do_empty) {
 		for (auto line : lines) {
 			auto text = line->Text.get();
@@ -2791,15 +2794,16 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 			for (char c : text) {
 				if (c != ' ' && c != '\t' && c != '\r' && c != '\n') { only_ws = false; break; }
 			}
-			if (only_ws) {
-				// Drop the active/selection references to this line first so the
-				// selection controller never holds a dangling pointer.
-				context->selectionController->SetActiveLine(nullptr);
-				context->ass->Events.erase(context->ass->iterator_to(*line));
-				disposed.push_back(line);
-			}
+			if (only_ws)
+				to_delete.push_back(line);
 		}
-		n_empty = (int)disposed.size();
+	}
+
+	if (!to_delete.empty()) {
+		// Erase from the event list (the intrusive list hook detaches on erase).
+		for (auto line : to_delete)
+			context->ass->Events.erase(context->ass->iterator_to(*line));
+		n_empty = (int)to_delete.size();
 	}
 
 	// Commit. Time fixes use COMMIT_DIAG_TIME; row removal uses ADDREM; text
@@ -2807,15 +2811,33 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 	// selectively undo one category.
 	bool changed_time = do_overlaps || do_short_gap || do_short_dur || do_long_dur;
 	bool changed_text = do_trim;
-	bool changed_rows = !disposed.empty();
+	bool changed_rows = !to_delete.empty();
 	if (changed_time)
 		context->ass->Commit(_("fix common errors (timing)"), AssFile::COMMIT_DIAG_TIME);
 	if (changed_text)
 		context->ass->Commit(_("fix common errors (text)"), AssFile::COMMIT_DIAG_TEXT);
+
 	if (changed_rows) {
+		// Rebuild a selection that contains only surviving lines, so the
+		// selection controller never holds a pointer to a line we're about to
+		// free. If the active line was deleted, fall back to the first survivor
+		// (or null if everything was removed).
+		auto const &old_sel = context->selectionController->GetSelectedSet();
+		AssDialogue *old_active = context->selectionController->GetActiveLine();
+		Selection new_sel;
+		for (auto line : old_sel) {
+			if (std::find(to_delete.begin(), to_delete.end(), line) == to_delete.end())
+				new_sel.insert(line);
+		}
+		AssDialogue *new_active = old_active;
+		if (new_active && std::find(to_delete.begin(), to_delete.end(), new_active) != to_delete.end())
+			new_active = new_sel.empty() ? nullptr : *new_sel.begin();
+
+		context->selectionController->SetSelectionAndActive(std::move(new_sel), new_active);
+
 		context->ass->Commit(_("fix common errors (remove empty)"), AssFile::COMMIT_DIAG_ADDREM | AssFile::COMMIT_DIAG_FULL);
-		// Now safe to free the detached dialogue objects.
-		for (auto line : disposed)
+		// Now safe to free the detached dialogue objects — nothing references them.
+		for (auto line : to_delete)
 			delete line;
 	}
 

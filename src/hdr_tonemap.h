@@ -234,43 +234,53 @@ inline ToneMapper BuildToneMapper(int transfer, int primaries, int max_cll) {
 /// runs in float so the compiler can vectorize it, and pointer increments
 /// avoid repeated index multiplication.
 ///
-/// `pixels` is width * height. dst must hold at least pixels * 4 bytes.
+/// `src_stride_bytes` is the byte distance between the start of consecutive
+/// source rows (FFMS Linesize[0]); swscale usually pads rows to a SIM
+/// alignment boundary so this is >= 6*width. `dst` is written tightly packed
+/// (4 bytes/pixel, no padding).
 inline void ToneMapRGB48toBGRA8(const ToneMapper &tm,
-                                const uint16_t *src, uint8_t *dst, size_t pixels) {
-	if (!src || !dst || pixels == 0)
+                                const uint16_t *src, size_t src_stride_bytes,
+                                uint8_t *dst, int width, int height) {
+	if (!src || !dst || width <= 0 || height <= 0)
 		return;
 
 	const float *m = tm.gamut.data();
 	const bool gamut = tm.needs_gamut;
 	const uint8_t *gl = tm.gamma_lut.data();
 	const float *el = tm.eotf_lut.data();
+	// Source row step in uint16_t units (bytes/2). Each row is 3*width pixels.
+	const size_t src_stride = src_stride_bytes / sizeof(uint16_t);
 
-	// Walk src/dst with raw pointers so the loop body has no integer multiply
-	// for addressing — just loads, FP math, and stores. This is the shape the
-	// autovectorizer can turn into packed SSE/AVX instructions.
-	const uint16_t *sp = src;
-	uint8_t *dp = dst;
-	for (size_t i = 0; i < pixels; ++i) {
-		// rgb48le layout per pixel: R16, G16, B16 (little-endian).
-		float r = el[sp[0]];
-		float g = el[sp[1]];
-		float b = el[sp[2]];
-		sp += 3;
+	// Process row by row so we honour the source stride; within a row we walk
+	// src/dst with raw pointers so the loop body has no integer multiply for
+	// addressing. This is the shape the autovectorizer can turn into packed
+	// SSE/AVX instructions.
+	const char *src_bytes = reinterpret_cast<const char *>(src);
+	for (int y = 0; y < height; ++y) {
+		const uint16_t *sp = reinterpret_cast<const uint16_t *>(src_bytes + y * src_stride_bytes);
+		uint8_t *dp = dst + static_cast<size_t>(y) * width * 4;
+		for (int x = 0; x < width; ++x) {
+			// rgb48le layout per pixel: R16, G16, B16 (little-endian).
+			float r = el[sp[0]];
+			float g = el[sp[1]];
+			float b = el[sp[2]];
+			sp += 3;
 
-		if (gamut)
-			ApplyGamut(r, g, b, m);
+			if (gamut)
+				ApplyGamut(r, g, b, m);
 
-		// Clamp to [0,1] then gamma-encode. Manual min/max is branchless and
-		// avoids the std::clamp template overhead in the hot loop.
-		if (r < 0.0f) r = 0.0f; else if (r > 1.0f) r = 1.0f;
-		if (g < 0.0f) g = 0.0f; else if (g > 1.0f) g = 1.0f;
-		if (b < 0.0f) b = 0.0f; else if (b > 1.0f) b = 1.0f;
+			// Clamp to [0,1] then gamma-encode. Manual min/max is branchless and
+			// avoids the std::clamp template overhead in the hot loop.
+			if (r < 0.0f) r = 0.0f; else if (r > 1.0f) r = 1.0f;
+			if (g < 0.0f) g = 0.0f; else if (g > 1.0f) g = 1.0f;
+			if (b < 0.0f) b = 0.0f; else if (b > 1.0f) b = 1.0f;
 
-		dp[0] = gl[static_cast<int>(b * (kGammaLutSize - 1) + 0.5f)];   // B
-		dp[1] = gl[static_cast<int>(g * (kGammaLutSize - 1) + 0.5f)];   // G
-		dp[2] = gl[static_cast<int>(r * (kGammaLutSize - 1) + 0.5f)];   // R
-		dp[3] = 255;                                                    // A
-		dp += 4;
+			dp[0] = gl[static_cast<int>(b * (kGammaLutSize - 1) + 0.5f)];   // B
+			dp[1] = gl[static_cast<int>(g * (kGammaLutSize - 1) + 0.5f)];   // G
+			dp[2] = gl[static_cast<int>(r * (kGammaLutSize - 1) + 0.5f)];   // R
+			dp[3] = 255;                                                    // A
+			dp += 4;
+		}
 	}
 }
 

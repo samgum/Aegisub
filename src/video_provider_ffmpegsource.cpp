@@ -374,14 +374,17 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 		// emit a tightly-packed 4-bytes/pixel buffer for the flip/rotation
 		// code below (which assumes exactly that layout). ToneMap holds
 		// precomputed EOTF/gamma LUTs, so this hot path has no transcendentals.
-		const size_t pixels = static_cast<size_t>(Width) * static_cast<size_t>(Height);
-		// resize (not assign with a fill value) avoids writing zeros we are
-		// about to overwrite; every byte is filled by ToneMapRGB48toBGRA8.
-		out.data.resize(pixels * 4);
+		//
+		// We pass frame->Linesize[0] as the source stride because swscale
+		// usually pads each row to a SIM alignment boundary, so the byte
+		// distance between rows can be > 6*Width. Reading contiguously would
+		// misalign every row after the first.
+		out.data.resize(static_cast<size_t>(Width) * Height * 4);
 		HDRTonemap::ToneMapRGB48toBGRA8(
 			*ToneMap,
 			reinterpret_cast<const uint16_t *>(frame->Data[0]),
-			out.data.data(), pixels);
+			frame->Linesize[0],
+			out.data.data(), Width, Height);
 		out.pitch = 4 * Width;
 	}
 	else {
