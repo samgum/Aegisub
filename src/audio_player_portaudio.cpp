@@ -193,11 +193,17 @@ void PortAudioPlayer::OpenStream() {
 		pa_output_p.device = (*device_ids)[i];
 		pa_output_p.channelCount = provider->GetChannels();
 		pa_output_p.sampleFormat = paInt16;
+		// Use the low output latency for responsive playback. This is critical
+		// for timing work: high latency makes the audio lag behind the cursor
+		// on the waveform by tens of ms, which feels like stutter and makes
+		// accurate syncing impossible. defaultLowOutputLatency is typically
+		// 5-15 ms on macOS CoreAudio.
 		pa_output_p.suggestedLatency = device_info->defaultLowOutputLatency;
 #ifdef __APPLE__
-		// CoreAudio is more sensitive to very small callback buffers on some
-		// Apple Silicon devices; use the high-latency default as a stable floor.
-		pa_output_p.suggestedLatency = std::max(pa_output_p.suggestedLatency, std::max(device_info->defaultHighOutputLatency, 0.12));
+		// Guard against a near-zero latency that some virtual devices report
+		// (which causes underruns/clicking), but keep it far below the old
+		// 0.12 floor that made timing work impossible.
+		pa_output_p.suggestedLatency = std::max(pa_output_p.suggestedLatency, 0.01);
 #endif
 		pa_output_p.hostApiSpecificStreamInfo = nullptr;
 

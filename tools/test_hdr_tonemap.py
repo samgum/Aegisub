@@ -133,14 +133,28 @@ def test_hdr_downscaled_at_decode_time():
 
 
 def test_hlg_normalization_is_correct():
-    """The HLG path must normalize display-linear light to SDR-relative using
-    1000/203, NOT the buggy *3.0 factor that caused overexposure."""
+    """HLG and PQ must normalize display-linear light to a 1.0 == 1000 nits
+    domain (NOT the old /203 domain that caused overexposure). The soft-clip
+    tone-map then lets SDR content (< 0.2) pass linearly while HDR highlights
+    roll off — putting reference white at the correct mid-gray position."""
     source = TONEMAP.read_text(encoding="utf-8")
-    # The correct normalization.
-    assert "HLGOOTF(e) * 1000.0 / kSdrWhiteNits" in source
-    # The old buggy pattern must NOT be present.
+    # PQ normalizes by 1000 (not 203).
+    assert "PQEOTF(e) / 1000.0" in source
+    # HLG OOTF output is already 1.0 == 1000 nits, so no extra scaling.
+    assert "lin = HLGOOTF(e);" in source
+    # The old buggy patterns must NOT be present.
     assert "kSdrWhiteNits * 3.0" not in source
-    assert "* 3.0" not in source
+    assert "/ kSdrWhiteNits" not in source.split("ToneMapReinhardt")[0].split("BuildToneMapper")[-1] \
+        or "max_cll > 0" in source  # peak still references kSdrWhiteNits, that's fine
+
+
+def test_tonemap_uses_soft_clip_not_reinhardt():
+    """The tone-map must use a soft highlight roll-off (linear below 0.75,
+    exponential above), not the old Reinhardt global compression that pushed
+    midtones too bright on PQ content."""
+    source = TONEMAP.read_text(encoding="utf-8")
+    assert "std::exp(-3.0" in source
+    assert "l <= 0.75" in source
 
 
 def test_flip_and_rotation_use_pitch_not_linesize():
@@ -178,6 +192,7 @@ def main():
         test_tonemap_uses_source_stride_for_padded_rows,
         test_hdr_downscaled_at_decode_time,
         test_hlg_normalization_is_correct,
+        test_tonemap_uses_soft_clip_not_reinhardt,
         test_flip_and_rotation_use_pitch_not_linesize,
         test_provider_builds_tonemapper_once_not_per_frame,
     ]

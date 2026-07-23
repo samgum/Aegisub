@@ -31,8 +31,14 @@ def test_portaudio_uses_safer_macos_latency_and_no_dither():
     source = PORTAUDIO.read_text(encoding="utf-8")
     header = PORTAUDIO_H.read_text(encoding="utf-8")
     assert "bool draining = false" in header
-    assert "defaultHighOutputLatency" in source
-    assert "0.12" in source
+    # macOS must use LOW output latency (not the old 0.12s high-latency floor
+    # that made timing work impossible due to 120ms audio lag).
+    assert "defaultLowOutputLatency" in source
+    assert "0.01" in source  # minimum floor to avoid underruns
+    # The old high-latency floor must be gone from actual code (comments
+    # describing the old bug are fine).
+    code_lines = [l for l in source.splitlines() if not l.strip().startswith("//")]
+    assert not any("0.12" in l for l in code_lines)
     assert "paPrimeOutputBuffersUsingStreamCallback | paDitherOff" in source
 
 

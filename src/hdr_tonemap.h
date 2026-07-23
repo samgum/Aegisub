@@ -127,22 +127,21 @@ inline double HLGOOTF(double e) {
 	return scene > 0.0 ? std::pow(scene, kHlgSystemGamma - 1.0) * scene : 0.0;
 }
 
-// Map a normalized linear-light value (relative to SDR white == 1.0) to a
-// displayable [0,1] value using an extended Reinhardt operator with a soft
-// highlight knee. Peak is the scene's max linear value (from MaxCLL when
-// known, otherwise a sane default). This preserves midtone contrast while
-// rolling off specular highlights instead of hard-clipping them.
+// Map a linear-light value (normalized so 1.0 == 1000 nits, the preview
+// ceiling) to a displayable [0,1] value. Values up to 0.75 (~750 nits) pass
+// through linearly so SDR-range content looks correct; highlights above that
+// roll off gently toward 1.0 via an exponential curve so specular detail is
+// preserved instead of hard-clipped. This is far more natural for an SDR
+// preview of HDR content than Reinhardt, which lifts midtones too much.
 inline double ToneMapReinhardt(double l, double peak) {
+	(void)peak;
 	if (l <= 0.0)
 		return 0.0;
-	// White point: anything at or above peak compresses toward 1.0.
-	double wp = (peak > 0.0) ? peak : 1.0;
-	// Extended Reinhardt: x' = x * (1 + x / wp^2) / (1 + x). Keeps midtones
-	// nearly linear and gently compresses highlights.
-	double num = l * (1.0 + l / (wp * wp));
-	double den = 1.0 + l;
-	double mapped = num / den;
-	return std::min(mapped, 1.0);
+	if (l <= 0.75)
+		return l;
+	// Exponential highlight roll-off: at l=0.75 returns 0.75, approaches 1.0
+	// asymptotically. k=3 gives a gentle knee visible over ~2 stops.
+	return 1.0 - 0.25 * std::exp(-3.0 * (l - 0.75));
 }
 
 // Apply the BT.2020 -> BT.709 gamut matrix in place. Cheap (9 mul), kept as
@@ -199,21 +198,23 @@ inline ToneMapper BuildToneMapper(int transfer, int primaries, int max_cll) {
 	tm.primaries = primaries;
 	tm.needs_gamut = (primaries == kPrimariesBT2020);
 
-	// Tone-map peak (scene-relative), from MaxCLL when available.
+	// Tone-map peak (unused by the soft-clip operator now, kept for the LUT
+	// build signature and future per-source tuning).
 	const double peak = (max_cll > 0 ? static_cast<double>(max_cll) : 1000.0) / kSdrWhiteNits;
 
 	tm.eotf_lut.resize(65536);
-	// Both PQ and HLG EOTFs produce display-linear light. Normalize to
-	// "relative to SDR reference white" (1.0 == 203 nits) so the tone-map and
-	// the rest of the pipeline work in the same units.
+	// Normalize display-linear light to the preview ceiling (1000 nits), so
+	// 1.0 == 1000 nits. The soft-clip operator then lets SDR-range content
+	// (< ~200 nits = 0.2) pass nearly linearly while HDR highlights roll off.
+	// This puts reference white (203 nits) at ~0.2 linear, which gamma-encodes
+	// to roughly mid-gray — the correct SDR preview appearance.
 	for (int v = 0; v < 65536; ++v) {
 		double e = static_cast<double>(v) / 65535.0;
 		double lin;
 		if (transfer == kTransferPQ)
-			lin = PQEOTF(e) / kSdrWhiteNits;
-		else  // HLG: OOTF returns display-linear (peak 1.0 == 1000 nits),
-		      // scale to relative-to-SDR-white (1.0 == 203 nits).
-			lin = HLGOOTF(e) * 1000.0 / kSdrWhiteNits;
+			lin = PQEOTF(e) / 1000.0;
+		else  // HLG: OOTF returns display-linear (peak 1.0 == 1000 nits).
+			lin = HLGOOTF(e);
 		tm.eotf_lut[v] = static_cast<float>(ToneMapReinhardt(lin, peak));
 	}
 
