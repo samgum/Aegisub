@@ -116,6 +116,21 @@ def test_tonemap_uses_source_stride_for_padded_rows():
     assert "frame->Linesize[0]," in provider
 
 
+def test_hdr_downscaled_at_decode_time():
+    """4K HDR decode at full resolution saturates the CPU and overflows the
+    32MB frame cache (one 4K BGRA frame is 33MB). HDR sources must be
+    subsampled at decode time to a preview ceiling so playback stays
+    responsive; SDR must be untouched."""
+    provider = FFMPEGSOURCE.read_text(encoding="utf-8")
+    # The downscale must only apply to HDR.
+    assert "if (IsHDR && Width > 1920)" in provider
+    assert "preview_max_width = 1920" in provider
+    # The resizer for HDR must be the cheap FAST_BILINEAR.
+    assert "FFMS_RESIZER_FAST_BILINEAR" in provider
+    # SDR must still use BICUBIC.
+    assert "FFMS_RESIZER_BICUBIC" in provider
+
+
 def test_flip_and_rotation_use_pitch_not_linesize():
     """flip/rotation must use out.pitch (which is correct for both the
     tone-mapped buffer and the raw SDR buffer), not frame->Linesize[0] which
@@ -149,6 +164,7 @@ def main():
         test_provider_requests_16_bit_for_hdr_and_bgra_for_sdr,
         test_getframe_tonemaps_hdr_and_passes_sdr_through,
         test_tonemap_uses_source_stride_for_padded_rows,
+        test_hdr_downscaled_at_decode_time,
         test_flip_and_rotation_use_pitch_not_linesize,
         test_provider_builds_tonemapper_once_not_per_frame,
     ]

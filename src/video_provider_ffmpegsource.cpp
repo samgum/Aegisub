@@ -325,8 +325,42 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 	const int rgb48_fmt = FFMS_GetPixFmt("rgb48le");
 	const int bgra_fmt = FFMS_GetPixFmt("bgra");
 	const int TargetFormat[] = { IsHDR ? rgb48_fmt : bgra_fmt, bgra_fmt, -1 };
-	if (FFMS_SetOutputFormatV2(VideoSource, TargetFormat, Width, Height, FFMS_RESIZER_BICUBIC, &ErrInfo))
+
+	// Performance: for large HDR sources (4K杜比视界/HDR10), decoding at full
+	// resolution is the dominant cost — 4K HEVC 10-bit software decode + swscale
+	// rgb48le conversion saturates the CPU and stalls the whole machine, and a
+	// single 4K BGRA frame (33MB) overflows the 32MB frame cache so playback
+	// re-decodes every frame. Subsample at decode time down to a preview ceiling
+	// (1920 wide, aspect preserved): this cuts decode + tone-map + memory all by
+	// ~4x, and 4 cached frames fit in the cache instead of <1. SDR is untouched
+	// so existing behaviour is identical for non-HDR video.
+	int out_w = Width;
+	int out_h = Height;
+	if (IsHDR && Width > 1920) {
+		const int preview_max_width = 1920;
+		double scale = static_cast<double>(preview_max_width) / Width;
+		out_w = preview_max_width;
+		out_h = std::max(1, static_cast<int>(Height * scale));
+		// Keep even dimensions — some swscale paths require them for YUV.
+		out_h -= out_h % 2;
+		LOG_I("video/provider/ffmpegsource") << "HDR preview downscaled from "
+			<< Width << "x" << Height << " to " << out_w << "x" << out_h
+			<< " to keep playback responsive";
+	}
+
+	// FAST_BILINEAR is far cheaper than BICUBIC and indistinguishable for a
+	// downsampled preview; use it for HDR. SDR keeps BICUBIC for parity.
+	int resizer = IsHDR ? FFMS_RESIZER_FAST_BILINEAR : FFMS_RESIZER_BICUBIC;
+	if (FFMS_SetOutputFormatV2(VideoSource, TargetFormat, out_w, out_h, resizer, &ErrInfo))
 		throw VideoOpenError(std::string("Failed to set output format: ") + ErrInfo.Buffer);
+
+	// The provider now reports the (possibly downscaled) output size, since
+	// every frame GetFrame returns is at out_w x out_h. DAR is unchanged because
+	// the downscale preserves aspect ratio.
+	if (IsHDR && Width > 1920) {
+		Width = out_w;
+		Height = out_h;
+	}
 
 	// get frame info data
 	FFMS_Track *FrameData = FFMS_GetTrackFromVideo(VideoSource);
