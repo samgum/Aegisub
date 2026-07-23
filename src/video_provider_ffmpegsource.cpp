@@ -348,9 +348,11 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 			<< " to keep playback responsive";
 	}
 
-	// FAST_BILINEAR is far cheaper than BICUBIC and indistinguishable for a
-	// downsampled preview; use it for HDR. SDR keeps BICUBIC for parity.
-	int resizer = IsHDR ? FFMS_RESIZER_FAST_BILINEAR : FFMS_RESIZER_BICUBIC;
+	// BILINEAR is a good quality/speed trade-off for the HDR path: it is much
+	// cheaper than BICUBIC but avoids the chroma artifacts that FAST_BILINEAR
+	// can produce on 4:2:0 YUV sources (visible color fringing at edges).
+	// SDR keeps BICUBIC for parity with upstream.
+	int resizer = IsHDR ? FFMS_RESIZER_BILINEAR : FFMS_RESIZER_BICUBIC;
 	if (FFMS_SetOutputFormatV2(VideoSource, TargetFormat, out_w, out_h, resizer, &ErrInfo))
 		throw VideoOpenError(std::string("Failed to set output format: ") + ErrInfo.Buffer);
 

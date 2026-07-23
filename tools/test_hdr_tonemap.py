@@ -125,10 +125,22 @@ def test_hdr_downscaled_at_decode_time():
     # The downscale must only apply to HDR.
     assert "if (IsHDR && Width > 1920)" in provider
     assert "preview_max_width = 1920" in provider
-    # The resizer for HDR must be the cheap FAST_BILINEAR.
-    assert "FFMS_RESIZER_FAST_BILINEAR" in provider
+    # The resizer for HDR must be BILINEAR (not FAST_BILINEAR, which causes
+    # chroma artifacts on 4:2:0 sources; not BICUBIC, which is too slow).
+    assert "FFMS_RESIZER_BILINEAR" in provider
     # SDR must still use BICUBIC.
     assert "FFMS_RESIZER_BICUBIC" in provider
+
+
+def test_hlg_normalization_is_correct():
+    """The HLG path must normalize display-linear light to SDR-relative using
+    1000/203, NOT the buggy *3.0 factor that caused overexposure."""
+    source = TONEMAP.read_text(encoding="utf-8")
+    # The correct normalization.
+    assert "HLGOOTF(e) * 1000.0 / kSdrWhiteNits" in source
+    # The old buggy pattern must NOT be present.
+    assert "kSdrWhiteNits * 3.0" not in source
+    assert "* 3.0" not in source
 
 
 def test_flip_and_rotation_use_pitch_not_linesize():
@@ -165,6 +177,7 @@ def main():
         test_getframe_tonemaps_hdr_and_passes_sdr_through,
         test_tonemap_uses_source_stride_for_padded_rows,
         test_hdr_downscaled_at_decode_time,
+        test_hlg_normalization_is_correct,
         test_flip_and_rotation_use_pitch_not_linesize,
         test_provider_builds_tonemapper_once_not_per_frame,
     ]

@@ -203,13 +203,17 @@ inline ToneMapper BuildToneMapper(int transfer, int primaries, int max_cll) {
 	const double peak = (max_cll > 0 ? static_cast<double>(max_cll) : 1000.0) / kSdrWhiteNits;
 
 	tm.eotf_lut.resize(65536);
+	// Both PQ and HLG EOTFs produce display-linear light. Normalize to
+	// "relative to SDR reference white" (1.0 == 203 nits) so the tone-map and
+	// the rest of the pipeline work in the same units.
 	for (int v = 0; v < 65536; ++v) {
 		double e = static_cast<double>(v) / 65535.0;
 		double lin;
 		if (transfer == kTransferPQ)
 			lin = PQEOTF(e) / kSdrWhiteNits;
-		else  // HLG (or anything else we treat as HLG for preview)
-			lin = HLGOOTF(e) * kSdrWhiteNits * 3.0 / kSdrWhiteNits;
+		else  // HLG: OOTF returns display-linear (peak 1.0 == 1000 nits),
+		      // scale to relative-to-SDR-white (1.0 == 203 nits).
+			lin = HLGOOTF(e) * 1000.0 / kSdrWhiteNits;
 		tm.eotf_lut[v] = static_cast<float>(ToneMapReinhardt(lin, peak));
 	}
 
