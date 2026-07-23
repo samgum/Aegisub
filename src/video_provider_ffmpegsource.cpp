@@ -81,11 +81,7 @@ class FFmpegSourceVideoProvider final : public VideoProvider, FFmpegSourceProvid
 	int Transfer = -1;              ///< Reported transfer characteristics (AVColorTransferCharacteristic)
 	int Primaries = -1;             ///< Reported color primaries (AVColorPrimaries)
 	int MaxCLL = 0;                 ///< Max content light level (nits); 0 = unavailable
-	bool IsHDR = false;             ///< True when this source needs HDR tone-mapping on the CPU
-	/// Precomputed EOTF/gamma lookup tables for the current HDR source. Built
-	/// once in LoadVideo and reused for every frame so the per-frame hot path
-	/// does no transcendentals (4K would otherwise be ~9 std::pow per pixel).
-	std::unique_ptr<HDRTonemap::ToneMapper> ToneMap;
+	bool IsHDR = false;             ///< True when this source is HDR (used for downscale logging)
 	double DAR;                     ///< display aspect ratio
 	std::vector<int> KeyFramesList; ///< list of keyframes
 	agi::vfr::Framerate Timecodes;  ///< vfr object
@@ -294,15 +290,9 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 	// FFMS_Frame exposes flat fields (not a nested struct): ContentLightLevelMax.
 	MaxCLL = TempFrame->HasContentLightLevel ? static_cast<int>(TempFrame->ContentLightLevelMax) : 0;
 	IsHDR = HDRTonemap::IsHDRSource(Transfer, Primaries);
-	if (IsHDR) {
+	if (IsHDR)
 		LOG_I("video/provider/ffmpegsource") << "HDR source detected (transfer=" << Transfer
-			<< ", primaries=" << Primaries << ", maxCLL=" << MaxCLL << "); enabling CPU tone-mapping";
-		// Build the EOTF/gamma lookup tables once for the whole source so the
-		// per-frame loop contains no std::pow calls (4K would otherwise be
-		// ~9 transcendentals per pixel and stall playback).
-		ToneMap = std::make_unique<HDRTonemap::ToneMapper>(
-			HDRTonemap::BuildToneMapper(Transfer, Primaries, MaxCLL));
-	}
+			<< ", primaries=" << Primaries << ", maxCLL=" << MaxCLL << "); using swscale conversion";
 
 	if (CS == AGI_CS_UNSPECIFIED)
 		CS = Width > 1024 || Height >= 600 ? AGI_CS_BT709 : AGI_CS_BT470BG;
@@ -318,22 +308,20 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 			throw VideoOpenError(std::string("Failed to set input format: ") + ErrInfo.Buffer);
 	}
 
-	// For HDR sources request 16-bit rgb48le so we can tone-map from full
-	// precision before quantizing to 8-bit; for SDR keep the original bgra
-	// path (zero overhead, unchanged behaviour). bgra is always the fallback
-	// so a decoder that can't produce rgb48le still opens the file.
-	const int rgb48_fmt = FFMS_GetPixFmt("rgb48le");
+	// All sources (HDR and SDR) decode to 8-bit bgra and let FFMS/libswscale
+	// handle the YUV->RGB + colorspace conversion. The earlier CPU tone-map
+	// experiment produced visible banding/blocking artifacts ("oil-painting"
+	// look) on real Dolby Vision content because per-channel LUT tone-mapping
+	// cannot preserve inter-channel consistency. libswscale's built-in
+	// conversion is smooth and continuous — the result is not a reference HDR
+	// render, but it is a clean, usable preview with no artifacts, which is
+	// what subtitle timing work actually needs.
 	const int bgra_fmt = FFMS_GetPixFmt("bgra");
-	const int TargetFormat[] = { IsHDR ? rgb48_fmt : bgra_fmt, bgra_fmt, -1 };
+	const int TargetFormat[] = { bgra_fmt, -1 };
 
 	// Performance: for large HDR sources (4K杜比视界/HDR10), decoding at full
-	// resolution is the dominant cost — 4K HEVC 10-bit software decode + swscale
-	// rgb48le conversion saturates the CPU and stalls the whole machine, and a
-	// single 4K BGRA frame (33MB) overflows the 32MB frame cache so playback
-	// re-decodes every frame. Subsample at decode time down to a preview ceiling
-	// (1920 wide, aspect preserved): this cuts decode + tone-map + memory all by
-	// ~4x, and 4 cached frames fit in the cache instead of <1. SDR is untouched
-	// so existing behaviour is identical for non-HDR video.
+	// resolution is the dominant cost. Subsample at decode time down to a
+	// preview ceiling (1920 wide, aspect preserved) so playback stays smooth.
 	int out_w = Width;
 	int out_h = Height;
 	if (IsHDR && Width > 1920) {
@@ -341,24 +329,16 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 		double scale = static_cast<double>(preview_max_width) / Width;
 		out_w = preview_max_width;
 		out_h = std::max(1, static_cast<int>(Height * scale));
-		// Keep even dimensions — some swscale paths require them for YUV.
 		out_h -= out_h % 2;
 		LOG_I("video/provider/ffmpegsource") << "HDR preview downscaled from "
 			<< Width << "x" << Height << " to " << out_w << "x" << out_h
 			<< " to keep playback responsive";
 	}
 
-	// BILINEAR is a good quality/speed trade-off for the HDR path: it is much
-	// cheaper than BICUBIC but avoids the chroma artifacts that FAST_BILINEAR
-	// can produce on 4:2:0 YUV sources (visible color fringing at edges).
-	// SDR keeps BICUBIC for parity with upstream.
 	int resizer = IsHDR ? FFMS_RESIZER_BILINEAR : FFMS_RESIZER_BICUBIC;
 	if (FFMS_SetOutputFormatV2(VideoSource, TargetFormat, out_w, out_h, resizer, &ErrInfo))
 		throw VideoOpenError(std::string("Failed to set output format: ") + ErrInfo.Buffer);
 
-	// The provider now reports the (possibly downscaled) output size, since
-	// every frame GetFrame returns is at out_w x out_h. DAR is unchanged because
-	// the downscale preserves aspect ratio.
 	if (IsHDR && Width > 1920) {
 		Width = out_w;
 		Height = out_h;
@@ -404,30 +384,10 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 	out.width = Width;
 	out.height = Height;
 
-	if (IsHDR) {
-		// FFMS delivered 16-bit rgb48le (6 bytes/pixel). Tone-map the full
-		// precision data down to 8-bit BGRA so highlight detail survives, and
-		// emit a tightly-packed 4-bytes/pixel buffer for the flip/rotation
-		// code below (which assumes exactly that layout). ToneMap holds
-		// precomputed EOTF/gamma LUTs, so this hot path has no transcendentals.
-		//
-		// We pass frame->Linesize[0] as the source stride because swscale
-		// usually pads each row to a SIM alignment boundary, so the byte
-		// distance between rows can be > 6*Width. Reading contiguously would
-		// misalign every row after the first.
-		out.data.resize(static_cast<size_t>(Width) * Height * 4);
-		HDRTonemap::ToneMapRGB48toBGRA8(
-			*ToneMap,
-			reinterpret_cast<const uint16_t *>(frame->Data[0]),
-			frame->Linesize[0],
-			out.data.data(), Width, Height);
-		out.pitch = 4 * Width;
-	}
-	else {
-		// SDR path: FFMS already gave us 8-bit BGRA; copy it straight through.
-		out.data.assign(frame->Data[0], frame->Data[0] + frame->Linesize[0] * Height);
-		out.pitch = frame->Linesize[0];
-	}
+	// FFMS delivers 8-bit bgra for all sources (HDR and SDR). libswscale has
+	// already handled the colorspace conversion; we just copy the frame.
+	out.data.assign(frame->Data[0], frame->Data[0] + frame->Linesize[0] * Height);
+	out.pitch = frame->Linesize[0];
 
 	// Handle flip — use out.pitch (not frame->Linesize[0]) so this is correct
 	// for both the HDR tone-mapped buffer (pitch == 4*Width) and the raw SDR

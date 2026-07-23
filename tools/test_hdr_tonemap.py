@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Static tests for the HDR tone-mapping preview layer.
+"""Static tests for HDR video handling.
 
-These guard the feature that lets HDR (PQ/HLG/BT.2020) footage open and show
-recognizable colour in Aegisub's 8-bit BGRA display pipeline, instead of a
-near-black frame. The tone-map runs on the CPU inside the FFmpegSource provider
-because the OpenGL renderer is hard-locked to 8-bit.
-
-Static (string-based) on purpose: they don't link FFMS2, matching the other
-tools/test_*.py tests.
+After the CPU tone-map experiment was removed (it produced banding/blocking
+artifacts on real Dolby Vision content), HDR sources now go through the same
+bgra path as SDR, letting libswscale handle the colorspace conversion. These
+tests verify that:
+- HDR sources are still detected and opened (not rejected).
+- HDR sources are downscaled at decode time for performance.
+- The CPU tone-map code path is NOT used (no rgb48le, no ToneMapRGB48toBGRA8
+  call, no BuildToneMapper).
+- hdr_tonemap.h is retained only for IsHDRSource detection.
 """
 from pathlib import Path
 
@@ -17,188 +19,71 @@ TONEMAP = ROOT / "src" / "hdr_tonemap.h"
 FFMPEGSOURCE = ROOT / "src" / "video_provider_ffmpegsource.cpp"
 
 
-def test_tonemap_header_exists_with_core_api():
-    """The tone-mapping module must expose the building blocks the provider
-    depends on: HDR detection, the two EOTFs, the operator, and the entry
-    point that converts a full rgb48le frame to 8-bit BGRA."""
-    source = TONEMAP.read_text(encoding="utf-8")
-    assert "namespace HDRTonemap" in source
-    assert "inline bool IsHDRSource(int transfer, int primaries)" in source
-    assert "inline double PQEOTF(double e)" in source
-    assert "inline double HLGOOTF(double e)" in source
-    assert "inline double ToneMapReinhardt(double l, double peak)" in source
-    assert "inline ToneMapper BuildToneMapper(int transfer, int primaries, int max_cll)" in source
-    assert "inline void ToneMapRGB48toBGRA8(const ToneMapper &tm," in source
-    # The transfer-function constants must match libavutil's values.
-    assert "kTransferPQ        = 16" in source
-    assert "kTransferHLG       = 18" in source
-    assert "kPrimariesBT2020   = 9" in source
-
-
-def test_tonemap_uses_luts_not_per_pixel_pow():
-    """The per-frame hot path must use precomputed lookup tables so 4K HDR
-    preview is not stalled by ~9 std::pow calls per pixel. The EOTF LUT folds
-    in PQ/HLG decode + tone-map; the gamma LUT folds in display encoding."""
-    source = TONEMAP.read_text(encoding="utf-8")
-    assert "std::vector<float> eotf_lut" in source
-    assert "std::vector<uint8_t> gamma_lut" in source
-    assert "struct ToneMapper" in source
-    # The hot loop reads channels from the EOTF LUT (cached as a raw pointer
-    # for speed), never calling PQEOTF / HLGOOTF directly in the per-frame path.
-    assert "el[sp[0]]" in source
-
-
-def test_tonemap_hot_path_runs_entirely_in_float():
-    """The per-frame loop must avoid double<->float conversions so the
-    compiler can vectorize it (SSE/AVX process float at 2x the bandwidth of
-    double). The gamut matrix and gamma encode both take float."""
-    source = TONEMAP.read_text(encoding="utf-8")
-    assert "inline void ApplyGamut(float &r, float &g, float &b, const float *m)" in source
-    assert "inline uint8_t Encode(float l) const" in source
-    assert "std::array<float, 9> gamut" in source
-
-
-def test_tonemap_is_hdr_keyed_off_transfer_not_primaries():
-    """SDR UHD content uses BT.2020 primaries too, so HDR detection must be
-    based on the transfer function (PQ/HLG), never on primaries alone."""
-    source = TONEMAP.read_text(encoding="utf-8")
-    assert "transfer == kTransferPQ || transfer == kTransferHLG" in source
-
-
-def test_tonemap_has_bt2020_to_709_gamut_matrix():
-    """Wide-gamut BT.2020 must be brought into the BT.709/sRGB cube the 8-bit
-    preview targets, otherwise colours stay oversaturated."""
-    source = TONEMAP.read_text(encoding="utf-8")
-    assert "kBT2020To709" in source
-    assert "ApplyGamut" in source
-
-
-def test_provider_reads_hdr_metadata_from_first_frame():
-    """The provider must capture transfer/primaries/MaxCLL and set IsHDR so the
-    rest of the pipeline knows whether to tone-map."""
+def test_hdr_detection_still_present():
+    """The provider must still detect HDR sources (for downscale + logging)."""
     source = FFMPEGSOURCE.read_text(encoding="utf-8")
-    assert '#include "hdr_tonemap.h"' in source
-    # FFMS2's field is deliberately misspelled in the upstream header.
     assert "TransferCharateristics" in source
     assert "ColorPrimaries" in source
     assert "ContentLightLevelMax" in source
     assert "HDRTonemap::IsHDRSource(Transfer, Primaries)" in source
+    assert '#include "hdr_tonemap.h"' in source
 
 
-def test_provider_requests_16_bit_for_hdr_and_bgra_for_sdr():
-    """HDR sources must decode at 16-bit rgb48le (so highlight detail survives
-    the tone-map); SDR sources must keep the original bgra path unchanged."""
+def test_hdr_uses_bgra_not_rgb48le():
+    """HDR must NOT request 16-bit rgb48le — that path caused banding artifacts.
+    All sources use plain bgra and let swscale convert."""
     source = FFMPEGSOURCE.read_text(encoding="utf-8")
-    assert 'FFMS_GetPixFmt("rgb48le")' in source
-    assert 'IsHDR ? rgb48_fmt : bgra_fmt' in source
+    # The format must be bgra for everything.
+    assert 'FFMS_GetPixFmt("bgra")' in source
+    # rgb48le must NOT be requested.
+    assert 'FFMS_GetPixFmt("rgb48le")' not in source
 
 
-def test_getframe_tonemaps_hdr_and_passes_sdr_through():
-    """GetFrame must branch on IsHDR: tone-map + quantize for HDR, raw copy for
-    SDR. Both branches must produce a tightly-packed 8-bit BGRA buffer so the
-    existing flip/rotation code keeps working."""
+def test_no_cpu_tonemap_in_provider():
+    """The CPU tone-map entry point must not be called from the provider."""
     source = FFMPEGSOURCE.read_text(encoding="utf-8")
-    assert "if (IsHDR)" in source
-    assert "HDRTonemap::ToneMapRGB48toBGRA8(" in source
-    # SDR fallback must still be the straight 8-bit copy.
-    assert "out.data.assign(frame->Data[0]" in source
-
-
-def test_tonemap_uses_source_stride_for_padded_rows():
-    """swscale usually pads each rgb48le row to a SIM alignment boundary, so
-    Linesize[0] can be > 6*Width. The tone-map must read with a per-row stride
-    (frame->Linesize[0]) or every row after the first is misaligned."""
-    tonemap = TONEMAP.read_text(encoding="utf-8")
-    provider = FFMPEGSOURCE.read_text(encoding="utf-8")
-    # The function signature must accept a stride.
-    assert "size_t src_stride_bytes" in tonemap
-    # The provider must pass frame->Linesize[0] as that stride.
-    assert "frame->Linesize[0]," in provider
+    assert "ToneMapRGB48toBGRA8" not in source
+    assert "BuildToneMapper" not in source
+    assert "ToneMap" not in source  # no ToneMapper member variable
 
 
 def test_hdr_downscaled_at_decode_time():
-    """4K HDR decode at full resolution saturates the CPU and overflows the
-    32MB frame cache (one 4K BGRA frame is 33MB). HDR sources must be
-    subsampled at decode time to a preview ceiling so playback stays
-    responsive; SDR must be untouched."""
-    provider = FFMPEGSOURCE.read_text(encoding="utf-8")
-    # The downscale must only apply to HDR.
-    assert "if (IsHDR && Width > 1920)" in provider
-    assert "preview_max_width = 1920" in provider
-    # The resizer for HDR must be BILINEAR (not FAST_BILINEAR, which causes
-    # chroma artifacts on 4:2:0 sources; not BICUBIC, which is too slow).
-    assert "FFMS_RESIZER_BILINEAR" in provider
-    # SDR must still use BICUBIC.
-    assert "FFMS_RESIZER_BICUBIC" in provider
-
-
-def test_hlg_normalization_is_correct():
-    """HLG and PQ must normalize display-linear light to a 1.0 == 1000 nits
-    domain (NOT the old /203 domain that caused overexposure). The soft-clip
-    tone-map then lets SDR content (< 0.2) pass linearly while HDR highlights
-    roll off — putting reference white at the correct mid-gray position."""
-    source = TONEMAP.read_text(encoding="utf-8")
-    # PQ normalizes by 1000 (not 203).
-    assert "PQEOTF(e) / 1000.0" in source
-    # HLG OOTF output is already 1.0 == 1000 nits, so no extra scaling.
-    assert "lin = HLGOOTF(e);" in source
-    # The old buggy patterns must NOT be present.
-    assert "kSdrWhiteNits * 3.0" not in source
-    assert "/ kSdrWhiteNits" not in source.split("ToneMapReinhardt")[0].split("BuildToneMapper")[-1] \
-        or "max_cll > 0" in source  # peak still references kSdrWhiteNits, that's fine
-
-
-def test_tonemap_uses_soft_clip_not_reinhardt():
-    """The tone-map must use a soft highlight roll-off (linear below 0.75,
-    exponential above), not the old Reinhardt global compression that pushed
-    midtones too bright on PQ content."""
-    source = TONEMAP.read_text(encoding="utf-8")
-    assert "std::exp(-3.0" in source
-    assert "l <= 0.75" in source
-
-
-def test_flip_and_rotation_use_pitch_not_linesize():
-    """flip/rotation must use out.pitch (which is correct for both the
-    tone-mapped buffer and the raw SDR buffer), not frame->Linesize[0] which
-    is wrong for the 16-bit-derived HDR path."""
+    """4K HDR sources must still be subsampled for performance."""
     source = FFMPEGSOURCE.read_text(encoding="utf-8")
-    # The flip/rotation loops must reference out.pitch.
-    assert "out.data[out.pitch * x" in source
-    assert "data[out.pitch *" in source
+    assert "if (IsHDR && Width > 1920)" in source
+    assert "preview_max_width = 1920" in source
+    assert "FFMS_RESIZER_BILINEAR" in source
 
 
-def test_provider_builds_tonemapper_once_not_per_frame():
-    """The EOTF/gamma LUTs are expensive to build (~5ms) and must be
-    constructed once per source (in LoadVideo) and reused per frame, otherwise
-    4K playback rebuilds 65536-entry tables on every GetFrame."""
+def test_hdr_getframe_uses_simple_copy():
+    """GetFrame must use the same simple bgra copy for all sources — no
+    HDR-specific branch that could introduce artifacts."""
     source = FFMPEGSOURCE.read_text(encoding="utf-8")
-    assert "std::unique_ptr<HDRTonemap::ToneMapper> ToneMap" in source
-    assert "HDRTonemap::BuildToneMapper(Transfer, Primaries, MaxCLL)" in source
-    # Per-frame call must take the prebuilt mapper, not rebuild it.
-    assert "HDRTonemap::ToneMapRGB48toBGRA8(\n\t\t\t*ToneMap," in source or \
-           "*ToneMap," in source
+    assert "out.data.assign(frame->Data[0]" in source
+    # No HDR-specific data processing branch.
+    assert "reinterpret_cast<const uint16_t" not in source
+
+
+def test_hdr_detection_logic_correct():
+    """IsHDRSource must key off the transfer function (PQ/HLG), not primaries."""
+    source = TONEMAP.read_text(encoding="utf-8")
+    assert "namespace HDRTonemap" in source
+    assert "inline bool IsHDRSource" in source
+    assert "transfer == kTransferPQ || transfer == kTransferHLG" in source
 
 
 def main():
     tests = [
-        test_tonemap_header_exists_with_core_api,
-        test_tonemap_uses_luts_not_per_pixel_pow,
-        test_tonemap_hot_path_runs_entirely_in_float,
-        test_tonemap_is_hdr_keyed_off_transfer_not_primaries,
-        test_tonemap_has_bt2020_to_709_gamut_matrix,
-        test_provider_reads_hdr_metadata_from_first_frame,
-        test_provider_requests_16_bit_for_hdr_and_bgra_for_sdr,
-        test_getframe_tonemaps_hdr_and_passes_sdr_through,
-        test_tonemap_uses_source_stride_for_padded_rows,
+        test_hdr_detection_still_present,
+        test_hdr_uses_bgra_not_rgb48le,
+        test_no_cpu_tonemap_in_provider,
         test_hdr_downscaled_at_decode_time,
-        test_hlg_normalization_is_correct,
-        test_tonemap_uses_soft_clip_not_reinhardt,
-        test_flip_and_rotation_use_pitch_not_linesize,
-        test_provider_builds_tonemapper_once_not_per_frame,
+        test_hdr_getframe_uses_simple_copy,
+        test_hdr_detection_logic_correct,
     ]
     for test in tests:
         test()
-    print(f"{len(tests)} HDR tone-map tests passed")
+    print(f"{len(tests)} HDR handling tests passed")
 
 
 if __name__ == "__main__":
