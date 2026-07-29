@@ -232,7 +232,7 @@ void Interface(wxTreebook *book, Preferences *parent) {
 	const wxString overflow_modes_arr[] = {_("Rendered subtitle width"), _("Plain text character count")};
 	wxArrayString overflow_modes(2, overflow_modes_arr);
 	p->OptionChoice(character_count, _("Overflow highlight mode"), overflow_modes, "Subtitle/Overflow Highlight/Mode");
-	p->OptionAdd(character_count, _("Overflow character limit"), "Subtitle/Overflow Highlight/Character Limit", 1, 1000);
+	p->OptionAdd(character_count, _("Overflow character limit"), "Subtitle/Overflow Highlight/Character Limit", {.min = 1, .max = 1000});
 
 	auto grid = p->PageSizer(_("Grid"));
 	p->OptionAdd(grid, _("Focus grid on click"), "Subtitle/Grid/Focus Allow");
