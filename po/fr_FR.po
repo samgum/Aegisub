@@ -6806,3 +6806,12 @@ msgstr "Charger les scripts d'automatisation associés ?"
 #: ../src/auto4_base.cpp:0
 msgid "Trust the authors && load scripts"
 msgstr "Faire confiance aux auteurs && charger les scripts"
+
+
+#: ../src/preferences.cpp:0
+msgid "Current frame range"
+msgstr "Plage de l'image actuelle"
+
+#: ../src/preferences.cpp:0
+msgid "Previous frame range"
+msgstr "Plage de l'image précédente"

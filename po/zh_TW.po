@@ -7540,3 +7540,12 @@ msgstr "載入關聯的自動化腳本？"
 #: ../src/auto4_base.cpp:0
 msgid "Trust the authors && load scripts"
 msgstr "信任作者並載入腳本"
+
+
+#: ../src/preferences.cpp:0
+msgid "Current frame range"
+msgstr "當前影格範圍"
+
+#: ../src/preferences.cpp:0
+msgid "Previous frame range"
+msgstr "上一影格範圍"

@@ -6816,3 +6816,12 @@ msgstr "Carregar scripts de automação associados?"
 #: ../src/auto4_base.cpp:0
 msgid "Trust the authors && load scripts"
 msgstr "Confiar nos autores && carregar scripts"
+
+
+#: ../src/preferences.cpp:0
+msgid "Current frame range"
+msgstr "Faixa do quadro atual"
+
+#: ../src/preferences.cpp:0
+msgid "Previous frame range"
+msgstr "Faixa do quadro anterior"

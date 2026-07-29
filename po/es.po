@@ -7419,3 +7419,12 @@ msgstr "¿Cargar scripts de automatización asociados?"
 #: ../src/auto4_base.cpp:0
 msgid "Trust the authors && load scripts"
 msgstr "Confiar en los autores && cargar scripts"
+
+
+#: ../src/preferences.cpp:0
+msgid "Current frame range"
+msgstr "Rango del fotograma actual"
+
+#: ../src/preferences.cpp:0
+msgid "Previous frame range"
+msgstr "Rango del fotograma anterior"

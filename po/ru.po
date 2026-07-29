@@ -6688,3 +6688,12 @@ msgstr "Загрузить связанные скрипты автоматиз�
 #: ../src/auto4_base.cpp:0
 msgid "Trust the authors && load scripts"
 msgstr "Доверять авторам && загрузить скрипты"
+
+
+#: ../src/preferences.cpp:0
+msgid "Current frame range"
+msgstr "Диапазон текущего кадра"
+
+#: ../src/preferences.cpp:0
+msgid "Previous frame range"
+msgstr "Диапазон предыдущего кадра"

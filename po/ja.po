@@ -6623,3 +6623,12 @@ msgstr "関連する自動化スクリプトを読み込みますか？"
 #: ../src/auto4_base.cpp:0
 msgid "Trust the authors && load scripts"
 msgstr "作者を信頼してスクリプトを読み込む"
+
+
+#: ../src/preferences.cpp:0
+msgid "Current frame range"
+msgstr "現在のフレーム範囲"
+
+#: ../src/preferences.cpp:0
+msgid "Previous frame range"
+msgstr "前のフレーム範囲"

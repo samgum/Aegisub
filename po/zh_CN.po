@@ -8048,3 +8048,12 @@ msgstr "加载关联的自动化脚本？"
 #: ../src/auto4_base.cpp:0
 msgid "Trust the authors && load scripts"
 msgstr "信任作者并加载脚本"
+
+
+#: ../src/preferences.cpp:0
+msgid "Current frame range"
+msgstr "当前帧范围"
+
+#: ../src/preferences.cpp:0
+msgid "Previous frame range"
+msgstr "上一帧范围"

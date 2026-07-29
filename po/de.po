@@ -6781,3 +6781,12 @@ msgstr "Zugehörige Automation-Skripte laden?"
 #: ../src/auto4_base.cpp:0
 msgid "Trust the authors && load scripts"
 msgstr "Den Autoren vertrauen && Skripte laden"
+
+
+#: ../src/preferences.cpp:0
+msgid "Current frame range"
+msgstr "Aktueller Frame-Bereich"
+
+#: ../src/preferences.cpp:0
+msgid "Previous frame range"
+msgstr "Vorheriger Frame-Bereich"
