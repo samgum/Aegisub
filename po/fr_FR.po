@@ -6797,3 +6797,12 @@ msgstr "Ignoré par style"
 #: ../src/dialog_timing_tools.cpp:0
 msgid "fix common errors (remove empty)"
 msgstr "Corriger les erreurs courantes (supprimer les vides)"
+
+
+#: ../src/auto4_base.cpp:0
+msgid "Load associated automation scripts?"
+msgstr "Charger les scripts d'automatisation associés ?"
+
+#: ../src/auto4_base.cpp:0
+msgid "Trust the authors && load scripts"
+msgstr "Faire confiance aux auteurs && charger les scripts"

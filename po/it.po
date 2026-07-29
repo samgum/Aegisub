@@ -6695,3 +6695,12 @@ msgstr "Saltato per stile"
 #: ../src/dialog_timing_tools.cpp:0
 msgid "fix common errors (remove empty)"
 msgstr "Correggi errori comuni (rimuovi vuote)"
+
+
+#: ../src/auto4_base.cpp:0
+msgid "Load associated automation scripts?"
+msgstr "Caricare gli script di automazione associati?"
+
+#: ../src/auto4_base.cpp:0
+msgid "Trust the authors && load scripts"
+msgstr "Considera fiducioso gli autori && carica script"
