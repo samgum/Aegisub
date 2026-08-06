@@ -373,7 +373,7 @@ void DialogShiftTimes::Process(wxCommandEvent &) {
 
 	auto const& sel = context->selectionController->GetSelectedSet();
 
-	long shift;
+	long shift = 0;  // initialize: ToLong leaves the value unchanged on failure
 	if (by_time) {
 		shift = shift_time->GetTime();
 		if (shift == 0) {
@@ -381,8 +381,10 @@ void DialogShiftTimes::Process(wxCommandEvent &) {
 			return;
 		}
 	}
-	else
-		shift_frames->GetValue().ToLong(&shift);
+	else {
+		if (!shift_frames->GetValue().ToLong(&shift))
+			shift = 0;  // parse failure (empty/non-numeric) -> no shift
+	}
 
 	if (reverse)
 		shift = -shift;

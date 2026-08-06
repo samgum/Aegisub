@@ -44,12 +44,12 @@ auto get_dialogue_field(SearchReplaceSettings::Field field) -> decltype(&AssDial
 	throw agi::InternalError("Bad field for search");
 }
 
-std::string const& get_normalized(const AssDialogue *diag, decltype(&AssDialogueBase::Text) field) {
-	auto& value = const_cast<AssDialogue*>(diag)->*field;
-	auto normalized = boost::locale::normalize(value.get());
-	if (normalized != value)
-		value = normalized;
-	return value.get();
+// Return a normalized copy of the field for matching purposes.
+// MUST NOT modify the original: AssDialogue fields are boost::flyweight, so
+// writing to them would silently change every other line sharing the same
+// value, corrupting user data without any undo entry.
+std::string get_normalized(const AssDialogue *diag, decltype(&AssDialogueBase::Text) field) {
+	return boost::locale::normalize((diag->*field).get());
 }
 
 typedef std::function<MatchState (const AssDialogue*, size_t)> matcher;
