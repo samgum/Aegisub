@@ -192,6 +192,7 @@ void FontsCollectorThread(AssFile *subs, agi::fs::path const& destination, FcMod
 						ret = zip->PutNextEntry(path.filename().wstring());
 						zip->Write(in);
 					}
+					break;
 				}
 				default: break;
 			}

@@ -88,7 +88,12 @@ void VideoProviderCache::GetFrame(int n, VideoFrame &out) {
 
 	master->GetFrame(n, out);
 
-	if (total_size >= max_cache_size) {
+	if (cache.empty()) {
+		// First frame ever, or cache was cleared: just add it. The
+		// '--cache.end()' below is UB on an empty list, so guard explicitly.
+		cache.emplace_front(out, n);
+	}
+	else if (total_size >= max_cache_size) {
 		cache.splice(cache.begin(), cache, --cache.end()); // Move last to front
 		cache.front().frame_number = n;
 		cache.front().frame = out;

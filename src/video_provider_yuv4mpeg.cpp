@@ -380,6 +380,9 @@ int YUV4MPEGVideoProvider::IndexFile(uint64_t pos) {
 		}
 		else {
 			/// @todo implement rff flags etc
+			// Still advance pos to avoid an infinite loop on headers we
+			// don't understand (malformed files, unrecognized frame flags).
+			pos += frame_sz;
 		}
 	}
 
