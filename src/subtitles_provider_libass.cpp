@@ -69,6 +69,11 @@ namespace {
 std::unique_ptr<agi::dispatch::Queue> cache_queue;
 ASS_Library *library;
 std::mutex overflow_renderer_mutex;
+/// Serializes all ass_read_memory / ass_renderer_init calls on the shared
+/// global library. LoadSubtitles runs on the video provider worker thread
+/// while GetRenderedBounds runs on the UI thread — both call ass_read_memory
+/// on the same ASS_Library, which is not thread-safe.
+std::mutex library_mutex;
 ASS_Renderer *overflow_renderer = nullptr;
 
 void msg_callback(int level, const char *fmt, va_list args, void *) {
@@ -189,6 +194,7 @@ public:
 
 	void LoadSubtitles(const char *data, size_t len) override {
 		if (ass_track) ass_free_track(ass_track);
+		std::lock_guard<std::mutex> lock(library_mutex);
 		ass_track = ass_read_memory(library, const_cast<char *>(data), len, nullptr);
 		if (!ass_track) throw agi::InternalError("libass failed to load subtitles.");
 	}
@@ -289,7 +295,11 @@ RenderedBounds GetRenderedBounds(AssFile *subs, int time_ms, int width, int heig
 		return bounds;
 
 	auto data = serialize_subtitles(subs);
-	ASS_Track *track = ass_read_memory(library, data.data(), data.size(), nullptr);
+	ASS_Track *track;
+	{
+		std::lock_guard<std::mutex> llock(library_mutex);
+		track = ass_read_memory(library, data.data(), data.size(), nullptr);
+	}
 	if (!track)
 		return bounds;
 

@@ -881,18 +881,26 @@ Result CheckText(agi::Context *context, AssDialogue const *line, std::string con
 		mem_dc.SelectObject(wxNullBitmap);
 	}
 
-	auto rendered = check_with_libass(context, line, text);
-	if (rendered.valid) {
-		if (rendered.overflow) {
-			result.valid = true;
-			result.overflow = true;
-			if (result.ranges.empty() && !text.empty())
-				result.ranges.push_back({ 0, static_cast<int>(text.size()) });
-		}
-		else {
-			result.valid = true;
-			result.overflow = false;
-			result.ranges.clear();
+	// Only fall back to the expensive libass render when the DC-based check
+	// failed to produce a valid result. libass check runs ass_read_memory +
+	// ass_render_frame on the UI thread; doing it unconditionally on every
+	// keystroke (CheckText is called from UpdateOverflowHighlight) causes
+	// visible lag on large scripts and amplifies the library_mutex contention
+	// with the video provider thread.
+	if (!result.valid) {
+		auto rendered = check_with_libass(context, line, text);
+		if (rendered.valid) {
+			if (rendered.overflow) {
+				result.valid = true;
+				result.overflow = true;
+				if (result.ranges.empty() && !text.empty())
+					result.ranges.push_back({ 0, static_cast<int>(text.size()) });
+			}
+			else {
+				result.valid = true;
+				result.overflow = false;
+				result.ranges.clear();
+			}
 		}
 	}
 
