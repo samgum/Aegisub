@@ -85,7 +85,10 @@ def test_portaudio_reopens_default_device_after_output_route_change():
     assert "std::find(default_device.begin(), default_device.end(), real_idx) == default_device.end()" in source
     assert "std::rotate(default_device.begin(), it, it + 1)" in source
     assert "RefreshDefaultDevice();" in source
-    assert "return stream && Pa_IsStreamActive(stream) == 1" in source
+    # IsPlaying must check callback_finished so playback ends promptly after
+    # paComplete (Pa_IsStreamActive stays true until Pa_StopStream).
+    assert "!callback_finished" in source
+    assert "Pa_IsStreamActive(stream) == 1" in source
 
 
 def test_portaudio_macos_route_change_is_exception_safe():

@@ -189,6 +189,11 @@ void PortAudioPlayer::OpenStream() {
 
 	for (size_t i = 0; i < device_ids->size(); ++i) {
 		const PaDeviceInfo *device_info = Pa_GetDeviceInfo((*device_ids)[i]);
+		// A device can disappear between enumeration and open (USB interface
+		// unplugged, Bluetooth headset disconnected), in which case
+		// Pa_GetDeviceInfo returns null. Skip it rather than crashing.
+		if (!device_info)
+			continue;
 		PaStreamParameters pa_output_p;
 		pa_output_p.device = (*device_ids)[i];
 		pa_output_p.channelCount = provider->GetChannels();
@@ -322,6 +327,7 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 	end = start_sample + count;
 	speed_position = 0.0;
 	draining = false;
+	callback_finished = false;
 	last_position = start_sample;
 
 #ifdef WITH_SOUNDTOUCH
@@ -379,6 +385,7 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 	if (player->draining) {
 		memset(outputBuffer, 0, framesPerBuffer * bytes_per_frame);
 		player->draining = false;
+		player->callback_finished = true;
 		return paComplete;
 	}
 
@@ -459,6 +466,7 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 	}
 
 	// Abort stream and stop the callback.
+	player->callback_finished = true;
 	return paComplete;
 }
 
@@ -519,7 +527,11 @@ wxArrayString PortAudioPlayer::GetOutputDevices() {
 }
 
 bool PortAudioPlayer::IsPlaying() {
-	return stream && Pa_IsStreamActive(stream) == 1;
+	// Pa_IsStreamActive stays true after the callback returns paComplete,
+	// until Pa_StopStream is called. Check callback_finished so the audio
+	// controller knows playback ended immediately, not hundreds of ms later
+	// when the stream time advances past end+200.
+	return stream && !callback_finished && Pa_IsStreamActive(stream) == 1;
 }
 
 void PortAudioPlayer::SetPlaybackSpeed(double speed) {

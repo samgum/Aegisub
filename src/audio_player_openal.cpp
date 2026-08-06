@@ -171,6 +171,7 @@ OpenALPlayer::OpenALPlayer(agi::AudioProvider *provider)
 OpenALPlayer::~OpenALPlayer()
 {
 	Stop();
+	TeardownContext();
 	alcCloseDevice(device);
 }
 
@@ -267,7 +268,13 @@ void OpenALPlayer::Stop()
 {
 	if (!playing) return;
 
-	// Stop the source before tearing down context
+	// Stop the source but DO NOT destroy the context here. Destroying and
+	// recreating the OpenAL context on every Play/Stop cycle causes
+	// intermittent EXC_BAD_ACCESS crashes on macOS (Apple's OpenAL defers
+	// context teardown to an async render thread, so alcDestroyContext racing
+	// with that thread is UB). The context, source and buffers are created
+	// once in InitContext (called from Play/ctor) and freed only in the
+	// destructor.
 	wxTimer::Stop();
 	playing = false;
 
@@ -277,8 +284,6 @@ void OpenALPlayer::Stop()
 		alSourcei(source, AL_BUFFER, 0);
 		alcMakeContextCurrent(nullptr);
 	}
-
-	TeardownContext();
 
 	start_frame = 0;
 	cur_frame = 0;
@@ -416,7 +421,16 @@ int64_t OpenALPlayer::GetCurrentPosition()
 #ifdef WITH_SOUNDTOUCH
 	if (tempo_processor)
 		output_frames = static_cast<int64_t>(std::lround(output_frames * playback_speed));
+	else
 #endif
+	{
+		// Without SoundTouch, speed is done via AL_PITCH which resamples the
+		// output. output_frames is in the (pitch-shifted) output domain, so
+		// divide by playback_speed to get back to source frames for correct
+		// position reporting.
+		if (playback_speed != 1.0)
+			output_frames = static_cast<int64_t>(std::lround(output_frames / playback_speed));
+	}
 
 	int64_t real = std::max<int64_t>(start_frame, start_frame + output_frames);
 	if (real < last_position)
