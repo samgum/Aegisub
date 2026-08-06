@@ -1447,6 +1447,36 @@ std::vector<FuriganaWrapToken> tokenize_for_furigana_wrap(std::string const& tex
 		size_t len = 1;
 		read_utf8_codepoint(text, pos, cp, len);
 
+		// Group consecutive CJK ideographs into a single non-breakable token,
+		// like a word. If auto-wrap split a CJK run mid-way, the per-line
+		// occurrence numbering would diverge from the dictionary (which counts
+		// runs on the full unwrapped line), silently dropping readings.
+		if (is_cjk_ideograph(cp)) {
+			std::string group = pending + text.substr(pos, len);
+			double width = furigana_wrap_token_units(cp, state, format);
+			pos += len;
+			while (pos < text.size()) {
+				uint32_t next_cp = 0;
+				size_t next_len = 1;
+				read_utf8_codepoint(text, pos, next_cp, next_len);
+				if (!is_cjk_ideograph(next_cp))
+					break;
+				group += text.substr(pos, next_len);
+				width += furigana_wrap_token_units(next_cp, state, format);
+				pos += next_len;
+			}
+
+			FuriganaWrapToken token;
+			token.raw = group;
+			token.width = width;
+			token.spacing = 0;  // no inter-CJK spacing within a run
+			token.visible = state.drawing == 0;
+			token.allow_wrap = false;  // never split a CJK run across lines
+			tokens.push_back(std::move(token));
+			pending.clear();
+			continue;
+		}
+
 		FuriganaWrapToken token;
 		token.raw = pending + text.substr(pos, len);
 		token.width = furigana_wrap_token_units(cp, state, format);

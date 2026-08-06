@@ -47,6 +47,8 @@
 #include "../subs_preview.h"
 #include "../video_controller.h"
 
+#include <memory>
+
 #include <libaegisub/fs.h>
 #include <libaegisub/path.h>
 
@@ -1488,6 +1490,10 @@ void generate_scroll_events(agi::Context *c, std::vector<LyricRow> const& rows, 
 }
 
 void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
+	// Holds source lines detached from the event list but not yet freed, so
+	// they survive the Commit + SetSelectionAndActive calls below (see the
+	// source_action==2 branch). Freed when the function returns.
+	std::vector<std::unique_ptr<AssDialogue>> disposed;
 	auto sources = collect_lyric_sources(c, settings);
 	bool removed_previous = false;
 	if (settings.clear_previous) {
@@ -1542,11 +1548,17 @@ void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
 		}
 	}
 	else if (settings.source_action == 2) {
+		// Delayed deletion: detach the source lines from the event list but keep
+		// them alive until after Commit + SetSelectionAndActive, so that the
+		// commit callbacks (SubsEditBox::OnCommit etc.) and the selection
+		// controller never touch a freed AssDialogue. Mirrors the pattern in
+		// command/edit.cpp delete_lines. `disposed` is declared at function
+		// scope so it outlives the Commit/SetSelectionAndActive calls below.
 		Selection source_set(sources.begin(), sources.end());
 		c->ass->Events.remove_and_dispose_if([&](AssDialogue const& line) {
 			return source_set.count(const_cast<AssDialogue *>(&line)) != 0;
-		}, [](AssDialogue *line) {
-			delete line;
+		}, [&disposed](AssDialogue *line) {
+			disposed.emplace_back(line);  // take ownership, don't delete yet
 		});
 	}
 	else {
