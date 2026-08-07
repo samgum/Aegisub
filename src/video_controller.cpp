@@ -43,6 +43,8 @@
 #include "utils.h"
 
 #include <libaegisub/ass/time.h>
+#include <algorithm>
+#include <cmath>
 
 #include <wx/log.h>
 
@@ -146,7 +148,15 @@ void VideoController::Play() {
 	context->audioController->PlayToEnd(start_ms);
 
 	playback_start_time = std::chrono::steady_clock::now();
-	playback.Start(10);
+	// Poll at half the frame duration (clamped to [10, 33] ms) instead of a
+	// flat 10 ms. On macOS, a 100 Hz NSTimer saturates the main run loop and
+	// starves idle processing; at typical 24/30 fps, half the 10 ms ticks do
+	// no work. At 24 fps this gives ~20 ms (50 Hz), at 30 fps ~16 ms.
+	int fps = 0;
+	if (context->project->VideoProvider())
+		fps = (int)std::lround(context->project->VideoProvider()->GetFPS().FPS());
+	int interval = fps > 0 ? std::max(10, std::min(33, 1000 / fps / 2)) : 10;
+	playback.Start(interval);
 }
 
 void VideoController::PlayLine() {
@@ -165,7 +175,11 @@ void VideoController::PlayLine() {
 	JumpToFrame(startFrame);
 
 	playback_start_time = std::chrono::steady_clock::now();
-	playback.Start(10);
+	int fps = 0;
+	if (context->project->VideoProvider())
+		fps = (int)std::lround(context->project->VideoProvider()->GetFPS().FPS());
+	int interval = fps > 0 ? std::max(10, std::min(33, 1000 / fps / 2)) : 10;
+	playback.Start(interval);
 }
 
 void VideoController::Stop() {

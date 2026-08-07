@@ -132,6 +132,15 @@
     auto stc = self.stc;
     auto state = self.state;
 
+    // Suppress modification events during IME composition (candidate selection).
+    // Each setMarkedText call fires wxSTC_MOD_INSERTTEXT which would trigger
+    // SubsEditBox::OnChange -> CommitText -> full subtitle reload + video
+    // re-render. During CJK input this happens many times per second as the
+    // user selects candidates, causing severe lag. Only commit when composition
+    // finishes (insertText: / unmarkText).
+    int saved_mask = stc->GetModEventMask();
+    stc->SetModEventMask(0);
+
     int pos = stc->GetInsertionPoint();
     if (state.markedRange.length > 0) {
         pos = state.markedRange.location;
@@ -163,6 +172,9 @@
         int length = [[str substringWithRange:range] lengthOfBytesUsingEncoding:NSUTF8StringEncoding];
         stc->SetSelection(start, start + length);
     }
+
+    // Restore the modification event mask so non-IME edits work normally.
+    stc->SetModEventMask(saved_mask);
 }
 
 - (void)unmarkText {
