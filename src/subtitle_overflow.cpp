@@ -842,17 +842,22 @@ Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
 		return it->second.result;
 
 	Result result;
-	result = check_with_libass(context, line, text);
-	if (!result.valid && dc) {
+	// Try the cheap DC-based check first. libass rendering (check_with_libass)
+	// acquires the global library_mutex shared with the video provider thread,
+	// so calling it for every visible row during grid repaint causes
+	// contention and stalls. DC measurement is much cheaper and correct for
+	// the common case; only fall back to libass when DC gives no answer.
+	if (dc) {
 		result = check_with_dc(context, line, text, *dc, false);
-	}
-	else if (!result.valid) {
+	} else {
 		wxBitmap bmp(1, 1);
 		wxMemoryDC mem_dc;
 		mem_dc.SelectObject(bmp);
 		result = check_with_dc(context, line, text, mem_dc, false);
 		mem_dc.SelectObject(wxNullBitmap);
 	}
+	if (!result.valid)
+		result = check_with_libass(context, line, text);
 
 	result_cache[line->Id] = { text, signature, result };
 	return result;

@@ -60,19 +60,25 @@ int WidthHelper::operator()(boost::flyweight<std::string> const& str) {
 }
 
 int WidthHelper::operator()(std::string const& str) {
-	return dc->GetTextExtent(to_wx(str)).GetWidth();
+	if (str.empty()) return 0;
+	// Route through the flyweight cache so the (potentially expensive on
+	// macOS Core Text) GetTextExtent call is only done once per unique string.
+	return (*this)(boost::flyweight<std::string>(str));
 }
 
 int WidthHelper::operator()(wxString const& str) {
-	return dc->GetTextExtent(str).GetWidth();
+	if (str.empty()) return 0;
+	return (*this)(boost::flyweight<std::string>(from_wx(str)));
 }
 
 int WidthHelper::operator()(const char *str) {
-	return dc->GetTextExtent(wxString::FromUTF8(str)).GetWidth();
+	if (!str || !*str) return 0;
+	return (*this)(boost::flyweight<std::string>(std::string(str)));
 }
 
 int WidthHelper::operator()(const wchar_t *str) {
-	return dc->GetTextExtent(str).GetWidth();
+	if (!str || !*str) return 0;
+	return (*this)(to_wx(str));
 }
 
 void GridColumn::UpdateWidth(const agi::Context *c, WidthHelper &helper) {
