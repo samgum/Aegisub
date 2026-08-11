@@ -89,6 +89,11 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Run targeted source regression checks
+        run: |
+          python tools/test_audio_playback.py
+          python tools/test_aug_regressions.py
+
       - name: Setup Meson
         run: |
           python -m pip install --upgrade pip setuptools
