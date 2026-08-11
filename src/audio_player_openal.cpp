@@ -421,16 +421,12 @@ int64_t OpenALPlayer::GetCurrentPosition()
 #ifdef WITH_SOUNDTOUCH
 	if (tempo_processor)
 		output_frames = static_cast<int64_t>(std::lround(output_frames * playback_speed));
-	else
 #endif
-	{
-		// Without SoundTouch, speed is done via AL_PITCH which resamples the
-		// output. output_frames is in the (pitch-shifted) output domain, so
-		// divide by playback_speed to get back to source frames for correct
-		// position reporting.
-		if (playback_speed != 1.0)
-			output_frames = static_cast<int64_t>(std::lround(output_frames / playback_speed));
-	}
+
+	// Without SoundTouch, AL_SAMPLE_OFFSET and processed buffer counts already
+	// describe progress through the source sample data. AL_PITCH changes how
+	// quickly those source samples are consumed, so applying playback_speed
+	// again here would double-correct the reported position.
 
 	int64_t real = std::max<int64_t>(start_frame, start_frame + output_frames);
 	if (real < last_position)
