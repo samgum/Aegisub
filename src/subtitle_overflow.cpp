@@ -841,23 +841,20 @@ Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
 	if (it != result_cache.end() && it->second.text == text && it->second.signature == signature && it->second.result.valid)
 		return it->second.result;
 
-	Result result;
-	// Try the cheap DC-based check first. libass rendering (check_with_libass)
-	// acquires the global library_mutex shared with the video provider thread,
-	// so calling it for every visible row during grid repaint causes
-	// contention and stalls. DC measurement is much cheaper and correct for
-	// the common case; only fall back to libass when DC gives no answer.
-	if (dc) {
+	// libass is authoritative because the DC approximation does not model
+	// vertical bounds, drawings, clips, rotations, or animated transforms.
+	// Keep DC as a fallback for environments where libass cannot render.
+	Result result = check_with_libass(context, line, text);
+	if (!result.valid && dc) {
 		result = check_with_dc(context, line, text, *dc, false);
-	} else {
+	}
+	else if (!result.valid) {
 		wxBitmap bmp(1, 1);
 		wxMemoryDC mem_dc;
 		mem_dc.SelectObject(bmp);
 		result = check_with_dc(context, line, text, mem_dc, false);
 		mem_dc.SelectObject(wxNullBitmap);
 	}
-	if (!result.valid)
-		result = check_with_libass(context, line, text);
 
 	result_cache[line->Id] = { text, signature, result };
 	return result;
@@ -886,26 +883,21 @@ Result CheckText(agi::Context *context, AssDialogue const *line, std::string con
 		mem_dc.SelectObject(wxNullBitmap);
 	}
 
-	// Only fall back to the expensive libass render when the DC-based check
-	// failed to produce a valid result. libass check runs ass_read_memory +
-	// ass_render_frame on the UI thread; doing it unconditionally on every
-	// keystroke (CheckText is called from UpdateOverflowHighlight) causes
-	// visible lag on large scripts and amplifies the library_mutex contention
-	// with the video provider thread.
-	if (!result.valid) {
-		auto rendered = check_with_libass(context, line, text);
-		if (rendered.valid) {
-			if (rendered.overflow) {
-				result.valid = true;
-				result.overflow = true;
-				if (result.ranges.empty() && !text.empty())
-					result.ranges.push_back({ 0, static_cast<int>(text.size()) });
-			}
-			else {
-				result.valid = true;
-				result.overflow = false;
-				result.ranges.clear();
-			}
+	// Use DC to locate character ranges, but let libass decide whether the
+	// rendered subtitle actually overflows. This preserves complex ASS layout
+	// semantics while retaining precise ranges for simple horizontal text.
+	auto rendered = check_with_libass(context, line, text);
+	if (rendered.valid) {
+		if (rendered.overflow) {
+			result.valid = true;
+			result.overflow = true;
+			if (result.ranges.empty() && !text.empty())
+				result.ranges.push_back({ 0, static_cast<int>(text.size()) });
+		}
+		else {
+			result.valid = true;
+			result.overflow = false;
+			result.ranges.clear();
 		}
 	}
 
