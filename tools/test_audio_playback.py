@@ -23,14 +23,16 @@ def test_portaudio_normal_speed_zero_fills_last_buffer():
     source = PORTAUDIO.read_text(encoding="utf-8")
     assert "const int bytes_per_frame" in source
     assert "framesPerBuffer - lenAvailable" in source
-    assert "player->draining = true;" in source
+    assert "memset(out + lenAvailable * bytes_per_frame, 0" in source
     assert "return paComplete;" in source
+    assert "draining" not in source
 
 
 def test_portaudio_uses_safer_macos_latency_and_no_dither():
     source = PORTAUDIO.read_text(encoding="utf-8")
     header = PORTAUDIO_H.read_text(encoding="utf-8")
-    assert "bool draining = false" in header
+    assert "std::atomic<bool> callback_finished{true}" in header
+    assert "bool draining" not in header
     # macOS must use LOW output latency (not the old 0.12s high-latency floor
     # that made timing work impossible due to 120ms audio lag).
     assert "defaultLowOutputLatency" in source
@@ -67,6 +69,9 @@ def test_openal_reports_source_playback_offset_not_prefill_position():
     assert "alGetSourcei(source, AL_SAMPLE_OFFSET, &sample_offset)" in source
     assert "cur_frame + extra * samplerate" not in source
     assert "tempo_processor && tempo_processor->IsFinished())" not in source
+    # AL_SAMPLE_OFFSET and processed buffers are already measured in source
+    # samples. Dividing them by AL_PITCH double-corrects the position.
+    assert "output_frames / playback_speed" not in source
 
 
 def test_portaudio_reopens_default_device_after_output_route_change():
@@ -85,9 +90,12 @@ def test_portaudio_reopens_default_device_after_output_route_change():
     assert "std::find(default_device.begin(), default_device.end(), real_idx) == default_device.end()" in source
     assert "std::rotate(default_device.begin(), it, it + 1)" in source
     assert "RefreshDefaultDevice();" in source
-    # IsPlaying must check callback_finished so playback ends promptly after
-    # paComplete (Pa_IsStreamActive stays true until Pa_StopStream).
-    assert "!callback_finished" in source
+    # The PortAudio finished callback runs only after all paComplete output
+    # has drained, and publishes completion safely to the UI thread.
+    assert "std::atomic<bool> callback_finished{true}" in header
+    assert "Pa_SetStreamFinishedCallback(stream, paStreamFinishedCallback)" in source
+    assert "callback_finished.store(true, std::memory_order_release)" in source
+    assert "callback_finished.load(std::memory_order_acquire)" in source
     assert "Pa_IsStreamActive(stream) == 1" in source
 
 
@@ -119,9 +127,11 @@ def test_portaudio_play_guards_null_stream():
     source = PORTAUDIO.read_text(encoding="utf-8")
     assert "if (!stream)" in source
     assert "Play called without an open stream" in source
-    # Play() must still use the null-safe active check before restarting,
-    # not a bare Pa_IsStreamStopped that would ignore the error recovery case.
-    assert "if (!IsPlaying())" in source
+    # Restart logic must distinguish active playback from an inactive
+    # paComplete stream, which still needs to be stopped before restart.
+    assert "Pa_IsStreamActive(stream)" in source
+    assert "Pa_IsStreamStopped(stream)" in source
+    assert "Pa_StartStream(stream)" in source
 
 
 def test_preview_output_uses_shared_peak_limiter():
