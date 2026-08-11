@@ -44,12 +44,12 @@ auto get_dialogue_field(SearchReplaceSettings::Field field) -> decltype(&AssDial
 	throw agi::InternalError("Bad field for search");
 }
 
-// Return a normalized copy of the field for matching purposes.
-// MUST NOT modify the original: AssDialogue fields are boost::flyweight, so
-// writing to them would silently change every other line sharing the same
-// value, corrupting user data without any undo entry.
-std::string get_normalized(const AssDialogue *diag, decltype(&AssDialogueBase::Text) field) {
-	return boost::locale::normalize((diag->*field).get());
+// Search the stored bytes directly. MatchState offsets are later applied to
+// the original field and to the Scintilla selection, so matching a normalized
+// temporary would make the offsets invalid whenever normalization changes the
+// UTF-8 byte length (for example, NFD "e + combining acute" versus NFC "é").
+std::string const& get_dialogue_field_value(const AssDialogue *diag, decltype(&AssDialogueBase::Text) field) {
+	return (diag->*field).get();
 }
 
 typedef std::function<MatchState (const AssDialogue*, size_t)> matcher;
@@ -63,7 +63,7 @@ public:
 
 	std::string get(const AssDialogue *d, size_t s) {
 		start = s;
-		return get_normalized(d, field).substr(s);
+		return get_dialogue_field_value(d, field).substr(s);
 	}
 
 	MatchState make_match_state(size_t s, size_t e, boost::u32regex *r = nullptr) {
@@ -79,7 +79,7 @@ public:
 	skip_tags_accessor(SearchReplaceSettings::Field f) : field(get_dialogue_field(f)) { }
 
 	std::string get(const AssDialogue *d, size_t s) {
-		return helper.strip_tags(get_normalized(d, field), s);
+		return helper.strip_tags(get_dialogue_field_value(d, field), s);
 	}
 
 	MatchState make_match_state(size_t s, size_t e, boost::u32regex *r = nullptr) {
