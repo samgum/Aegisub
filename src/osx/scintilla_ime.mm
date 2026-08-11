@@ -178,12 +178,20 @@
 }
 
 - (void)unmarkText {
+    auto stc = self.stc;
     auto state = self.state;
     if (state.markedRange.length > 0) {
-        self.stc->DeleteRange(state.markedRange.location, state.markedRange.length);
+        // insertText: calls unmarkText before inserting the committed string.
+        // Suppress this transient deletion so observers see one semantic edit
+        // (the final insertion), not an intermediate empty subtitle.
+        int saved_mask = stc->GetModEventMask();
+        stc->SetModEventMask(0);
+        stc->DeleteRange(state.markedRange.location, state.markedRange.length);
+        stc->SetModEventMask(saved_mask);
+
         state.markedRange = NSMakeRange(NSNotFound, 0);
         if (state.undoActive)
-            self.stc->SetUndoCollection(true);
+            stc->SetUndoCollection(true);
     }
 }
 
