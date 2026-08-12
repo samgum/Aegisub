@@ -159,11 +159,14 @@ void PortAudioPlayer::RebuildDeviceList() {
 }
 
 void PortAudioPlayer::CloseStream() {
+	callback_finished.store(true, std::memory_order_release);
 	if (!stream)
 		return;
 
 	PaError active = Pa_IsStreamActive(stream);
 	if (active == 1)
+		Pa_AbortStream(stream);
+	else if (active == 0 && Pa_IsStreamStopped(stream) == 0)
 		Pa_StopStream(stream);
 
 	Pa_CloseStream(stream);
@@ -295,8 +298,10 @@ bool PortAudioPlayer::EnsureStreamForDefaultDevice() {
 	return stream != nullptr;
 }
 
-void PortAudioPlayer::paStreamFinishedCallback(void *) {
-	LOG_D("audio/player/portaudio") << "stopping stream";
+void PortAudioPlayer::paStreamFinishedCallback(void *userData) {
+	auto *player = static_cast<PortAudioPlayer *>(userData);
+	player->callback_finished.store(true, std::memory_order_release);
+	LOG_D("audio/player/portaudio") << "stream output finished";
 }
 
 void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
@@ -322,12 +327,41 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 		return;
 	}
 
+	// A callback stream which returned paComplete is inactive but not stopped;
+	// PortAudio requires Stop/Abort before it can be started again. Abort live
+	// playback for an immediate restart, or stop a completed inactive stream.
+	PaError active = Pa_IsStreamActive(stream);
+	if (active < 0) {
+		LOG_D("audio/player/portaudio") << "could not query stream state: " << Pa_GetErrorText(active);
+		return;
+	}
+	if (active == 1) {
+		PaError err = Pa_AbortStream(stream);
+		if (err != paNoError) {
+			LOG_D("audio/player/portaudio") << "could not abort active stream: " << Pa_GetErrorText(err);
+			return;
+		}
+	}
+	else {
+		PaError stopped = Pa_IsStreamStopped(stream);
+		if (stopped < 0) {
+			LOG_D("audio/player/portaudio") << "could not query stopped state: " << Pa_GetErrorText(stopped);
+			return;
+		}
+		if (stopped == 0) {
+			PaError err = Pa_StopStream(stream);
+			if (err != paNoError) {
+				LOG_D("audio/player/portaudio") << "could not stop completed stream: " << Pa_GetErrorText(err);
+				return;
+			}
+		}
+	}
+
 	current = start_sample;
 	start = start_sample;
 	end = start_sample + count;
 	speed_position = 0.0;
-	draining = false;
-	callback_finished = false;
+	callback_finished.store(false, std::memory_order_release);
 	last_position = start_sample;
 
 #ifdef WITH_SOUNDTOUCH
@@ -335,22 +369,18 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 		tempo_processor->Reset(start_sample, start_sample + count, playback_speed, volume);
 #endif
 
-	// Restart the callback if it had previously completed (paComplete stops
-	// invoking the callback but leaves the stream open). IsPlaying() is false
-	// both for a never-started stream and for one that stopped after the
-	// callback returned paComplete, and also covers the error recovery case.
-	if (!IsPlaying()) {
-		PaError err = Pa_SetStreamFinishedCallback(stream, paStreamFinishedCallback);
-		if (err != paNoError) {
-			LOG_D("audio/player/portaudio") << "could not set FinishedCallback";
-			return;
-		}
+	PaError err = Pa_SetStreamFinishedCallback(stream, paStreamFinishedCallback);
+	if (err != paNoError) {
+		callback_finished.store(true, std::memory_order_release);
+		LOG_D("audio/player/portaudio") << "could not set FinishedCallback";
+		return;
+	}
 
-		err = Pa_StartStream(stream);
-		if (err != paNoError) {
-			LOG_D("audio/player/portaudio") << "error playing stream: " << Pa_GetErrorText(err);
-			return;
-		}
+	err = Pa_StartStream(stream);
+	if (err != paNoError) {
+		callback_finished.store(true, std::memory_order_release);
+		LOG_D("audio/player/portaudio") << "error playing stream: " << Pa_GetErrorText(err);
+		return;
 	}
 	pa_start = Pa_GetStreamTime(stream);
 }
@@ -358,6 +388,7 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 void PortAudioPlayer::Stop() {
 	if (stream)
 		Pa_StopStream(stream);
+	callback_finished.store(true, std::memory_order_release);
 }
 
 int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
@@ -382,13 +413,6 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 	// Calculate how much left
 	int64_t lenAvailable = std::min<int64_t>(player->end - player->current, framesPerBuffer);
 	const int bytes_per_frame = player->provider->GetChannels() * player->provider->GetBytesPerSample();
-	if (player->draining) {
-		memset(outputBuffer, 0, framesPerBuffer * bytes_per_frame);
-		player->draining = false;
-		player->callback_finished = true;
-		return paComplete;
-	}
-
 	// Play something
 	if (lenAvailable > 0 && player->playback_speed == 1.0) {
 		player->provider->GetAudio(outputBuffer, player->current, lenAvailable);
@@ -402,8 +426,7 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 		if ((unsigned long)lenAvailable < framesPerBuffer) {
 			auto out = static_cast<char *>(outputBuffer);
 			memset(out + lenAvailable * bytes_per_frame, 0, (framesPerBuffer - lenAvailable) * bytes_per_frame);
-			player->draining = true;
-			return paContinue;
+			return paComplete;
 		}
 
 		// Continue as normal
@@ -416,10 +439,8 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 			auto out = static_cast<char *>(outputBuffer);
 			player->tempo_processor->Fill(out, framesPerBuffer);
 			player->current = player->tempo_processor->GetInputFrame();
-			if (player->tempo_processor->IsFinished()) {
-				player->draining = true;
-				return paContinue;
-			}
+			if (player->tempo_processor->IsFinished())
+				return paComplete;
 			return paContinue;
 		}
 #endif
@@ -429,8 +450,7 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 
 		if (source_frames <= 0) {
 			memset(outputBuffer, 0, framesPerBuffer * bytes_per_frame);
-			player->draining = true;
-			return paContinue;
+			return paComplete;
 		}
 
 		player->speed_buffer.resize(source_frames * bytes_per_frame);
@@ -461,12 +481,11 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 
 		if (output_frame == framesPerBuffer)
 			return paContinue;
-		player->draining = true;
-		return paContinue;
+		return paComplete;
 	}
 
-	// Abort stream and stop the callback.
-	player->callback_finished = true;
+	// No samples remain. PortAudio will invoke the finished callback after
+	// all output generated by this callback has actually been played.
 	return paComplete;
 }
 
@@ -527,11 +546,9 @@ wxArrayString PortAudioPlayer::GetOutputDevices() {
 }
 
 bool PortAudioPlayer::IsPlaying() {
-	// Pa_IsStreamActive stays true after the callback returns paComplete,
-	// until Pa_StopStream is called. Check callback_finished so the audio
-	// controller knows playback ended immediately, not hundreds of ms later
-	// when the stream time advances past end+200.
-	return stream && !callback_finished && Pa_IsStreamActive(stream) == 1;
+	if (!stream || callback_finished.load(std::memory_order_acquire))
+		return false;
+	return Pa_IsStreamActive(stream) == 1;
 }
 
 void PortAudioPlayer::SetPlaybackSpeed(double speed) {

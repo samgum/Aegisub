@@ -76,6 +76,11 @@ std::mutex overflow_renderer_mutex;
 std::mutex library_mutex;
 ASS_Renderer *overflow_renderer = nullptr;
 
+ASS_Renderer *init_renderer() {
+	std::lock_guard<std::mutex> lock(library_mutex);
+	return ass_renderer_init(library);
+}
+
 void msg_callback(int level, const char *fmt, va_list args, void *) {
 	if (level >= 7) return;
 	char buf[1024];
@@ -127,7 +132,7 @@ std::vector<char> serialize_subtitles(AssFile *subs) {
 
 ASS_Renderer *get_overflow_renderer() {
 	if (!overflow_renderer) {
-		overflow_renderer = ass_renderer_init(library);
+		overflow_renderer = init_renderer();
 		ass_set_font_scale(overflow_renderer, 1.);
 		ass_set_fonts(overflow_renderer, nullptr, "Sans", 1, nullptr, true);
 	}
@@ -207,7 +212,7 @@ public:
 			return;
 
 		ass_renderer_done(shared->renderer);
-		shared->renderer = ass_renderer_init(library);
+		shared->renderer = init_renderer();
 		ass_set_font_scale(shared->renderer, 1.);
 		ass_set_fonts(shared->renderer, nullptr, "Sans", 1, nullptr, true);
 	}
@@ -219,7 +224,7 @@ LibassSubtitlesProvider::LibassSubtitlesProvider(agi::BackgroundRunner *br)
 {
 	auto state = shared;
 	cache_queue->Async([state] {
-		auto ass_renderer = ass_renderer_init(library);
+		auto ass_renderer = init_renderer();
 		if (ass_renderer) {
 			ass_set_font_scale(ass_renderer, 1.);
 			ass_set_fonts(ass_renderer, nullptr, "Sans", 1, nullptr, true);
@@ -375,7 +380,7 @@ void CacheFonts() {
 
 	// Initialize a renderer to force fontconfig to update its cache
 	cache_queue->Async([] {
-		auto ass_renderer = ass_renderer_init(library);
+		auto ass_renderer = init_renderer();
 		ass_set_fonts(ass_renderer, nullptr, "Sans", 1, nullptr, true);
 		ass_renderer_done(ass_renderer);
 	});

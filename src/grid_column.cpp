@@ -78,7 +78,7 @@ int WidthHelper::operator()(const char *str) {
 
 int WidthHelper::operator()(const wchar_t *str) {
 	if (!str || !*str) return 0;
-	return (*this)(to_wx(str));
+	return (*this)(wxString(str));
 }
 
 void GridColumn::UpdateWidth(const agi::Context *c, WidthHelper &helper) {

@@ -88,6 +88,11 @@ void VideoProviderCache::GetFrame(int n, VideoFrame &out) {
 
 	master->GetFrame(n, out);
 
+	// A zero cache budget means caching is disabled. Without this guard the
+	// empty-list safety path below retained one full frame indefinitely.
+	if (max_cache_size == 0)
+		return;
+
 	if (cache.empty()) {
 		// First frame ever, or cache was cleared: just add it. The
 		// '--cache.end()' below is UB on an empty list, so guard explicitly.
