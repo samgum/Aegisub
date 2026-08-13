@@ -163,14 +163,6 @@ jobs:
         run: |
           choco install ninja innosetup
 
-          # FFmpeg's fallback configuration invokes gzip. Git for Windows is
-          # preinstalled on hosted runners and ships it in usr\bin, but that
-          # directory is not guaranteed to be on PATH.
-          $gitUsrBin = Join-Path $env:ProgramFiles "Git\usr\bin"
-          if (Test-Path -LiteralPath $gitUsrBin) {
-            $gitUsrBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          }
-
           $moonscripturl = "https://github.com/leafo/moonscript/releases/download/v0.6.0/moonscript-v0.6.0-windows-x86_64.zip"
           mkdir moonscript
           Invoke-WebRequest -Uri $moonscripturl -OutFile ".\moonscript\moonscript.zip"

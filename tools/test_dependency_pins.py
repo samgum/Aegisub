@@ -23,17 +23,16 @@ def test_git_wrap_revisions_are_immutable():
     assert not failures, "mutable git wrap revisions: " + ", ".join(failures)
 
 
-def test_windows_ci_exposes_git_gzip():
+def test_windows_ci_does_not_shadow_msvc_linker():
     source = CI_WORKFLOW.read_text(encoding="utf-8")
     windows = source[source.index("- name: Install dependencies (Windows)"):]
-    assert '$gitUsrBin = Join-Path $env:ProgramFiles "Git\\usr\\bin"' in windows
-    assert "if (Test-Path -LiteralPath $gitUsrBin)" in windows
-    assert "$gitUsrBin | Out-File -FilePath $env:GITHUB_PATH" in windows
+    assert 'Git\\usr\\bin' not in windows
+    assert "$gitUsrBin | Out-File -FilePath $env:GITHUB_PATH" not in windows
 
 
 def main():
     test_git_wrap_revisions_are_immutable()
-    test_windows_ci_exposes_git_gzip()
+    test_windows_ci_does_not_shadow_msvc_linker()
     print("2 dependency pin tests passed")
 
 
