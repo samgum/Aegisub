@@ -92,8 +92,58 @@ def test_overlap_fix_logic_correct():
     # Must compare cur->End > nxt->Start and set cur->End = nxt->Start.
     assert "cur_end > nxt_start" in proc
     assert "cur->End = nxt_start" in proc
+    assert "nxt_start > cur->Start" in proc
     # Must build the full 'all' list to find neighbours.
     assert "for (auto& line : context->ass->Events)" in proc
+    # File order is not necessarily chronological; neighbour comparisons must be.
+    assert "std::stable_sort(all.begin(), all.end()" in proc
+    assert "return lhs->Start < rhs->Start;" in proc
+
+
+def test_selected_lookup_is_constant_time():
+    """Selected-row mode must not scan the selection for every event pair."""
+    src = DIALOG_CPP.read_text(encoding="utf-8")
+    idx = src.index("DialogFixCommonErrors::Process")
+    proc = src[idx:]
+    assert "std::unordered_set<AssDialogue *> targets" in proc
+    assert "targets.count(d) != 0" in proc
+    assert "std::find(lines.begin(), lines.end(), d)" not in proc
+
+
+def test_comments_are_not_modified():
+    """Comment rows are metadata and must be excluded from every fix."""
+    src = DIALOG_CPP.read_text(encoding="utf-8")
+    idx = src.index("DialogFixCommonErrors::Process")
+    proc = src[idx:]
+    duration = proc[proc.index("// --- Per-line duration fixes."):proc.index("// --- Neighbour timing fixes.")]
+    text = proc[proc.index("// --- Text fixes."):proc.index("// --- Remove empty lines.")]
+    empty = proc[proc.index("// --- Remove empty lines."):proc.index("if (!to_delete.empty())")]
+    assert "if (line->Comment)" in duration
+    assert "if (line->Comment)" in text
+    assert "if (line->Comment)" in empty
+    assert "if (!line.Comment)" in proc
+
+
+def test_commits_require_real_changes():
+    """Selecting an option without finding a problem must not create undo entries."""
+    src = DIALOG_CPP.read_text(encoding="utf-8")
+    idx = src.index("DialogFixCommonErrors::Process")
+    proc = src[idx:]
+    assert "bool changed_time = n_overlap || n_gap || n_short || n_long;" in proc
+    assert "bool changed_text = n_trim != 0;" in proc
+    assert "bool changed_time = do_overlaps" not in proc
+    assert "bool changed_text = do_trim" not in proc
+
+
+def test_fix_categories_create_real_separate_undo_snapshots():
+    """Timing must be committed before text mutation, and text before deletion."""
+    src = DIALOG_CPP.read_text(encoding="utf-8")
+    proc = src[src.index("DialogFixCommonErrors::Process"):]
+    timing_commit = proc.index('Commit(_("fix common errors (timing)")')
+    text_fixes = proc.index("// --- Text fixes.")
+    text_commit = proc.index('Commit(_("fix common errors (text)")')
+    removal = proc.index("// --- Remove empty lines.")
+    assert timing_commit < text_fixes < text_commit < removal
 
 
 def test_empty_removal_is_safe():
@@ -106,6 +156,39 @@ def test_empty_removal_is_safe():
     assert "Events.erase" in proc
     # Must rebuild selection from survivors, not just clear the active line.
     assert "SetSelectionAndActive" in proc
+
+
+def test_ass_aware_empty_detection_preserves_non_dialogue_content():
+    """Whitespace detection must understand ASS escapes/tags without deleting
+    drawing commands, templates, or comments."""
+    src = DIALOG_CPP.read_text(encoding="utf-8")
+    helper = src[src.index("bool is_ass_whitespace_only("):src.index("wxString get_history_string")]
+    proc = src[src.index("DialogFixCommonErrors::Process"):]
+    assert "line.ParseTags()" in helper
+    assert "AssBlockType::DRAWING" in helper
+    assert "AssBlockType::PLAIN" in helper
+    assert "0xE3" in helper and "0x80" in helper  # UTF-8 U+3000
+    assert "text[i + 1] == 'h'" in helper
+    assert 'boost::istarts_with(effect, "template")' in helper
+    assert 'effect.compare(0, 8, "template")' not in helper
+    assert "is_ass_whitespace_only(*line)" in proc
+    empty = proc[proc.index("// --- Remove empty lines."):proc.index("if (!to_delete.empty())")]
+    assert "if (line->Comment)" in empty
+
+
+def test_delete_all_keeps_one_editable_line_and_precise_commit():
+    """Deleting every empty event must mirror edit/delete: add a replacement,
+    commit ADDREM only, then select the committed replacement."""
+    src = DIALOG_CPP.read_text(encoding="utf-8")
+    proc = src[src.index("DialogFixCommonErrors::Process"):]
+    removal = proc[proc.index("bool changed_rows = !to_delete.empty();"):]
+    assert "if (!new_active)" in removal
+    assert "new_active = new AssDialogue;" in removal
+    assert "context->ass->Events.push_back(*new_active);" in removal
+    commit = removal.index('Commit(_("fix common errors (remove empty)"), AssFile::COMMIT_DIAG_ADDREM);')
+    selection = removal.index("SetSelectionAndActive", commit)
+    assert commit < selection
+    assert "COMMIT_DIAG_ADDREM | AssFile::COMMIT_DIAG_FULL" not in removal
 
 
 def test_chinese_translations():
@@ -127,6 +210,13 @@ def main():
         test_config_defaults_present,
         test_uses_correct_commit_types,
         test_overlap_fix_logic_correct,
+        test_selected_lookup_is_constant_time,
+        test_comments_are_not_modified,
+        test_commits_require_real_changes,
+        test_fix_categories_create_real_separate_undo_snapshots,
+        test_empty_removal_is_safe,
+        test_ass_aware_empty_detection_preserves_non_dialogue_content,
+        test_delete_all_keeps_one_editable_line_and_precise_commit,
         test_chinese_translations,
     ]
     for test in tests:

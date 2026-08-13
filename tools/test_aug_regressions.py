@@ -43,11 +43,13 @@ def test_cjk_ime_composition_is_observer_atomic():
 def test_libass_overflow_is_authoritative():
     source = read("src/subtitle_overflow.cpp")
     check = method(source, "Result Check(", "Result CheckText(")
-    check_text = method(source, "Result CheckText(", "void InvalidateLine(")
+    check_text = method(source, "Result CheckText(", "Result CheckTextExact(")
+    check_text_exact = method(source, "Result CheckTextExact(", "void InvalidateLine(")
 
-    assert check.index("check_with_libass(") < check.index("check_with_dc(")
-    assert "auto rendered = check_with_libass(context, line, text);" in check_text
-    assert "if (!result.valid) {\n\t\tauto rendered" not in check_text
+    assert check.index("check_with_libass(") < check.index("measure_with_dc(")
+    assert "check_with_libass" not in check_text
+    assert "auto rendered = check_with_libass(context, line, text);" in check_text_exact
+    assert "if (!result.valid) {\n\t\tauto rendered" not in check_text_exact
 
 
 def test_libass_renderer_creation_uses_library_lock():
@@ -74,9 +76,34 @@ def test_audio_completion_and_position_units():
 def test_zero_video_cache_is_really_disabled():
     source = read("src/video_provider_cache.cpp")
     disabled = source.index("if (max_cache_size == 0)")
-    first_insert = source.index("if (cache.empty())", disabled)
+    first_insert = source.index("cache.emplace_front(out, n);", disabled)
     assert disabled < first_insert
     assert "master->GetFrame(n, out);" in source[:disabled]
+
+
+def test_video_cache_hits_are_constant_time():
+    source = read("src/video_provider_cache.cpp")
+    assert "std::unordered_map<int, Cache::iterator> index;" in source
+    assert "auto hit = index.find(n);" in source
+    assert "cache.splice(cache.begin(), cache, hit->second)" in source
+    assert "index.erase(victim->frame_number);" in source
+    assert "index.clear();" in source
+    assert "total_size = 0;" in source
+    get_frame = method(source, "void VideoProviderCache::GetFrame", "\n}\n}\n\nstd::unique_ptr")
+    assert "for (auto cur = cache.begin()" not in get_frame
+
+
+def test_ffms_pixel_transforms_use_four_byte_operations():
+    source = read("src/video_provider_ffmpegsource.cpp")
+    frame = method(source, "void FFmpegSourceVideoProvider::GetFrame", "\n}\n}\n\nstd::unique_ptr")
+    assert "void copy_bgra(" in source
+    assert "void swap_bgra(" in source
+    assert "std::memcpy(&pixel, src, sizeof pixel);" in source
+    assert "std::memcpy(&a, lhs, sizeof a);" in source
+    assert "for (int ch = 0; ch < 4; ++ch)" not in frame
+    # Source rows must retain out.pitch so padded SDR buffers rotate correctly.
+    assert "data.data() + out.pitch * (Height - 1 - x)" in frame
+    assert "data.data() + out.pitch * y" in frame
 
 
 def test_search_offsets_refer_to_stored_bytes():
@@ -87,6 +114,20 @@ def test_search_offsets_refer_to_stored_bytes():
     assert "boost::locale::normalize((diag->*field)" not in source
 
 
+def test_ffms_rotation_is_normalized():
+    source = read("src/video_provider_ffmpegsource.cpp")
+    frame_rotation = method(source, "\t// Handle rotation", "\n}\n}\n\nstd::unique_ptr<VideoProvider>")
+
+    assert "int normalize_rotation(int rotation)" in source
+    assert "rotation %= 360;" in source
+    assert "return rotation < 0 ? rotation + 360 : rotation;" in source
+    assert "auto rotation = normalize_rotation(VideoInfo->Rotation);" in frame_rotation
+    assert "if (rotation == 180)" in frame_rotation
+    assert "else if (rotation == 90)" in frame_rotation
+    assert "else if (rotation == 270)" in frame_rotation
+    assert "VideoInfo->Rotation % 180" not in source
+
+
 def main():
     tests = [
         test_timer_cadence,
@@ -95,7 +136,10 @@ def main():
         test_libass_renderer_creation_uses_library_lock,
         test_audio_completion_and_position_units,
         test_zero_video_cache_is_really_disabled,
+        test_video_cache_hits_are_constant_time,
+        test_ffms_pixel_transforms_use_four_byte_operations,
         test_search_offsets_refer_to_stored_bytes,
+        test_ffms_rotation_is_normalized,
     ]
     for test in tests:
         test()

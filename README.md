@@ -3,7 +3,7 @@
 [中文说明](README_CN.md) | English
 
 A customized fork of [Aegisub](http://aegisub.org) focused on practical
-subtitle-production workflows — HDR/Dolby Vision preview, CJK text tools,
+subtitle-production workflows — modern video-source compatibility, CJK text tools,
 audio stability, and batch timing fixes.
 
 Pre-built binaries (Windows installer/portable, macOS DMG for Intel and Apple
@@ -13,18 +13,20 @@ Silicon) are available on the [Releases page](https://github.com/samgum/Aegisub/
 
 ## What's new in this fork
 
-### HDR & Dolby Vision video support
+### HDR & Dolby Vision video compatibility
 - **Open HDR/BT.2020 video** — the original Aegisub rejected 4K HDR sources
   with "Unknown video color space". This fork recognises BT.2020 and all
-  modern color spaces so UHD/HDR/Dolby Vision files open normally.
-- **CPU HDR tone-mapping** — PQ (SMPTE ST 2084) and HLG (ARIB STD-B67) sources
-  are decoded at 16-bit precision and tone-mapped to a viewable SDR/BT.709
-  preview, so HDR footage no longer appears near-black or washed out. The
-  tone-map uses precomputed lookup tables (no `std::pow` in the per-frame loop)
-  and runs entirely in `float` for autovectorization.
-- **Decode-time downscaling** — 4K HDR sources are subsampled to a 1920-wide
-  preview at decode time, cutting CPU/memory ~4× so playback stays responsive
-  instead of freezing the whole machine.
+  modern color-space identifiers so UHD/HDR/Dolby Vision files can be opened.
+- **Preview-grade HDR tone mapping** — standard HDR10 (PQ) and HLG base layers
+  are converted through a 16-bit RGB CPU path with luminance-preserving tone
+  mapping, BT.2020-to-BT.709 conversion, gamut compression, and output-space
+  dithering. It is intended for subtitle preview, not reference colour grading.
+- **Dolby Vision limitation** — RPU reshaping is not applied. Profiles with a
+  standard PQ/HLG base layer can preview that base layer only; IPT/ICtCp sources
+  such as profile 5 are unsupported and their preview colours are unreliable.
+- **Preview downscaling** — HDR sources wider than 1920 pixels are converted to
+  a 1920-wide preview after codec decoding, reducing conversion, upload, and
+  frame-cache cost while keeping the original aspect ratio.
 - SDR video is completely untouched (zero overhead, same behavior as upstream).
 
 ### Fix Common Errors (Subtitle Edit-style batch fixer)

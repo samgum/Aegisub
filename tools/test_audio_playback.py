@@ -7,6 +7,7 @@ OPENAL = ROOT / "src" / "audio_player_openal.cpp"
 PORTAUDIO = ROOT / "src" / "audio_player_portaudio.cpp"
 PORTAUDIO_H = ROOT / "src" / "audio_player_portaudio.h"
 SOUNDTOUCH = ROOT / "src" / "audio_player_soundtouch.cpp"
+SOUNDTOUCH_H = ROOT / "src" / "audio_player_soundtouch.h"
 SAMPLE_SAFETY = ROOT / "src" / "audio_sample_safety.h"
 
 
@@ -26,6 +27,13 @@ def test_portaudio_normal_speed_zero_fills_last_buffer():
     assert "memset(out + lenAvailable * bytes_per_frame, 0" in source
     assert "return paComplete;" in source
     assert "draining" not in source
+
+
+def test_portaudio_zero_fills_callbacks_with_no_valid_frames():
+    source = PORTAUDIO.read_text(encoding="utf-8")
+    no_samples = source.split("// No samples remain.", 1)[1].split("}", 1)[0]
+    assert "memset(outputBuffer, 0, framesPerBuffer * bytes_per_frame);" in no_samples
+    assert "return paComplete;" in no_samples
 
 
 def test_portaudio_uses_safer_macos_latency_and_no_dither():
@@ -53,25 +61,101 @@ def test_soundtouch_avoids_preclipping_and_output_clipping():
     assert "AudioSampleSafety::ApplyGainLimiter(out, available * channels(), volume)" in source
     assert "AudioSampleSafety::ConvertFloatToInt16Limited" in source
     assert "std::clamp(output_buffer[i], -1.0f, 1.0f)" not in source
+    assert "std::atomic_flag volume_guard" in SOUNDTOUCH_H.read_text(encoding="utf-8")
+    assert "volume_for_fill()" in source
 
 
 def test_volume_changes_reach_soundtouch_processors():
     openal = OPENAL.read_text(encoding="utf-8")
+    portaudio = PORTAUDIO.read_text(encoding="utf-8")
     portaudio_h = PORTAUDIO_H.read_text(encoding="utf-8")
     assert "void OpenALPlayer::SetVolume(double vol)" in openal
     assert "tempo_processor->SetVolume(vol);" in openal
-    assert "tempo_processor->SetVolume(vol);" in portaudio_h
+    assert "void PortAudioPlayer::SetVolume(double vol)" in portaudio
+    assert "tempo_processor->SetVolume(vol);" in portaudio
+    assert "std::atomic_flag volume_guard" in portaudio_h
+    assert "VolumeForCallback()" in portaudio
+
+
+def test_portaudio_soundtouch_position_tracks_emitted_audio():
+    portaudio = PORTAUDIO.read_text(encoding="utf-8")
+    portaudio_h = PORTAUDIO_H.read_text(encoding="utf-8")
+    soundtouch = SOUNDTOUCH.read_text(encoding="utf-8")
+    soundtouch_h = SOUNDTOUCH_H.read_text(encoding="utf-8")
+
+    assert "double output_frame = 0.0" in soundtouch_h
+    assert "int64_t GetOutputFrame() const" in soundtouch_h
+    assert "output_frame + got * playback_speed" in soundtouch
+    assert "output_start_frame = player->tempo_processor->GetOutputFrame()" in portaudio
+    assert "player->current = player->tempo_processor->GetOutputFrame()" in portaudio
+    assert "player->tempo_processor->GetInputFrame()" not in portaudio
+    assert "timeInfo->outputBufferDacTime" in portaudio
+    assert "outputBufferDacTime > 0.0" not in portaudio
+    assert "ReadSoundTouchPosition(anchor_frame, anchor_time, anchor_speed)" in portaudio
+    assert "elapsed -= info->outputLatency" in portaudio
+    assert "std::atomic_flag soundtouch_position_guard" in portaudio_h
+    assert "soundtouch_position_sequence" not in portaudio_h
+    assert "if (soundtouch_position_guard.test_and_set" in portaudio
+    assert "soundtouch_position.valid = false" in portaudio
+    assert "ResetSoundTouchPosition();" in portaudio
+    assert "std::atomic_flag end_guard" in portaudio_h
+    assert "auto playback_end = player->EndForCallback()" in portaudio
+    assert "player->tempo_processor->SetEndFrame(playback_end)" in portaudio
+    assert "remaining_source / playback_speed" in soundtouch
+    assert "tempo_processor->SetPlaybackSpeed(playback_speed)" not in portaudio
+    assert "Pa_AbortStream(stream)" in portaudio
 
 
 def test_openal_reports_source_playback_offset_not_prefill_position():
     source = OPENAL.read_text(encoding="utf-8")
+    position_method = source.split("int64_t OpenALPlayer::GetCurrentPosition()", 1)[1]
+    position_method = position_method.split("std::unique_ptr<AudioPlayer> CreateOpenALPlayer", 1)[0]
     assert "alGetSourcei(source, AL_BUFFERS_PROCESSED, &processed)" in source
     assert "alGetSourcei(source, AL_SAMPLE_OFFSET, &sample_offset)" in source
     assert "cur_frame + extra * samplerate" not in source
     assert "tempo_processor && tempo_processor->IsFinished())" not in source
     # AL_SAMPLE_OFFSET and processed buffers are already measured in source
     # samples. Dividing them by AL_PITCH double-corrects the position.
-    assert "output_frames / playback_speed" not in source
+    assert "output_frames / playback_speed" not in position_method
+
+
+def test_openal_soundtouch_uses_output_duration_for_completion():
+    source = OPENAL.read_text(encoding="utf-8")
+    soundtouch = SOUNDTOUCH.read_text(encoding="utf-8")
+    assert "auto fill_len = tempo_processor->Fill" in source
+    assert "if (fill_len == 0)" in source
+    assert "selected_audio_finished = tempo_processor->IsFinished()" in source
+    assert "selected_audio_finished && buffers_free == num_buffers" in source
+    assert "if (buffers_free == num_buffers)" in source
+    assert "return available;" in soundtouch
+    assert "return filled;" in soundtouch
+    assert "expected_output_frames" not in source
+    assert "(end_frame - start_frame) * bpf" not in source
+    assert "buffers_played - num_buffers" not in source
+
+
+def test_openal_soundtouch_restarts_from_audible_position_on_speed_change():
+    source = OPENAL.read_text(encoding="utf-8")
+    method = source.split("void OpenALPlayer::SetPlaybackSpeed(double speed)", 1)[1]
+    method = method.split("int64_t OpenALPlayer::GetCurrentPosition()", 1)[0]
+    assert "if (!playing)" in method
+    assert "if (tempo_processor)" in method
+    restart = method.split("if (tempo_processor)", 1)[1]
+    assert restart.index("GetCurrentPosition()") < restart.index("playback_speed = new_speed")
+    assert "Play(restart_position, restart_end - restart_position);" in method
+    assert "tempo_processor->SetPlaybackSpeed" not in method
+    assert "start_frame = GetCurrentPosition() - buffers_played" not in method
+
+
+def test_openal_rebuilds_queue_when_end_changes():
+    source = OPENAL.read_text(encoding="utf-8")
+    method = source.split("void OpenALPlayer::SetEndPosition(int64_t pos)", 1)[1]
+    method = method.split("void OpenALPlayer::SetVolume(double vol)", 1)[0]
+    assert "if (playing)" in method
+    assert "tempo_processor" not in method
+    assert "GetCurrentPosition()" in method
+    assert "std::min(end_frame, pos)" in method
+    assert "Play(restart_position, pos - restart_position);" in method
 
 
 def test_portaudio_reopens_default_device_after_output_route_change():
@@ -161,10 +245,15 @@ def main():
     tests = [
         test_openal_uses_provider_sample_format,
         test_portaudio_normal_speed_zero_fills_last_buffer,
+        test_portaudio_zero_fills_callbacks_with_no_valid_frames,
         test_portaudio_uses_safer_macos_latency_and_no_dither,
         test_soundtouch_avoids_preclipping_and_output_clipping,
         test_volume_changes_reach_soundtouch_processors,
+        test_portaudio_soundtouch_position_tracks_emitted_audio,
         test_openal_reports_source_playback_offset_not_prefill_position,
+        test_openal_soundtouch_uses_output_duration_for_completion,
+        test_openal_soundtouch_restarts_from_audible_position_on_speed_change,
+        test_openal_rebuilds_queue_when_end_changes,
         test_portaudio_reopens_default_device_after_output_route_change,
         test_portaudio_macos_route_change_is_exception_safe,
         test_portaudio_play_guards_null_stream,

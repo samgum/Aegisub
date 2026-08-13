@@ -44,9 +44,16 @@
 #include <libaegisub/fs.h>
 #include <libaegisub/log.h>
 
+#include <cstdint>
+#include <cstring>
 #include <string_view>
 
 namespace {
+int normalize_rotation(int rotation) {
+	rotation %= 360;
+	return rotation < 0 ? rotation + 360 : rotation;
+}
+
 typedef enum AGI_ColorSpaces {
 	AGI_CS_RGB = 0,
 	AGI_CS_BT709 = 1,
@@ -61,8 +68,39 @@ typedef enum AGI_ColorSpaces {
 	AGI_CS_SMPTE2085 = 11,
 	AGI_CS_CHROMATICITY_DERIVED_NCL = 12,
 	AGI_CS_CHROMATICITY_DERIVED_CL = 13,
-	AGI_CS_ICTCP = 14
+	AGI_CS_ICTCP = 14,
+	AGI_CS_IPT_C2 = 15
 } AGI_ColorSpaces;
+
+bool swscale_has_input_matrix(int color_space) {
+	switch (color_space) {
+		case AGI_CS_RGB:
+		case AGI_CS_BT709:
+		case AGI_CS_FCC:
+		case AGI_CS_BT470BG:
+		case AGI_CS_SMPTE170M:
+		case AGI_CS_SMPTE240M:
+		case AGI_CS_BT2020_NCL:
+		case AGI_CS_BT2020_CL:
+			return true;
+		default:
+			return false;
+	}
+}
+
+void copy_bgra(unsigned char *dst, unsigned char const *src) {
+	uint32_t pixel;
+	std::memcpy(&pixel, src, sizeof pixel);
+	std::memcpy(dst, &pixel, sizeof pixel);
+}
+
+void swap_bgra(unsigned char *lhs, unsigned char *rhs) {
+	uint32_t a, b;
+	std::memcpy(&a, lhs, sizeof a);
+	std::memcpy(&b, rhs, sizeof b);
+	std::memcpy(lhs, &b, sizeof b);
+	std::memcpy(rhs, &a, sizeof a);
+}
 
 /// @class FFmpegSourceVideoProvider
 /// @brief Implements video loading through the FFMS library.
@@ -81,7 +119,10 @@ class FFmpegSourceVideoProvider final : public VideoProvider, FFmpegSourceProvid
 	int Transfer = -1;              ///< Reported transfer characteristics (AVColorTransferCharacteristic)
 	int Primaries = -1;             ///< Reported color primaries (AVColorPrimaries)
 	int MaxCLL = 0;                 ///< Max content light level (nits); 0 = unavailable
-	bool IsHDR = false;             ///< True when this source is HDR (used for downscale logging)
+	bool HasDolbyVision = false;    ///< True when FFMS2 exposes Dolby Vision RPU data
+	bool IsHDR = false;             ///< True for PQ/HLG or Dolby Vision sources
+	bool UseCpuToneMap = false;     ///< Standard PQ/HLG base layer can use the preview mapper
+	std::unique_ptr<HDRTonemap::ToneMapper> CpuToneMapper;
 	double DAR;                     ///< display aspect ratio
 	std::vector<int> KeyFramesList; ///< list of keyframes
 	agi::vfr::Framerate Timecodes;  ///< vfr object
@@ -101,6 +142,14 @@ public:
 
 	void SetColorSpace(std::string const& matrix) override {
 		if (matrix == ColorSpace) return;
+		// The HDR mapper is constructed for the source matrix. Applying a saved
+		// SDR TV.601 override would make swscale feed it unrelated RGB values.
+		if (UseCpuToneMap) {
+			LOG_W("video/provider/ffmpegsource")
+				<< "Ignoring manual colour-matrix override '" << matrix
+				<< "' while HDR CPU tone mapping is active";
+			return;
+		}
 		if (matrix == RealColorSpace)
 			FFMS_SetInputFormatV(VideoSource, CS, CR, FFMS_GetPixFmt(""), nullptr);
 		else if (matrix == "TV.601")
@@ -112,9 +161,9 @@ public:
 
 	int GetFrameCount() const override             { return VideoInfo->NumFrames; }
 
-	int GetWidth() const override  { return (VideoInfo->Rotation % 180 == 90 || VideoInfo->Rotation % 180 == -90) ? Height : Width; }
-	int GetHeight() const override { return (VideoInfo->Rotation % 180 == 90 || VideoInfo->Rotation % 180 == -90) ? Width : Height; }
-	double GetDAR() const override { return (VideoInfo->Rotation % 180 == 90 || VideoInfo->Rotation % 180 == -90) ? 1 / DAR : DAR; }
+	int GetWidth() const override  { auto rotation = normalize_rotation(VideoInfo->Rotation); return (rotation == 90 || rotation == 270) ? Height : Width; }
+	int GetHeight() const override { auto rotation = normalize_rotation(VideoInfo->Rotation); return (rotation == 90 || rotation == 270) ? Width : Height; }
+	double GetDAR() const override { auto rotation = normalize_rotation(VideoInfo->Rotation); return (rotation == 90 || rotation == 270) ? 1 / DAR : DAR; }
 
 	agi::vfr::Framerate GetFPS() const override    { return Timecodes; }
 	std::string GetColorSpace() const override     { return ColorSpace; }
@@ -156,9 +205,9 @@ std::string colormatrix_description(int cs, int cr) {
 		default:
 			// YCOCG, SMPTE2085, chromaticity-derived, ICTcp and anything else
 			// libavutil may report. Rather than refusing to open the video,
-			// fall back to the closest standard matrix the resampler supports.
-			// This preserves the old behavior for known-but-unmapped spaces
-			// while no longer hard-failing on them.
+			// expose a usable UI label, but do not hide that this is approximate.
+			LOG_W("video/provider/ffmpegsource") << "Video reports unsupported colour-space id "
+				<< cs << "; preview conversion and the .709 label may be approximate";
 			return str + ".709";
 	}
 }
@@ -280,56 +329,88 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 	int VideoCS = CS = TempFrame->ColorSpace;
 	CR = TempFrame->ColorRange;
 
-	// Capture HDR transfer/primaries so we can decide whether the display
-	// pipeline needs a CPU tone-map. Aegisub renders to 8-bit BGRA, so HDR
-	// (PQ/HLG) footage must be tone-mapped here or it shows up near-black.
+	// Capture HDR metadata so the standard HDR10/HLG base layer can be converted
+	// by the preview-grade CPU mapper. Dolby Vision IPT/ICtCp profiles are kept
+	// out of this path: their nonlinear RPU reshaping cannot be replaced by a
+	// fixed matrix.
 	// FFMS2's field name is intentionally misspelled in the upstream header
 	// ("TransferCharateristics"); keep the typo to match.
 	Transfer = TempFrame->TransferCharateristics;
 	Primaries = TempFrame->ColorPrimaries;
 	// FFMS_Frame exposes flat fields (not a nested struct): ContentLightLevelMax.
 	MaxCLL = TempFrame->HasContentLightLevel ? static_cast<int>(TempFrame->ContentLightLevelMax) : 0;
-	IsHDR = HDRTonemap::IsHDRSource(Transfer, Primaries);
-	if (IsHDR)
-		LOG_I("video/provider/ffmpegsource") << "HDR source detected (transfer=" << Transfer
-			<< ", primaries=" << Primaries << ", maxCLL=" << MaxCLL << "); using swscale conversion";
+	HasDolbyVision = TempFrame->DolbyVisionRPUSize > 0;
+	IsHDR = HDRTonemap::IsHDRSource(Transfer, Primaries) || HasDolbyVision;
 
+	// Resolve missing matrix metadata before deciding whether rgb48le is safe.
+	// The CPU mapper may only consume output from matrices libswscale actually
+	// understands; treating ICTCP/IPT_C2 or a future id as ordinary RGB causes
+	// severe and misleading colour errors.
 	if (CS == AGI_CS_UNSPECIFIED)
 		CS = Width > 1024 || Height >= 600 ? AGI_CS_BT709 : AGI_CS_BT470BG;
+	bool IsDolbyVisionIpt = CS == AGI_CS_ICTCP || CS == AGI_CS_IPT_C2;
+	bool HasSupportedInputMatrix = swscale_has_input_matrix(CS);
+	UseCpuToneMap = HDRTonemap::IsHDRSource(Transfer, Primaries)
+		&& HasSupportedInputMatrix && !IsDolbyVisionIpt;
+	if (UseCpuToneMap) {
+		bool convert_bt2020 = Primaries == 9 || CS == AGI_CS_BT2020_NCL || CS == AGI_CS_BT2020_CL;
+		CpuToneMapper = std::make_unique<HDRTonemap::ToneMapper>(Transfer, convert_bt2020, MaxCLL);
+		LOG_I("video/provider/ffmpegsource") << "HDR source detected (transfer=" << Transfer
+			<< ", primaries=" << Primaries << ", maxCLL=" << MaxCLL
+			<< "); using preview-grade CPU tone mapping";
+	}
+	if (HasDolbyVision && UseCpuToneMap)
+		LOG_W("video/provider/ffmpegsource")
+			<< "Dolby Vision RPU metadata detected. Preview tone mapping uses only the "
+				"standard PQ/HLG base layer; RPU reshaping is not applied.";
+	else if (IsDolbyVisionIpt)
+		LOG_W("video/provider/ffmpegsource")
+			<< "Dolby Vision IPT/ICtCp (profile 5 style) video is unsupported by the "
+				"CPU tone mapper. RPU reshaping is not applied and preview colours are unreliable.";
+	else if (HasDolbyVision)
+		LOG_W("video/provider/ffmpegsource")
+			<< "Dolby Vision metadata has no usable standard PQ/HLG base layer. "
+				"RPU reshaping is not applied and preview colours are unreliable.";
+	else if (HDRTonemap::IsHDRSource(Transfer, Primaries) && !HasSupportedInputMatrix)
+		LOG_W("video/provider/ffmpegsource")
+			<< "HDR source reports unsupported colour-space id " << CS
+			<< "; disabling CPU tone mapping because libswscale cannot safely "
+				"convert this matrix to RGB.";
+
 	RealColorSpace = ColorSpace = colormatrix_description(CS, CR);
 
-	if (CS != AGI_CS_RGB && CS != AGI_CS_BT470BG && ColorSpace != colormatrix && colormatrix == "TV.601") {
+	if (!UseCpuToneMap && CS != AGI_CS_RGB && CS != AGI_CS_BT470BG
+	&& ColorSpace != colormatrix && colormatrix == "TV.601") {
 		CS = AGI_CS_BT470BG;
 		ColorSpace = colormatrix_description(AGI_CS_BT470BG, CR);
 	}
+	else if (UseCpuToneMap && colormatrix == "TV.601" && ColorSpace != colormatrix)
+		LOG_W("video/provider/ffmpegsource")
+			<< "Ignoring saved TV.601 override while HDR CPU tone mapping is active";
 
 	if (CS != VideoCS) {
 		if (FFMS_SetInputFormatV(VideoSource, CS, CR, FFMS_GetPixFmt(""), &ErrInfo))
 			throw VideoOpenError(std::string("Failed to set input format: ") + ErrInfo.Buffer);
 	}
 
-	// All sources (HDR and SDR) decode to 8-bit bgra and let FFMS/libswscale
-	// handle the YUV->RGB + colorspace conversion. The earlier CPU tone-map
-	// experiment produced visible banding/blocking artifacts ("oil-painting"
-	// look) on real Dolby Vision content because per-channel LUT tone-mapping
-	// cannot preserve inter-channel consistency. libswscale's built-in
-	// conversion is smooth and continuous — the result is not a reference HDR
-	// render, but it is a clean, usable preview with no artifacts, which is
-	// what subtitle timing work actually needs.
+	// Standard HDR10/HLG is converted by swscale to transfer-encoded rgb48le, then
+	// tone-mapped below. SDR retains the normal direct BGRA path. Dolby Vision
+	// IPT/ICtCp stays on BGRA because treating those nonlinear channels as RGB
+	// would be actively misleading.
 	const int bgra_fmt = FFMS_GetPixFmt("bgra");
-	const int TargetFormat[] = { bgra_fmt, -1 };
+	const int rgb48_fmt = FFMS_GetPixFmt("rgb48le");
+	const int TargetFormat[] = { UseCpuToneMap ? rgb48_fmt : bgra_fmt, -1 };
 
-	// Performance: for large HDR sources (4K杜比视界/HDR10), decoding at full
-	// resolution is the dominant cost. Subsample at decode time down to a
-	// preview ceiling (1920 wide, aspect preserved) so playback stays smooth.
+	// Performance: convert large HDR sources to a 1920-wide preview after codec
+	// decoding. This reduces swscale, upload and frame-cache costs; it does not
+	// reduce the codec's own full-resolution decode work.
 	int out_w = Width;
 	int out_h = Height;
 	if (IsHDR && Width > 1920) {
 		const int preview_max_width = 1920;
 		double scale = static_cast<double>(preview_max_width) / Width;
 		out_w = preview_max_width;
-		out_h = std::max(1, static_cast<int>(Height * scale));
-		out_h -= out_h % 2;
+		out_h = std::max(2, static_cast<int>(Height * scale) & ~1);
 		LOG_I("video/provider/ffmpegsource") << "HDR preview downscaled from "
 			<< Width << "x" << Height << " to " << out_w << "x" << out_h
 			<< " to keep playback responsive";
@@ -384,54 +465,73 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 	out.width = Width;
 	out.height = Height;
 
-	// FFMS delivers 8-bit bgra for all sources (HDR and SDR). libswscale has
-	// already handled the colorspace conversion; we just copy the frame.
-	out.data.assign(frame->Data[0], frame->Data[0] + frame->Linesize[0] * Height);
-	out.pitch = frame->Linesize[0];
+	if (UseCpuToneMap) {
+		out.pitch = 4 * Width;
+		out.data.resize(static_cast<size_t>(out.pitch) * Height);
+		CpuToneMapper->ToneMapRGB48toBGRA8(frame->Data[0], frame->Linesize[0],
+			out.data.data(), out.pitch, Width, Height);
+	}
+	else {
+		// FFMS normally returns a positive padded stride. Handle a negative or
+		// unexpectedly short stride without constructing an invalid vector range.
+		if (frame->Linesize[0] >= 4 * Width) {
+			out.pitch = frame->Linesize[0];
+			out.data.assign(frame->Data[0], frame->Data[0] + static_cast<size_t>(out.pitch) * Height);
+		}
+		else if (frame->Linesize[0] <= -4 * Width) {
+			out.pitch = 4 * Width;
+			out.data.resize(static_cast<size_t>(out.pitch) * Height);
+			for (int y = 0; y < Height; ++y)
+				std::copy_n(frame->Data[0] + static_cast<ptrdiff_t>(y) * frame->Linesize[0],
+					out.pitch, out.data.data() + static_cast<size_t>(y) * out.pitch);
+		}
+		else
+			throw VideoDecodeError("FFmpegSource returned an invalid BGRA row stride");
+	}
 
 	// Handle flip — use out.pitch (not frame->Linesize[0]) so this is correct
-	// for both the HDR tone-mapped buffer (pitch == 4*Width) and the raw SDR
-	// buffer (pitch == Linesize[0]); the two only coincidentally match for SDR.
+	// for both the HDR tone-mapped buffer and the raw SDR buffer.
 	if (VideoInfo->Flip > 0)
 		for (int x = 0; x < Height; ++x)
 			for (int y = 0; y < Width / 2; ++y)
-				for (int ch = 0; ch < 4; ++ch)
-					std::swap(out.data[out.pitch * x + 4 * y + ch], out.data[out.pitch * x + 4 * (Width - 1 - y) + ch]);
+				swap_bgra(out.data.data() + out.pitch * x + 4 * y,
+					out.data.data() + out.pitch * x + 4 * (Width - 1 - y));
 
 	else if (VideoInfo->Flip < 0)
 		for (int x = 0; x < Height / 2; ++x)
 			for (int y = 0; y < Width; ++y)
-				for (int ch = 0; ch < 4; ++ch)
-					std::swap(out.data[out.pitch * x + 4 * y + ch], out.data[out.pitch * (Height - 1 - x) + 4 * y + ch]);
+				swap_bgra(out.data.data() + out.pitch * x + 4 * y,
+					out.data.data() + out.pitch * (Height - 1 - x) + 4 * y);
 
 	// Handle rotation
-	if (VideoInfo->Rotation % 360 == 180 || VideoInfo->Rotation % 360 == -180) {
+	auto rotation = normalize_rotation(VideoInfo->Rotation);
+	if (rotation == 180) {
 		std::vector<unsigned char> data(std::move(out.data));
 		out.data.resize(Width * Height * 4);
 		for (int x = 0; x < Height; ++x)
 			for (int y = 0; y < Width; ++y)
-				for (int ch = 0; ch < 4; ++ch)
-					out.data[4 * (Width * x + y) + ch] = data[out.pitch * (Height - 1 - x) + 4 * (Width - 1 - y) + ch];
+				copy_bgra(out.data.data() + 4 * (Width * x + y),
+					data.data() + out.pitch * (Height - 1 - x) + 4 * (Width - 1 - y));
 		out.pitch = 4 * Width;
 	}
-	else if (VideoInfo->Rotation % 180 == 90 || VideoInfo->Rotation % 360 == -270) {
+	else if (rotation == 90) {
 		std::vector<unsigned char> data(std::move(out.data));
 		out.data.resize(Width * Height * 4);
 		for (int x = 0; x < Width; ++x)
 			for (int y = 0; y < Height; ++y)
-				for (int ch = 0; ch < 4; ++ch)
-					out.data[4 * (Height * x + y) + ch] = data[out.pitch * y + 4 * (Width - 1 - x) + ch];
+				copy_bgra(out.data.data() + 4 * (Height * x + y),
+					data.data() + out.pitch * y + 4 * (Width - 1 - x));
 		out.width = Height;
 		out.height = Width;
 		out.pitch = 4 * Height;
 	}
-	else if (VideoInfo->Rotation % 180 == 270 || VideoInfo->Rotation % 360 == -90) {
+	else if (rotation == 270) {
 		std::vector<unsigned char> data(std::move(out.data));
 		out.data.resize(Width * Height * 4);
 		for (int x = 0; x < Width; ++x)
 			for (int y = 0; y < Height; ++y)
-				for (int ch = 0; ch < 4; ++ch)
-					out.data[4 * (Height * x + y) + ch] = data[out.pitch * (Height - 1 - y) + 4 * x + ch];
+				copy_bgra(out.data.data() + 4 * (Height * x + y),
+					data.data() + out.pitch * (Height - 1 - y) + 4 * x);
 		out.width = Height;
 		out.height = Width;
 		out.pitch = 4 * Height;

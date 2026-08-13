@@ -10,6 +10,7 @@
 #include "include/aegisub/context.h"
 #include "options.h"
 #include "project.h"
+#include "selection_controller.h"
 #include "subtitles_provider_libass.h"
 
 #include <algorithm>
@@ -93,13 +94,28 @@ struct FontKeyHash {
 	}
 };
 
-// Character width cache: avoids redundant GDI font measurements
-// Maps (font state) -> (utf8 char) -> raw pixel width
+// These caches are UI-thread-only. Both wxDC measurement and the AssFile
+// snapshots used by libass must remain on the UI thread.
+constexpr size_t max_result_cache_entries = 512;
+constexpr size_t max_font_cache_entries = 128;
+constexpr size_t max_chars_per_font = 1024;
+
+// Character width cache: avoids redundant GDI font measurements.
+// Maps (font state) -> (utf8 char) -> raw pixel width.
 static std::unordered_map<FontKey, std::unordered_map<std::string, int>, FontKeyHash> char_width_cache;
 
-// Shared result cache: keyed by AssDialogue::Id. Keep the source text with the
-// result so live edits or programmatic text changes cannot reuse stale ranges.
-static std::unordered_map<int, CachedResult> result_cache;
+// Keep provisional DC measurements separate from authoritative libass results:
+// the edit control writes the former on every keystroke and the idle pass writes
+// the latter, so neither path can accidentally downgrade the other.
+static std::unordered_map<int, CachedResult> fast_result_cache;
+static std::unordered_map<int, CachedResult> exact_result_cache;
+static size_t cache_generation = 0;
+
+void store_result(std::unordered_map<int, CachedResult>& cache, int id, CachedResult result) {
+	if (cache.size() >= max_result_cache_entries && cache.find(id) == cache.end())
+		cache.erase(cache.begin());
+	cache.insert_or_assign(id, std::move(result));
+}
 
 size_t utf8_char_len(unsigned char c) {
 	if (c < 0x80) return 1;
@@ -182,7 +198,7 @@ TextState base_state(AssStyle const& style) {
 	return state;
 }
 
-std::string cache_signature(agi::Context *context, AssDialogue const& line, bool detect_wrap_overflow) {
+std::string cache_signature(agi::Context *context, AssDialogue const& line) {
 	if (!context)
 		return {};
 
@@ -203,20 +219,25 @@ std::string cache_signature(agi::Context *context, AssDialogue const& line, bool
 		style = &default_style;
 
 	std::ostringstream ss;
-	ss << detect_wrap_overflow << ',' << script_w << ',' << script_h << ',' << video_w << ',' << video_h << ','
+	// File-wide script/style/attachment/extradata changes are represented by
+	// cache_generation. BaseGrid's commit listener increments it through
+	// InvalidateAll(), keeping this per-line hot path O(1).
+	ss << cache_generation << ',' << script_w << ',' << script_h << ',' << video_w << ',' << video_h << ','
 		<< static_cast<int>(line.Start) << ',' << static_cast<int>(line.End) << ','
 		<< line.Layer << ',' << line.Style.get() << ',' << line.Actor.get() << ',' << line.Effect.get() << ','
 		<< line.Margin[0] << ',' << line.Margin[1] << ',' << line.Margin[2] << ','
 		<< style->font << ',' << style->fontsize << ',' << style->scalex << ',' << style->scaley << ','
 		<< style->spacing << ',' << style->outline_w << ',' << style->shadow_w << ','
-		<< style->bold << ',' << style->italic << ',' << style->alignment << ','
-		<< style->Margin[0] << ',' << style->Margin[1] << ',' << style->Margin[2];
-
-	for (auto const& info : context->ass->Info)
-		ss << "|I:" << info.GetEntryData();
-	for (auto const& s : context->ass->Styles)
-		ss << "|S:" << s.GetEntryData();
-	ss << "|A:" << context->ass->Attachments.size();
+		<< style->bold << ',' << style->italic << ',' << style->underline << ',' << style->strikeout << ','
+		<< style->angle << ',' << style->borderstyle << ',' << style->alignment << ',' << style->encoding << ','
+		<< static_cast<int>(style->primary.a) << ',' << static_cast<int>(style->secondary.a) << ','
+		<< static_cast<int>(style->outline.a) << ',' << static_cast<int>(style->shadow.a) << ','
+		<< style->Margin[0] << ',' << style->Margin[1] << ',' << style->Margin[2]
+		<< ",X:" << line.ExtradataIds.get().size();
+	// Extradata ID membership is line-local and normally tiny. Values behind
+	// these IDs are covered by COMMIT_EXTRADATA's file-generation invalidation.
+	for (auto id : line.ExtradataIds.get())
+		ss << ',' << id;
 	return ss.str();
 }
 
@@ -383,7 +404,12 @@ int get_raw_char_width(wxDC& dc, TextState const& state, std::string_view raw) {
 
 	dc.SetFont(make_font(state));
 	int w = dc.GetTextExtent(to_wx(raw)).GetWidth();
-	char_width_cache[key][ch] = w;
+	if (char_width_cache.size() >= max_font_cache_entries && char_width_cache.find(key) == char_width_cache.end())
+		char_width_cache.erase(char_width_cache.begin());
+	auto& widths = char_width_cache[key];
+	if (widths.size() >= max_chars_per_font && widths.find(ch) == widths.end())
+		widths.erase(widths.begin());
+	widths.insert_or_assign(ch, w);
 	return w;
 }
 
@@ -828,6 +854,31 @@ subtitle_overflow::Result check_with_character_limit(AssDialogue const *line, st
 
 namespace subtitle_overflow {
 
+namespace {
+
+Result measure_with_dc(agi::Context *context, AssDialogue const *line, std::string const& text, wxDC *dc, bool detect_wrap_overflow) {
+	if (dc)
+		return check_with_dc(context, line, text, *dc, detect_wrap_overflow);
+
+	wxBitmap bmp(1, 1);
+	wxMemoryDC mem_dc;
+	mem_dc.SelectObject(bmp);
+	auto result = check_with_dc(context, line, text, mem_dc, detect_wrap_overflow);
+	mem_dc.SelectObject(wxNullBitmap);
+	return result;
+}
+
+bool cache_hit(std::unordered_map<int, CachedResult> const& cache, int id, std::string const& text,
+	std::string const& signature, Result& result) {
+	auto it = cache.find(id);
+	if (it == cache.end() || it->second.text != text || it->second.signature != signature || !it->second.result.valid)
+		return false;
+	result = it->second.result;
+	return true;
+}
+
+}
+
 Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
 	if (!context || !line || line->Comment || !OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool())
 		return {};
@@ -836,27 +887,27 @@ Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
 	if (OPT_GET("Subtitle/Overflow Highlight/Mode")->GetInt() == 1)
 		return check_with_character_limit(line, text);
 
-	auto signature = cache_signature(context, *line, false);
-	auto it = result_cache.find(line->Id);
-	if (it != result_cache.end() && it->second.text == text && it->second.signature == signature && it->second.result.valid)
-		return it->second.result;
+	auto signature = cache_signature(context, *line);
+	Result cached;
+	if (cache_hit(exact_result_cache, line->Id, text, signature, cached))
+		return cached;
+
+	// During live editing, CheckText has already published an O(text) wxDC
+	// approximation. Let the grid reuse it until the idle libass pass replaces
+	// it with an exact result; other rows always take the authoritative path.
+	auto active_line = context->selectionController->GetActiveLine();
+	if (active_line && active_line->Id == line->Id
+	&& cache_hit(fast_result_cache, line->Id, text, signature, cached))
+		return cached;
 
 	// libass is authoritative because the DC approximation does not model
 	// vertical bounds, drawings, clips, rotations, or animated transforms.
 	// Keep DC as a fallback for environments where libass cannot render.
 	Result result = check_with_libass(context, line, text);
-	if (!result.valid && dc) {
-		result = check_with_dc(context, line, text, *dc, false);
-	}
-	else if (!result.valid) {
-		wxBitmap bmp(1, 1);
-		wxMemoryDC mem_dc;
-		mem_dc.SelectObject(bmp);
-		result = check_with_dc(context, line, text, mem_dc, false);
-		mem_dc.SelectObject(wxNullBitmap);
-	}
+	if (!result.valid)
+		result = measure_with_dc(context, line, text, dc, false);
 
-	result_cache[line->Id] = { text, signature, result };
+	store_result(exact_result_cache, line->Id, { text, signature, result });
 	return result;
 }
 
@@ -867,50 +918,62 @@ Result CheckText(agi::Context *context, AssDialogue const *line, std::string con
 	if (OPT_GET("Subtitle/Overflow Highlight/Mode")->GetInt() == 1)
 		return check_with_character_limit(line, text);
 
-	auto signature = cache_signature(context, *line, true);
-	auto it = result_cache.find(line->Id);
-	if (it != result_cache.end() && it->second.text == text && it->second.signature == signature && it->second.result.valid)
-		return it->second.result;
-
+	auto signature = cache_signature(context, *line);
 	Result result;
-	if (dc) {
-		result = check_with_dc(context, line, text, *dc, true);
-	} else {
-		wxBitmap bmp(1, 1);
-		wxMemoryDC mem_dc;
-		mem_dc.SelectObject(bmp);
-		result = check_with_dc(context, line, text, mem_dc, true);
-		mem_dc.SelectObject(wxNullBitmap);
-	}
+	if (cache_hit(fast_result_cache, line->Id, text, signature, result))
+		return result;
 
-	// Use DC to locate character ranges, but let libass decide whether the
-	// rendered subtitle actually overflows. This preserves complex ASS layout
-	// semantics while retaining precise ranges for simple horizontal text.
+	// Keystroke path: never invoke libass here. The edit control schedules the
+	// authoritative CheckTextExact pass after a short idle debounce.
+	result = measure_with_dc(context, line, text, dc, true);
+	store_result(fast_result_cache, line->Id, { text, signature, result });
+	return result;
+}
+
+Result CheckTextExact(agi::Context *context, AssDialogue const *line, std::string const& text, wxDC *dc) {
+	if (!context || !line || line->Comment || !OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool())
+		return {};
+
+	if (OPT_GET("Subtitle/Overflow Highlight/Mode")->GetInt() == 1)
+		return check_with_character_limit(line, text);
+
+	auto signature = cache_signature(context, *line);
+	Result result;
+	if (cache_hit(exact_result_cache, line->Id, text, signature, result))
+		return result;
+
+	// Preserve character-level ranges from the provisional pass, but let libass
+	// make the final overflow decision.
+	if (!cache_hit(fast_result_cache, line->Id, text, signature, result))
+		result = measure_with_dc(context, line, text, dc, true);
+
 	auto rendered = check_with_libass(context, line, text);
 	if (rendered.valid) {
-		if (rendered.overflow) {
-			result.valid = true;
-			result.overflow = true;
-			if (result.ranges.empty() && !text.empty())
-				result.ranges.push_back({ 0, static_cast<int>(text.size()) });
-		}
-		else {
-			result.valid = true;
-			result.overflow = false;
+		result.valid = true;
+		result.overflow = rendered.overflow;
+		if (!rendered.overflow)
 			result.ranges.clear();
-		}
+		else if (result.ranges.empty() && !text.empty())
+			result.ranges.push_back({ 0, static_cast<int>(text.size()) });
 	}
 
-	result_cache[line->Id] = { text, signature, result };
+	store_result(exact_result_cache, line->Id, { text, signature, result });
 	return result;
 }
 
 void InvalidateLine(int id) {
-	result_cache.erase(id);
+	fast_result_cache.erase(id);
+	exact_result_cache.erase(id);
+}
+
+void InvalidateExactLine(int id) {
+	exact_result_cache.erase(id);
 }
 
 void InvalidateAll() {
-	result_cache.clear();
+	++cache_generation;
+	fast_result_cache.clear();
+	exact_result_cache.clear();
 	char_width_cache.clear();
 }
 

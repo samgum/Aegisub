@@ -30,6 +30,7 @@
 #include "subs_edit_ctrl.h"
 
 #include "ass_dialogue.h"
+#include "base_grid.h"
 #include "command/command.h"
 #include "compat.h"
 #include "format.h"
@@ -88,6 +89,7 @@ SubsTextEditCtrl::SubsTextEditCtrl(wxWindow* parent, wxSize wsize, long style, a
 , spellchecker(SpellCheckerFactory::GetSpellChecker())
 , thesaurus(std::make_unique<Thesaurus>())
 , context(context)
+, overflow_check_timer(this)
 {
 	osx::ime::inject(this);
 
@@ -128,6 +130,7 @@ SubsTextEditCtrl::SubsTextEditCtrl(wxWindow* parent, wxSize wsize, long style, a
 
 	Bind(wxEVT_CONTEXT_MENU, &SubsTextEditCtrl::OnContextMenu, this);
 	Bind(wxEVT_IDLE, std::bind(&SubsTextEditCtrl::UpdateCallTip, this));
+	Bind(wxEVT_TIMER, &SubsTextEditCtrl::OnOverflowCheckTimer, this, overflow_check_timer.GetId());
 	Bind(wxEVT_STC_DOUBLECLICK, &SubsTextEditCtrl::OnDoubleClick, this);
 	Bind(wxEVT_STC_STYLENEEDED, [this](wxStyledTextEvent&) {
 		{
@@ -178,6 +181,8 @@ SubsTextEditCtrl::SubsTextEditCtrl(wxWindow* parent, wxSize wsize, long style, a
 }
 
 SubsTextEditCtrl::~SubsTextEditCtrl() {
+	overflow_check_timer.Stop();
+	Unbind(wxEVT_TIMER, &SubsTextEditCtrl::OnOverflowCheckTimer, this, overflow_check_timer.GetId());
 }
 
 void SubsTextEditCtrl::Subscribe(std::string const& name) {
@@ -288,16 +293,47 @@ void SubsTextEditCtrl::SetStyles() {
 }
 
 void SubsTextEditCtrl::UpdateOverflowHighlight() {
-	SetIndicatorCurrent(2);
-	IndicatorClearRange(0, GetTextLength());
-
 	AssDialogue *diag = context ? context->selectionController->GetActiveLine() : nullptr;
 	auto result = subtitle_overflow::CheckText(context, diag, line_text);
+	ApplyOverflowHighlight(result);
+
+	overflow_check_timer.Stop();
+	overflow_pending_line_id = diag ? diag->Id : -1;
+	overflow_pending_text = line_text;
+	if (diag && OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool()
+	&& OPT_GET("Subtitle/Overflow Highlight/Mode")->GetInt() == 0)
+		overflow_check_timer.StartOnce(400);
+}
+
+void SubsTextEditCtrl::ApplyOverflowHighlight(subtitle_overflow::Result const& result) {
+	SetIndicatorCurrent(2);
+	IndicatorClearRange(0, GetTextLength());
 	if (!result.overflow)
 		return;
 
 	for (auto const& range : result.ranges)
 		IndicatorFillRange(range.start, range.length);
+}
+
+void SubsTextEditCtrl::OnOverflowCheckTimer(wxTimerEvent&) {
+	AssDialogue *diag = context ? context->selectionController->GetActiveLine() : nullptr;
+	std::string current_text = GetTextRaw().data();
+	if (!diag || diag->Id != overflow_pending_line_id
+	|| current_text != overflow_pending_text || line_text != overflow_pending_text
+	|| diag->Text.get() != overflow_pending_text)
+		return;
+
+	// Deliberately stay on the UI thread: libass snapshots AssFile state and the
+	// DC fallback uses wx objects, neither of which may be touched by a worker.
+	auto result = subtitle_overflow::CheckTextExact(context, diag, overflow_pending_text);
+	if (diag != context->selectionController->GetActiveLine()
+	|| GetTextRaw().data() != overflow_pending_text || line_text != overflow_pending_text
+	|| diag->Text.get() != overflow_pending_text)
+		return;
+
+	ApplyOverflowHighlight(result);
+	if (context->subsGrid)
+		context->subsGrid->Refresh(false);
 }
 
 void SubsTextEditCtrl::UpdateStyle() {

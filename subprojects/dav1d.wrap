@@ -1,7 +1,7 @@
 [wrap-git]
 directory = dav1d
 url = https://github.com/videolan/dav1d.git
-revision = head
+revision = 54706fc6bc0cdecab7e9593974a4039cc038fca7
 
 [provide]
 dav1d = dav1d_dep

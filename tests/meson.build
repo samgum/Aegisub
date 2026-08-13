@@ -25,6 +25,7 @@ tests_src = [
     'tests/format.cpp',
     'tests/fs.cpp',
     'tests/hotkey.cpp',
+	'tests/hdr_tonemap.cpp',
     'tests/iconv.cpp',
     'tests/ifind.cpp',
     'tests/inline_string_encoding.cpp',
@@ -69,6 +70,10 @@ runner = executable(
 
 test('gtest main', runner)
 test('luajit-52', executable('luajit-52', 'tests/luajit_52.c', dependencies: luajit))
+
+python = import('python').find_installation()
+test('source regressions', python,
+     args: [meson.project_source_root() / 'tools' / 'run_source_regressions.py'])
 
 # setup test env
 if host_machine.system() == 'windows'

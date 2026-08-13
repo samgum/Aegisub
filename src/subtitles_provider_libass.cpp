@@ -53,6 +53,7 @@
 #include <atomic>
 #include <boost/gil.hpp>
 #include <climits>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -152,6 +153,35 @@ int count_bands(std::vector<std::pair<int, int>>& bands) {
 		current_bottom = std::max(current_bottom, band.second);
 	}
 	return count;
+}
+
+// libass masks are usually sparse around glyph edges. Scan a machine word at
+// a time and only fall back to bytes for the word containing the first/last
+// covered pixel. memcpy keeps unaligned rows and strict aliasing safe.
+std::pair<int, int> nonzero_span(unsigned char const *row, int width) {
+	constexpr size_t word_size = sizeof(uint64_t);
+	int left = 0;
+	for (; left + static_cast<int>(word_size) <= width; left += static_cast<int>(word_size)) {
+		uint64_t word;
+		std::memcpy(&word, row + left, word_size);
+		if (word)
+			break;
+	}
+	for (; left < width && !row[left]; ++left) { }
+	if (left == width)
+		return {-1, -1};
+
+	int right = width;
+	while (right - static_cast<int>(word_size) >= left) {
+		uint64_t word;
+		std::memcpy(&word, row + right - word_size, word_size);
+		if (word)
+			break;
+		right -= static_cast<int>(word_size);
+	}
+	while (right > left && !row[right - 1])
+		--right;
+	return {left, right};
 }
 
 // Stuff used on the cache thread, owned by a shared_ptr in case the provider
@@ -327,15 +357,7 @@ RenderedBounds GetRenderedBounds(AssFile *subs, int time_ms, int width, int heig
 
 		for (int y = 0; y < img->h; ++y) {
 			auto row = img->bitmap + y * img->stride;
-			int row_left = -1;
-			int row_right = -1;
-			for (int x = 0; x < img->w; ++x) {
-				if (!row[x])
-					continue;
-				if (row_left < 0)
-					row_left = x;
-				row_right = x + 1;
-			}
+			auto [row_left, row_right] = nonzero_span(row, img->w);
 
 			if (row_left < 0)
 				continue;

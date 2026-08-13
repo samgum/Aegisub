@@ -233,7 +233,7 @@ check_deps = [
     ['portaudio-2.0', [], 'PortAudio', [], []],
     ['openal', '>=0.0.8', 'OpenAL', [], ['OpenAL']],
     # video
-    ['ffms2', '>=2.22', 'FFMS2', ['ffms2', 'ffms2_dep'], []],
+    ['ffms2', '>=5.0', 'FFMS2', ['ffms2', 'ffms2_dep'], []],
     # other
     ['fftw3', [], 'FFTW3', [], []],
     ['hunspell', [], 'Hunspell', ['hunspell', 'hunspell_dep'], []],

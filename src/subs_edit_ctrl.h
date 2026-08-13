@@ -33,6 +33,7 @@
 #include <string>
 #include <vector>
 #include <wx/stc/stc.h>
+#include <wx/timer.h>
 
 class Thesaurus;
 namespace agi {
@@ -40,6 +41,7 @@ namespace agi {
 	struct Context;
 	namespace ass { struct DialogueToken; }
 }
+namespace subtitle_overflow { struct Result; }
 
 /// @class SubsTextEditCtrl
 /// @brief A Scintilla control with spell checking and syntax highlighting
@@ -52,6 +54,11 @@ class SubsTextEditCtrl final : public wxStyledTextCtrl, private agi::signal::Con
 
 	/// Project context, for splitting lines
 	agi::Context *context;
+
+	/// Debounces the expensive libass overflow pass while the user is typing.
+	wxTimer overflow_check_timer;
+	int overflow_pending_line_id = -1;
+	std::string overflow_pending_text;
 
 	/// The word right-clicked on, used for spellchecker replacing
 	std::string currentWord;
@@ -96,6 +103,8 @@ class SubsTextEditCtrl final : public wxStyledTextCtrl, private agi::signal::Con
 	void StyleSpellCheck();
 	void UpdateCallTip();
 	void UpdateOverflowHighlight();
+	void ApplyOverflowHighlight(subtitle_overflow::Result const& result);
+	void OnOverflowCheckTimer(wxTimerEvent&);
 	void SetStyles();
 
 	void UpdateStyle();

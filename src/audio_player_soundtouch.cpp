@@ -29,6 +29,16 @@ int SoundTouchAudioProcessor::channels() const {
 	return provider->GetChannels();
 }
 
+double SoundTouchAudioProcessor::volume_for_fill() {
+	// SetVolume runs on the UI thread. Never wait for it in the real-time
+	// callback; one buffer at the previous level is preferable to blocking.
+	if (!volume_guard.test_and_set(std::memory_order_acquire)) {
+		active_volume = requested_volume;
+		volume_guard.clear(std::memory_order_release);
+	}
+	return active_volume;
+}
+
 void SoundTouchAudioProcessor::feed_more() {
 	if (input_frame >= end_frame) {
 		input_finished = true;
@@ -55,9 +65,13 @@ void SoundTouchAudioProcessor::feed_more() {
 
 void SoundTouchAudioProcessor::Reset(int64_t start, int64_t end, double speed, double vol) {
 	input_frame = start;
+	output_frame = start;
 	end_frame = end;
 	playback_speed = std::max(0.25, std::min(speed, 4.0));
-	volume = vol;
+	while (volume_guard.test_and_set(std::memory_order_acquire)) { }
+	requested_volume = vol;
+	active_volume = vol;
+	volume_guard.clear(std::memory_order_release);
 	input_finished = input_frame >= end_frame;
 	flushed = input_finished;
 	output_finished = input_finished;
@@ -70,12 +84,24 @@ void SoundTouchAudioProcessor::Reset(int64_t start, int64_t end, double speed, d
 }
 
 void SoundTouchAudioProcessor::SetEndFrame(int64_t end) {
+	if (end == end_frame)
+		return;
+
 	end_frame = end;
+	if (output_frame >= end_frame) {
+		output_frame = end_frame;
+		input_finished = input_frame >= end_frame;
+		output_finished = true;
+		return;
+	}
+
+	output_finished = false;
 	if (input_frame < end_frame) {
 		input_finished = false;
 		flushed = false;
-		output_finished = false;
 	}
+	else
+		input_finished = true;
 }
 
 void SoundTouchAudioProcessor::SetPlaybackSpeed(double speed) {
@@ -83,9 +109,23 @@ void SoundTouchAudioProcessor::SetPlaybackSpeed(double speed) {
 	processor->setTempo(playback_speed);
 }
 
+void SoundTouchAudioProcessor::SetVolume(double vol) {
+	// The caller is not the audio callback and may wait for its short read-side
+	// critical section. Only requested_volume is written here, so a callback
+	// which cannot acquire the guard can safely keep using active_volume.
+	while (volume_guard.test_and_set(std::memory_order_acquire)) { }
+	requested_volume = vol;
+	volume_guard.clear(std::memory_order_release);
+}
+
+int64_t SoundTouchAudioProcessor::GetOutputFrame() const {
+	return std::min(end_frame, static_cast<int64_t>(std::llround(output_frame)));
+}
+
 size_t SoundTouchAudioProcessor::Fill(void *dst, size_t frames_requested) {
 	auto bytes_per_frame = (size_t)channels() * provider->GetBytesPerSample();
 	auto out = static_cast<int16_t *>(dst);
+	auto volume = volume_for_fill();
 
 	if (frames_requested == 0)
 		return 0;
@@ -100,9 +140,10 @@ size_t SoundTouchAudioProcessor::Fill(void *dst, size_t frames_requested) {
 			memset(out + available * channels(), 0, (frames_requested - available) * bytes_per_frame);
 
 		input_frame += available;
+		output_frame += available;
 		input_finished = input_frame >= end_frame;
 		output_finished = input_finished;
-		return frames_requested;
+		return available;
 	}
 
 	size_t filled = 0;
@@ -110,7 +151,14 @@ size_t SoundTouchAudioProcessor::Fill(void *dst, size_t frames_requested) {
 		output_buffer.resize(frames_requested * channels());
 
 	while (filled < frames_requested && !output_finished) {
-		auto got = processor->receiveSamples(output_buffer.data(), (unsigned int)(frames_requested - filled));
+		auto remaining_source = std::max(0.0, end_frame - output_frame);
+		if (remaining_source == 0.0) {
+			output_finished = true;
+			break;
+		}
+		auto remaining_output = static_cast<size_t>(std::ceil(remaining_source / playback_speed));
+		auto requested = std::min(frames_requested - filled, remaining_output);
+		auto got = processor->receiveSamples(output_buffer.data(), (unsigned int)requested);
 		if (got) {
 			AudioSampleSafety::ConvertFloatToInt16Limited(
 				out + filled * channels(),
@@ -118,6 +166,9 @@ size_t SoundTouchAudioProcessor::Fill(void *dst, size_t frames_requested) {
 				(size_t)got * channels(),
 				volume);
 			filled += got;
+			output_frame = std::min<double>(end_frame, output_frame + got * playback_speed);
+			if (output_frame >= end_frame)
+				output_finished = true;
 			continue;
 		}
 
@@ -133,12 +184,13 @@ size_t SoundTouchAudioProcessor::Fill(void *dst, size_t frames_requested) {
 		}
 
 		output_finished = true;
+		output_frame = end_frame;
 	}
 
 	if (filled < frames_requested)
 		memset(out + filled * channels(), 0, (frames_requested - filled) * bytes_per_frame);
 
-	return frames_requested;
+	return filled;
 }
 
 #endif // WITH_SOUNDTOUCH

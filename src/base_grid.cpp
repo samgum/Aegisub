@@ -149,7 +149,10 @@ void BaseGrid::OnSubtitlesCommit(int type, const AssDialogue *single_line) {
 	if (type == AssFile::COMMIT_NEW || type & AssFile::COMMIT_ORDER || type & AssFile::COMMIT_DIAG_ADDREM)
 		UpdateMaps();
 
-	if (type == AssFile::COMMIT_NEW || type & AssFile::COMMIT_SCRIPTINFO || type & AssFile::COMMIT_STYLES || type & AssFile::COMMIT_DIAG_FULL)
+	if (type == AssFile::COMMIT_NEW
+	|| type & (AssFile::COMMIT_SCRIPTINFO | AssFile::COMMIT_STYLES | AssFile::COMMIT_ATTACHMENT
+		| AssFile::COMMIT_EXTRADATA | AssFile::COMMIT_DIAG_ADDREM)
+	|| (type & AssFile::COMMIT_DIAG_FULL) == AssFile::COMMIT_DIAG_FULL)
 		subtitle_overflow::InvalidateAll();
 
 	if (type & AssFile::COMMIT_DIAG_META) {
@@ -165,8 +168,13 @@ void BaseGrid::OnSubtitlesCommit(int type, const AssDialogue *single_line) {
 		Refresh(false);
 	}
 	else if (type & AssFile::COMMIT_DIAG_TEXT) {
-		if (single_line)
-			subtitle_overflow::InvalidateLine(single_line->Id);
+		if (single_line) {
+			auto active_line = context->selectionController->GetActiveLine();
+			if (active_line && active_line->Id == single_line->Id)
+				subtitle_overflow::InvalidateExactLine(single_line->Id);
+			else
+				subtitle_overflow::InvalidateLine(single_line->Id);
+		}
 		else
 			subtitle_overflow::InvalidateAll();
 		if (OPT_GET("Subtitle/Overflow Highlight/Enabled")->GetBool()) {

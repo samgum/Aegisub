@@ -20,7 +20,9 @@
 #include "video_frame.h"
 
 
+#include <iterator>
 #include <list>
+#include <unordered_map>
 
 namespace {
 /// A video frame and its frame number
@@ -37,6 +39,7 @@ struct CachedFrame {
 /// @class VideoProviderCache
 /// @brief A wrapper around a video provider which provides LRU caching
 class VideoProviderCache final : public VideoProvider {
+	using Cache = std::list<CachedFrame>;
 	/// The source provider to get frames from
 	std::unique_ptr<VideoProvider> master;
 
@@ -47,7 +50,9 @@ class VideoProviderCache final : public VideoProvider {
 	const size_t max_cache_size = OPT_GET("Provider/Video/Cache/Size")->GetInt() << 20; // convert MB to bytes
 
 	/// Cache of video frames with the most recently used ones at the front
-	std::list<CachedFrame> cache;
+	Cache cache;
+	std::unordered_map<int, Cache::iterator> index;
+	size_t total_size = 0;
 
 public:
 	VideoProviderCache(std::unique_ptr<VideoProvider> master) : master(std::move(master)) { }
@@ -56,6 +61,8 @@ public:
 
 	void SetColorSpace(std::string const& m) override {
 		cache.clear();
+		index.clear();
+		total_size = 0;
 		return master->SetColorSpace(m);
 	}
 
@@ -74,16 +81,12 @@ public:
 };
 
 void VideoProviderCache::GetFrame(int n, VideoFrame &out) {
-	size_t total_size = 0;
-
-	for (auto cur = cache.begin(); cur != cache.end(); ++cur) {
-		if (cur->frame_number == n) {
-			cache.splice(cache.begin(), cache, cur); // Move to front
-			out = cache.front().frame;
-			return;
-		}
-
-		total_size += cur->frame.data.size();
+	auto hit = index.find(n);
+	if (hit != index.end()) {
+		cache.splice(cache.begin(), cache, hit->second); // Move to front
+		hit->second = cache.begin();
+		out = hit->second->frame;
+		return;
 	}
 
 	master->GetFrame(n, out);
@@ -93,18 +96,20 @@ void VideoProviderCache::GetFrame(int n, VideoFrame &out) {
 	if (max_cache_size == 0)
 		return;
 
-	if (cache.empty()) {
-		// First frame ever, or cache was cleared: just add it. The
-		// '--cache.end()' below is UB on an empty list, so guard explicitly.
-		cache.emplace_front(out, n);
+	// Keep the exact byte budget when possible. A single oversized frame is
+	// still cached (the documented soft-limit behavior), but never alongside
+	// stale entries. This also makes duplicate frame numbers impossible.
+	auto frame_size = out.data.size();
+	while (!cache.empty() && (total_size > max_cache_size || frame_size > max_cache_size - total_size)) {
+		auto victim = std::prev(cache.end());
+		total_size -= victim->frame.data.size();
+		index.erase(victim->frame_number);
+		cache.erase(victim);
 	}
-	else if (total_size >= max_cache_size) {
-		cache.splice(cache.begin(), cache, --cache.end()); // Move last to front
-		cache.front().frame_number = n;
-		cache.front().frame = out;
-	}
-	else
-		cache.emplace_front(out, n);
+
+	cache.emplace_front(out, n);
+	index.emplace(n, cache.begin());
+	total_size += frame_size;
 }
 }
 

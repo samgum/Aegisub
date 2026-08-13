@@ -1,292 +1,195 @@
 #pragma once
 
-// CPU HDR tone-mapping for video preview.
-//
-// Aegisub's display pipeline is 8-bit BGRA end to end (the OpenGL renderer in
-// video_out_gl.cpp hard-codes GL_BGRA_EXT + GL_UNSIGNED_BYTE), so HDR content
-// (10-bit PQ/HLG BT.2020) would otherwise be crushed to SDR by libswscale's
-// default behaviour, producing a dark, washed-out preview.
-//
-// This module maps HDR frames down to a viewable SDR/BT.709 image on the CPU,
-// working from 16-bit rgb48le data so highlight detail is preserved through
-// the tone-map before being quantized to 8-bit. The math is self-contained:
-// no FFMS2 or ffmpeg types are referenced here, so it compiles and is unit
-// testable independently of the media backend.
-//
-// PERFORMANCE
-// The naive per-pixel formulation calls std::pow ~9 times per pixel (PQ EOTF
-// + display gamma), and a 4K frame has ~8.3M pixels — that is tens of millions
-// of transcendental ops per frame and makes preview playback unusably slow.
-// We eliminate essentially all of that with two precomputed lookup tables
-// built once per source in BuildToneMapper():
-//   * eotf_lut_[65536] maps every possible 16-bit channel value straight to a
-//     tone-mapped linear-light value, folding in the PQ/HLG EOTF, reference
-//     white normalization and the Reinhardt tone-map. 65536 floats = 256KB,
-//     built once, reused for every frame.
-//   * gamma_lut_[1024] maps a quantized linear value back to an 8-bit display
-//     code, folding in the 1/gamma encoding.
-// The BT.2020->BT.709 gamut step cannot be folded into a 1D LUT (it mixes
-// channels), so it stays as 9 multiplies per pixel — cheap relative to the
-// transcendentals it replaces.
-// After LUT-ification each pixel is: 3 table reads + 9 multiplies + 3 clamps
-// + 3 table reads, i.e. no transcendentals at all in the hot loop.
-//
-// This is a *preview* tone-map, not a reference HDR renderer: it exists so HDR
-// footage can be opened and timed in Aegisub with recognizable colour, rather
-// than a near-black frame.
+// Preview-grade HDR10/HLG to SDR tone mapping used by the FFmpegSource video
+// provider. Dolby Vision reshaping is deliberately out of scope: an RPU is not
+// a fixed colour matrix and profiles without a standard HDR base layer cannot
+// be rendered correctly by this code.
 
 #include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstdint>
 #include <cstddef>
-#include <vector>
+#include <cstdint>
 
 namespace HDRTonemap {
 
-// AVColorTransferCharacteristic / AVColorPrimaries values (libavutil). PQ and
-// HLG are the two HDR transfer functions in the wild; BT.2020 is the wide
-// colour gamut primaries used by essentially all UHD/HDR content.
-constexpr int kTransferPQ        = 16;  // SMPTE ST 2084 (PQ / Dolby Vision HDR10)
-constexpr int kTransferHLG       = 18;  // ARIB STD-B67 (HLG / BBC HDR)
-constexpr int kPrimariesBT2020   = 9;
-constexpr int kPrimariesBT709    = 1;
+constexpr int kTransferPQ = 16;   // SMPTE ST 2084
+constexpr int kTransferHLG = 18;  // ARIB STD-B67
 
-// Reference white levels (cd/m^2). 203 nits is the HDR reference white from
-// BT.2408; we map it to SDR white so the preview's midtones land where a
-// viewer expects them.
-constexpr double kSdrWhiteNits   = 203.0;
-constexpr double kPqPeakNits     = 10000.0;   // PQ is defined up to 10 000 nits
-
-// --- SMPTE ST 2084 (PQ) EOTF constants (BT.1886 / SMPTE 2084-1) -----------
-constexpr double kPqM1 = 0.1593017578125;
-constexpr double kPqM2 = 78.84375;
-constexpr double kPqC1 = 0.8359375;
-constexpr double kPqC2 = 18.8515625;
-constexpr double kPqC3 = 18.6875;
-
-// --- ARIB STD-B67 (HLG) constants ----------------------------------------
-constexpr double kHlgA = 0.17883277;
-constexpr double kHlgB = 0.28466892;
-constexpr double kHlgC = 0.55991073;
-
-// Display gamma applied after tone-mapping (BT.1886-like / sRGB approximation).
-constexpr double kDisplayGamma = 2.4;
-
-// Linear-light resolution used for the inverse (gamma) LUT. 1024 steps is far
-// finer than 8-bit output and keeps the LUT tiny (1KB).
-constexpr int kGammaLutSize = 1024;
-
-// BT.2020 (linear) -> BT.709 (linear) primaries, 3x3 matrix.
-// Source: ITU-R BT.2087 / standard chromatic adaptation. Applied per-channel
-// after EOTF so the wide-gamut colour is brought into the sRGB/Rec.709 cube
-// the 8-bit preview targets.
-constexpr std::array<double, 9> kBT2020To709 = {
-	1.6605, -0.5876, -0.0728,
-	-0.1246, 1.1329, -0.0083,
-	-0.0182, -0.1006, 1.1187
-};
-
-// True when a source's transfer function is an HDR curve that needs tone-mapping.
-// We key off the transfer function rather than the primaries: BT.2020 is also
-// used by SDR UHD content, which must NOT be tone-mapped.
 inline bool IsHDRSource(int transfer, int primaries) {
-	(void)primaries;  // reserved for future per-gamut handling
+	(void)primaries;
 	return transfer == kTransferPQ || transfer == kTransferHLG;
 }
 
-// --- Scalar EOTF / tone-map primitives (used to build the LUTs) -----------
+class ToneMapper {
+	static constexpr size_t kLutSize = 65536;
+	static constexpr size_t kHlgLutSize = 4097;
 
-// SMPTE ST 2084 (PQ) inverse EOTF: normalized signal e ([0,1]) -> linear cd/m^2.
-inline double PQEOTF(double e) {
-	if (e <= 0.0)
-		return 0.0;
-	if (e >= 1.0)
-		return kPqPeakNits;
-	double ep = std::pow(e, 1.0 / kPqM2);
-	double num = std::max(ep - kPqC1, 0.0);
-	double den = kPqC2 - kPqC3 * ep;
-	if (den <= 0.0)
-		return kPqPeakNits;
-	return kPqPeakNits * std::pow(num / den, 1.0 / kPqM1);
-}
+	int transfer_ = kTransferPQ;
+	bool convert_bt2020_ = true;
+	float source_peak_nits_ = 1000.0f;
+	std::array<float, kLutSize> eotf_{};
+	std::array<float, kLutSize> srgb_codes_{};
+	std::array<float, kHlgLutSize> hlg_scale_{};
 
-// HLG (ARIB STD-B67) scene-light to display-light, normalized so the OETF
-// input range [0,1] maps to display light with 1.0 == reference white after
-// applying the nominal 1000-nit system gamma. Input e is the OETF signal.
-inline double HLGOOTF(double e) {
-	if (e <= 0.0)
-		return 0.0;
-	double scene;  // scene-referred linear, relative to reference white
-	if (e <= 0.5)
-		scene = (e * e) / (3.0 * kHlgC);
-	else
-		scene = (std::exp((e - kHlgC) / kHlgA) + kHlgB) / 12.0;
-	// System gamma for a ~1000 nit reference display: 1.2
-	constexpr double kHlgSystemGamma = 1.2;
-	return scene > 0.0 ? std::pow(scene, kHlgSystemGamma - 1.0) * scene : 0.0;
-}
+	static float SRGBOETF(float linear) {
+		linear = std::clamp(linear, 0.0f, 1.0f);
+		return linear <= 0.0031308f ? 12.92f * linear
+			: 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
+	}
 
-// Map a linear-light value (normalized so 1.0 == 1000 nits, the preview
-// ceiling) to a displayable [0,1] value. Values up to 0.75 (~750 nits) pass
-// through linearly so SDR-range content looks correct; highlights above that
-// roll off gently toward 1.0 via an exponential curve so specular detail is
-// preserved instead of hard-clipped. This is far more natural for an SDR
-// preview of HDR content than Reinhardt, which lifts midtones too much.
-inline double ToneMapReinhardt(double l, double peak) {
-	(void)peak;
-	if (l <= 0.0)
-		return 0.0;
-	if (l <= 0.75)
-		return l;
-	// Exponential highlight roll-off: at l=0.75 returns 0.75, approaches 1.0
-	// asymptotically. k=3 gives a gentle knee visible over ~2 stops.
-	return 1.0 - 0.25 * std::exp(-3.0 * (l - 0.75));
-}
+	float HLGScale(float scene_luma) const {
+		scene_luma = std::clamp(scene_luma, 0.0f, 1.0f);
+		float pos = scene_luma * (kHlgLutSize - 1);
+		size_t lo = static_cast<size_t>(pos);
+		size_t hi = std::min(lo + 1, kHlgLutSize - 1);
+		float fraction = pos - lo;
+		return hlg_scale_[lo] + (hlg_scale_[hi] - hlg_scale_[lo]) * fraction;
+	}
 
-// Apply the BT.2020 -> BT.709 gamut matrix in place. Cheap (9 mul), kept as
-// scalar math because it mixes channels and cannot be folded into a 1D LUT.
-// Float version: the hot path runs entirely in float so the compiler can
-// vectorize it (SSE/AVX), and float precision is far more than enough for an
-// 8-bit output target.
-inline void ApplyGamut(float &r, float &g, float &b, const float *m) {
-	float nr = m[0] * r + m[1] * g + m[2] * b;
-	float ng = m[3] * r + m[4] * g + m[5] * b;
-	float nb = m[6] * r + m[7] * g + m[8] * b;
-	r = nr; g = ng; b = nb;
-}
+	static void CompressGamut(float luma, float& r, float& g, float& b) {
+		luma = std::clamp(luma, 0.0f, 1.0f);
+		float amount = 1.0f;
+		for (float channel : {r, g, b}) {
+			if (channel < 0.0f && channel < luma)
+				amount = std::min(amount, luma / (luma - channel));
+			else if (channel > 1.0f && channel > luma)
+				amount = std::min(amount, (1.0f - luma) / (channel - luma));
+		}
+		r = luma + amount * (r - luma);
+		g = luma + amount * (g - luma);
+		b = luma + amount * (b - luma);
+	}
 
-/// Precomputed tables for one HDR source. Build once (BuildToneMapper) and
-/// reuse for every frame of that source; building is ~65536 pow calls which
-/// is ~5ms, paid once at open time instead of per frame.
-struct ToneMapper {
-	/// eotf_lut[v] = tone-mapped linear-light value for a 16-bit channel
-	/// input v (0..65535). Folds in EOTF + reference-white normalization +
-	/// Reinhardt tone-map so the per-frame loop needs no transcendentals.
-	std::vector<float> eotf_lut;  // size 65536
+	float ToneMapLuma(float nits) const {
+		if (nits <= 0.0f) return 0.0f;
+		// Extended Reinhard in units of SDR reference white (203 nit). It is
+		// continuous and monotonic, reaches display white at the trusted source
+		// peak, and retains highlight separation above reference white.
+		constexpr float reference_white = 203.0f;
+		float x = nits / reference_white;
+		float white = source_peak_nits_ / reference_white;
+		return x * (1.0f + x / (white * white)) / (1.0f + x);
+	}
 
-	/// gamma_lut[i] = 8-bit display code for a quantized linear value
-	/// i / (kGammaLutSize - 1). Folds in the 1/gamma encoding.
-	std::vector<uint8_t> gamma_lut;  // size kGammaLutSize
+	static uint16_t ReadLE16(uint8_t const* data) {
+		return static_cast<uint16_t>(data[0] | (static_cast<uint16_t>(data[1]) << 8));
+	}
 
-	/// BT.2020->BT.709 matrix in float for the vectorizable hot path.
-	std::array<float, 9> gamut{};
+public:
+	ToneMapper(int transfer = kTransferPQ, bool convert_bt2020 = true, int max_cll = 0)
+	: transfer_(transfer)
+	, convert_bt2020_(convert_bt2020)
+	{
+		// Content-light metadata is frequently absent or malformed. Values below
+		// SDR reference white and values outside PQ's defined range are ignored.
+		// PQ is absolute-light content, so a trustworthy MaxCLL can define the
+		// highlight shoulder. HLG is scene-referred; this preview deliberately
+		// uses the nominal BT.2100 1000-nit OOTF below, so applying MaxCLL only
+		// to its shoulder would make the two halves of that transform disagree.
+		if (transfer_ == kTransferPQ && max_cll >= 203 && max_cll <= 10000)
+			source_peak_nits_ = static_cast<float>(max_cll);
 
-	int transfer = -1;
-	int primaries = -1;
-	bool needs_gamut = false;
+		for (size_t i = 0; i < kLutSize; ++i) {
+			float code = static_cast<float>(i) / (kLutSize - 1);
+			eotf_[i] = transfer_ == kTransferHLG ? HLGInverseOETF(code) : PQEOTF(code);
+			srgb_codes_[i] = 255.0f * SRGBOETF(code);
+		}
+		for (size_t i = 0; i < kHlgLutSize; ++i) {
+			float luma = static_cast<float>(i) / (kHlgLutSize - 1);
+			// BT.2100 HLG system gamma for a nominal 1000-nit display is 1.2.
+			hlg_scale_[i] = 1000.0f * std::pow(luma, 0.2f);
+		}
+	}
 
-	/// Look up the tone-mapped linear value for a 16-bit channel.
-	inline float EOTF(uint16_t v) const { return eotf_lut[v]; }
+	static float PQEOTF(float code) {
+		constexpr float m1 = 2610.0f / 16384.0f;
+		constexpr float m2 = 2523.0f / 32.0f;
+		constexpr float c1 = 3424.0f / 4096.0f;
+		constexpr float c2 = 2413.0f / 128.0f;
+		constexpr float c3 = 2392.0f / 128.0f;
+		code = std::clamp(code, 0.0f, 1.0f);
+		float p = std::pow(code, 1.0f / m2);
+		float numerator = std::max(p - c1, 0.0f);
+		return 10000.0f * std::pow(numerator / (c2 - c3 * p), 1.0f / m1);
+	}
 
-	/// Encode a clamped [0,1] linear value to 8-bit via the gamma LUT.
-	/// Float throughout so the hot loop stays in one FP width.
-	inline uint8_t Encode(float l) const {
-		if (l <= 0.0f) return gamma_lut[0];
-		if (l >= 1.0f) return gamma_lut[kGammaLutSize - 1];
-		int idx = static_cast<int>(l * (kGammaLutSize - 1) + 0.5f);
-		return gamma_lut[idx];
+	static float HLGInverseOETF(float code) {
+		constexpr float a = 0.17883277f;
+		constexpr float b = 0.28466892f;
+		constexpr float c = 0.55991073f;
+		code = std::clamp(code, 0.0f, 1.0f);
+		return code <= 0.5f ? code * code / 3.0f
+			: (std::exp((code - c) / a) + b) / 12.0f;
+	}
+
+	uint8_t EncodeLinear(float linear, int x, int y) const {
+		static constexpr uint8_t bayer[8][8] = {
+			{ 0, 48, 12, 60,  3, 51, 15, 63},
+			{32, 16, 44, 28, 35, 19, 47, 31},
+			{ 8, 56,  4, 52, 11, 59,  7, 55},
+			{40, 24, 36, 20, 43, 27, 39, 23},
+			{ 2, 50, 14, 62,  1, 49, 13, 61},
+			{34, 18, 46, 30, 33, 17, 45, 29},
+			{10, 58,  6, 54,  9, 57,  5, 53},
+			{42, 26, 38, 22, 41, 25, 37, 21},
+		};
+		linear = std::clamp(linear, 0.0f, 1.0f);
+		size_t index = static_cast<size_t>(linear * (kLutSize - 1) + 0.5f);
+		float dither = (static_cast<float>(bayer[y & 7][x & 7]) + 0.5f) / 64.0f - 0.5f;
+		return static_cast<uint8_t>(std::clamp(std::floor(srgb_codes_[index] + dither + 0.5f), 0.0f, 255.0f));
+	}
+
+	void ToneMapPixel(uint16_t r16, uint16_t g16, uint16_t b16, int x, int y,
+		uint8_t& b8, uint8_t& g8, uint8_t& r8) const {
+		float r = eotf_[r16];
+		float g = eotf_[g16];
+		float b = eotf_[b16];
+
+		if (transfer_ == kTransferHLG) {
+			float scene_luma = 0.2627f * r + 0.6780f * g + 0.0593f * b;
+			float scale = HLGScale(scene_luma);
+			r *= scale; g *= scale; b *= scale;
+		}
+
+		if (convert_bt2020_) {
+			float rr =  1.660491f * r - 0.587641f * g - 0.072850f * b;
+			float gg = -0.124550f * r + 1.132900f * g - 0.008349f * b;
+			float bb = -0.018151f * r - 0.100579f * g + 1.118730f * b;
+			r = rr; g = gg; b = bb;
+		}
+
+		float luma_nits = std::max(0.0f, 0.2126f * r + 0.7152f * g + 0.0722f * b);
+		float mapped_luma = ToneMapLuma(luma_nits);
+		if (luma_nits > 1e-8f) {
+			float scale = mapped_luma / luma_nits;
+			r *= scale; g *= scale; b *= scale;
+		}
+		else {
+			r = g = b = 0.0f;
+		}
+		CompressGamut(mapped_luma, r, g, b);
+		r8 = EncodeLinear(r, x, y);
+		g8 = EncodeLinear(g, x, y);
+		b8 = EncodeLinear(b, x, y);
+	}
+
+	void ToneMapRGB48toBGRA8(uint8_t const* source, ptrdiff_t source_stride,
+		uint8_t* destination, ptrdiff_t destination_stride, int width, int height) const {
+		for (int y = 0; y < height; ++y) {
+			auto src = source + y * source_stride;
+			auto dst = destination + y * destination_stride;
+			for (int x = 0; x < width; ++x) {
+				uint8_t b, g, r;
+				ToneMapPixel(ReadLE16(src + 0), ReadLE16(src + 2), ReadLE16(src + 4), x, y, b, g, r);
+				dst[4 * x + 0] = b;
+				dst[4 * x + 1] = g;
+				dst[4 * x + 2] = r;
+				dst[4 * x + 3] = 255;
+				src += 6;
+			}
+		}
 	}
 };
 
-/// Build the LUTs for a given source. Expensive (~5ms) but called once per
-/// opened video, not per frame. Returns a ready ToneMapper; for non-HDR
-/// sources the result is unused (the provider keeps the bgra fast path).
-inline ToneMapper BuildToneMapper(int transfer, int primaries, int max_cll) {
-	ToneMapper tm;
-	tm.transfer = transfer;
-	tm.primaries = primaries;
-	tm.needs_gamut = (primaries == kPrimariesBT2020);
-
-	// Tone-map peak (unused by the soft-clip operator now, kept for the LUT
-	// build signature and future per-source tuning).
-	const double peak = (max_cll > 0 ? static_cast<double>(max_cll) : 1000.0) / kSdrWhiteNits;
-
-	tm.eotf_lut.resize(65536);
-	// Normalize display-linear light to the preview ceiling (1000 nits), so
-	// 1.0 == 1000 nits. The soft-clip operator then lets SDR-range content
-	// (< ~200 nits = 0.2) pass nearly linearly while HDR highlights roll off.
-	// This puts reference white (203 nits) at ~0.2 linear, which gamma-encodes
-	// to roughly mid-gray — the correct SDR preview appearance.
-	for (int v = 0; v < 65536; ++v) {
-		double e = static_cast<double>(v) / 65535.0;
-		double lin;
-		if (transfer == kTransferPQ)
-			lin = PQEOTF(e) / 1000.0;
-		else  // HLG: OOTF returns display-linear (peak 1.0 == 1000 nits).
-			lin = HLGOOTF(e);
-		tm.eotf_lut[v] = static_cast<float>(ToneMapReinhardt(lin, peak));
-	}
-
-	// Gamma LUT over the post-tone-map [0,1] range.
-	tm.gamma_lut.resize(kGammaLutSize);
-	for (int i = 0; i < kGammaLutSize; ++i) {
-		double l = static_cast<double>(i) / (kGammaLutSize - 1);
-		double v = std::pow(l, 1.0 / kDisplayGamma);
-		tm.gamma_lut[i] = static_cast<uint8_t>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0));
-	}
-
-	// Float copy of the gamut matrix for the vectorizable hot path.
-	for (int i = 0; i < 9; ++i)
-		tm.gamut[i] = static_cast<float>(kBT2020To709[i]);
-
-	return tm;
-}
-
-/// Tone-map a full rgb48le frame (6 bytes/pixel) into an 8-bit BGRA buffer
-/// (4 bytes/pixel) using a prebuilt ToneMapper. This is the per-frame hot
-/// path: no std::pow calls, no double<->float conversions — the whole loop
-/// runs in float so the compiler can vectorize it, and pointer increments
-/// avoid repeated index multiplication.
-///
-/// `src_stride_bytes` is the byte distance between the start of consecutive
-/// source rows (FFMS Linesize[0]); swscale usually pads rows to a SIM
-/// alignment boundary so this is >= 6*width. `dst` is written tightly packed
-/// (4 bytes/pixel, no padding).
-inline void ToneMapRGB48toBGRA8(const ToneMapper &tm,
-                                const uint16_t *src, size_t src_stride_bytes,
-                                uint8_t *dst, int width, int height) {
-	if (!src || !dst || width <= 0 || height <= 0)
-		return;
-
-	const float *m = tm.gamut.data();
-	const bool gamut = tm.needs_gamut;
-	const uint8_t *gl = tm.gamma_lut.data();
-	const float *el = tm.eotf_lut.data();
-	// Source row step in uint16_t units (bytes/2). Each row is 3*width pixels.
-	const size_t src_stride = src_stride_bytes / sizeof(uint16_t);
-
-	// Process row by row so we honour the source stride; within a row we walk
-	// src/dst with raw pointers so the loop body has no integer multiply for
-	// addressing. This is the shape the autovectorizer can turn into packed
-	// SSE/AVX instructions.
-	const char *src_bytes = reinterpret_cast<const char *>(src);
-	for (int y = 0; y < height; ++y) {
-		const uint16_t *sp = reinterpret_cast<const uint16_t *>(src_bytes + y * src_stride_bytes);
-		uint8_t *dp = dst + static_cast<size_t>(y) * width * 4;
-		for (int x = 0; x < width; ++x) {
-			// rgb48le layout per pixel: R16, G16, B16 (little-endian).
-			float r = el[sp[0]];
-			float g = el[sp[1]];
-			float b = el[sp[2]];
-			sp += 3;
-
-			if (gamut)
-				ApplyGamut(r, g, b, m);
-
-			// Clamp to [0,1] then gamma-encode. Manual min/max is branchless and
-			// avoids the std::clamp template overhead in the hot loop.
-			if (r < 0.0f) r = 0.0f; else if (r > 1.0f) r = 1.0f;
-			if (g < 0.0f) g = 0.0f; else if (g > 1.0f) g = 1.0f;
-			if (b < 0.0f) b = 0.0f; else if (b > 1.0f) b = 1.0f;
-
-			dp[0] = gl[static_cast<int>(b * (kGammaLutSize - 1) + 0.5f)];   // B
-			dp[1] = gl[static_cast<int>(g * (kGammaLutSize - 1) + 0.5f)];   // G
-			dp[2] = gl[static_cast<int>(r * (kGammaLutSize - 1) + 0.5f)];   // R
-			dp[3] = 255;                                                    // A
-			dp += 4;
-		}
-	}
-}
-
-}  // namespace HDRTonemap
+} // namespace HDRTonemap

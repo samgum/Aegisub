@@ -38,6 +38,7 @@
 #include <unicode/translit.h>
 #include <unicode/unistr.h>
 
+#include <boost/algorithm/string/predicate.hpp>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -47,6 +48,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -70,6 +72,42 @@
 namespace {
 wxString format_seconds(int ms) {
 	return wxString::Format("%.3f", ms / 1000.0);
+}
+
+bool is_ass_whitespace_only(AssDialogue const& line) {
+	auto const& effect = line.Effect.get();
+	if (boost::istarts_with(effect, "template"))
+		return false;
+
+	for (auto const& block : line.ParseTags()) {
+		if (block->GetType() == AssBlockType::DRAWING)
+			return false;
+		if (block->GetType() != AssBlockType::PLAIN)
+			continue;
+
+		auto const& text = static_cast<AssDialogueBlockPlain const *>(block.get())->text;
+		for (size_t i = 0; i < text.size();) {
+			unsigned char c = text[i];
+			if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+				++i;
+				continue;
+			}
+			if (i + 2 < text.size() && c == 0xE3
+			    && static_cast<unsigned char>(text[i + 1]) == 0x80
+			    && static_cast<unsigned char>(text[i + 2]) == 0x80) {
+				i += 3;
+				continue;
+			}
+			// ASS hard spaces and explicit line breaks have no visible glyph.
+			if (c == '\\' && i + 1 < text.size()
+			    && (text[i + 1] == 'h' || text[i + 1] == 'N' || text[i + 1] == 'n')) {
+				i += 2;
+				continue;
+			}
+			return false;
+		}
+	}
+	return true;
 }
 
 wxString get_history_string(json::Object& obj) {
@@ -2728,18 +2766,43 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 
 	int n_overlap = 0, n_gap = 0, n_short = 0, n_long = 0, n_empty = 0, n_trim = 0;
 
-	// --- Timing fixes: need the full ordered event list to compare neighbours.
-	// Build an index of every dialogue (not just the selection) so we can find
-	// the next line after each target even when only some rows are selected.
+	bool all_rows = selection_mode->GetSelection() == 0;
+	std::unordered_set<AssDialogue *> targets(lines.begin(), lines.end());
+	auto in_target = [&](AssDialogue *d) {
+		return all_rows || targets.count(d) != 0;
+	};
+
+	// --- Per-line duration fixes. Do these before neighbour fixes so extending a
+	// short line cannot reintroduce an overlap which was already removed.
+	for (auto line : lines) {
+		if (line->Comment)
+			continue;
+
+		int start = line->Start;
+		int dur = line->End - start;
+
+		if (do_short_dur && dur < min_dur) {
+			line->End = start + min_dur;
+			++n_short;
+		}
+		else if (do_long_dur && dur > max_dur) {
+			line->End = start + max_dur;
+			++n_long;
+		}
+	}
+
+	// --- Neighbour timing fixes. File/row order is not necessarily temporal;
+	// compare a stable start-time ordering and omit comment rows entirely so a
+	// comment cannot hide an overlap between the surrounding dialogue rows.
 	std::vector<AssDialogue *> all;
 	all.reserve(context->ass->Events.size());
-	for (auto& line : context->ass->Events)
-		all.push_back(&line);
-
-	auto in_target = [&](AssDialogue *d) {
-		if (selection_mode->GetSelection() == 0) return true;
-		return std::find(lines.begin(), lines.end(), d) != lines.end();
-	};
+	for (auto& line : context->ass->Events) {
+		if (!line.Comment)
+			all.push_back(&line);
+	}
+	std::stable_sort(all.begin(), all.end(), [](AssDialogue const *lhs, AssDialogue const *rhs) {
+		return lhs->Start < rhs->Start;
+	});
 
 	if (do_overlaps || do_short_gap) {
 		for (size_t i = 0; i + 1 < all.size(); ++i) {
@@ -2747,16 +2810,16 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 			AssDialogue *nxt = all[i + 1];
 			int cur_end = cur->End;
 			int nxt_start = nxt->Start;
-			if (cur->Comment || nxt->Comment)
-				continue;
 
 			// Overlap: current end is after next start.
 			if (do_overlaps && cur_end > nxt_start) {
-				if (in_target(cur)) {
+				// Equal-start rows cannot be separated by trimming the current end;
+				// leave them unchanged rather than creating a zero-length row.
+				if (nxt_start > cur->Start && in_target(cur)) {
 					cur->End = nxt_start;
+					cur_end = cur->End;
 					++n_overlap;
 				}
-				cur_end = nxt_start;
 			}
 
 			// Short gap: the (possibly corrected) gap is below the minimum.
@@ -2774,22 +2837,17 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 		}
 	}
 
-	// --- Per-line duration + text fixes.
-	for (auto line : lines) {
-		int start = line->Start;
-		int end = line->End;
-		int dur = end - start;
+	bool changed_time = n_overlap || n_gap || n_short || n_long;
+	if (changed_time)
+		context->ass->Commit(_("fix common errors (timing)"), AssFile::COMMIT_DIAG_TIME);
 
-		if (do_short_dur && dur < min_dur) {
-			line->End = start + min_dur;
-			++n_short;
-		}
-		if (do_long_dur && dur > max_dur) {
-			line->End = start + max_dur;
-			++n_long;
-		}
+	// --- Text fixes. Commit after the timing snapshot so each category really
+	// is independently undoable instead of creating duplicate final snapshots.
+	if (do_trim) {
+		for (auto line : lines) {
+			if (line->Comment)
+				continue;
 
-		if (do_trim) {
 			std::string text = line->Text.get();
 			// Strip trailing ASCII spaces/tabs/CR/LF and full-width U+3000.
 			size_t endpos = text.size();
@@ -2809,6 +2867,9 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 			}
 		}
 	}
+	bool changed_text = n_trim != 0;
+	if (changed_text)
+		context->ass->Commit(_("fix common errors (text)"), AssFile::COMMIT_DIAG_TEXT);
 
 	// --- Remove empty lines.
 	// We must keep the selection controller's selection set free of any pointer
@@ -2819,12 +2880,10 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 	std::vector<AssDialogue *> to_delete;
 	if (do_empty) {
 		for (auto line : lines) {
-			auto text = line->Text.get();
-			bool only_ws = true;
-			for (char c : text) {
-				if (c != ' ' && c != '\t' && c != '\r' && c != '\n') { only_ws = false; break; }
-			}
-			if (only_ws)
+			if (line->Comment)
+				continue;
+
+			if (is_ass_whitespace_only(*line))
 				to_delete.push_back(line);
 		}
 	}
@@ -2836,17 +2895,9 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 		n_empty = (int)to_delete.size();
 	}
 
-	// Commit. Time fixes use COMMIT_DIAG_TIME; row removal uses ADDREM; text
-	// fixes use COMMIT_DIAG_TEXT. Each is its own undo step so the user can
-	// selectively undo one category.
-	bool changed_time = do_overlaps || do_short_gap || do_short_dur || do_long_dur;
-	bool changed_text = do_trim;
+	// Row removal is committed after timing and text so it is a separate undo
+	// step and the selection snapshot contains no dangling dialogue pointers.
 	bool changed_rows = !to_delete.empty();
-	if (changed_time)
-		context->ass->Commit(_("fix common errors (timing)"), AssFile::COMMIT_DIAG_TIME);
-	if (changed_text)
-		context->ass->Commit(_("fix common errors (text)"), AssFile::COMMIT_DIAG_TEXT);
-
 	if (changed_rows) {
 		// Rebuild a selection that contains only surviving lines, so the
 		// selection controller never holds a pointer to a line we're about to
@@ -2861,11 +2912,20 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 		}
 		AssDialogue *new_active = old_active;
 		if (new_active && std::find(to_delete.begin(), to_delete.end(), new_active) != to_delete.end())
-			new_active = new_sel.empty() ? nullptr : *new_sel.begin();
+			new_active = nullptr;
+		if (!new_active && !new_sel.empty())
+			new_active = *new_sel.begin();
+		if (!new_active && !context->ass->Events.empty())
+			new_active = &context->ass->Events.front();
+		if (!new_active) {
+			new_active = new AssDialogue;
+			context->ass->Events.push_back(*new_active);
+		}
+		if (new_sel.empty())
+			new_sel.insert(new_active);
 
+		context->ass->Commit(_("fix common errors (remove empty)"), AssFile::COMMIT_DIAG_ADDREM);
 		context->selectionController->SetSelectionAndActive(std::move(new_sel), new_active);
-
-		context->ass->Commit(_("fix common errors (remove empty)"), AssFile::COMMIT_DIAG_ADDREM | AssFile::COMMIT_DIAG_FULL);
 		// Now safe to free the detached dialogue objects — nothing references them.
 		for (auto line : to_delete)
 			delete line;

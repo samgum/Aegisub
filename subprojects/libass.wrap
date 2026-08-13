@@ -1,4 +1,4 @@
 [wrap-git]
 directory = libass
 url = https://github.com/libass/libass.git
-revision = head
+revision = 3087d2b2ffda76602a17f9b09d25cb8addc8d313

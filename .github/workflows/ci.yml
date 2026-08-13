@@ -90,9 +90,7 @@ jobs:
           python-version: '3.x'
 
       - name: Run targeted source regression checks
-        run: |
-          python tools/test_audio_playback.py
-          python tools/test_aug_regressions.py
+        run: python tools/run_source_regressions.py
 
       - name: Setup Meson
         run: |
@@ -165,6 +163,14 @@ jobs:
         run: |
           choco install ninja innosetup
 
+          # FFmpeg's fallback configuration invokes gzip. Git for Windows is
+          # preinstalled on hosted runners and ships it in usr\bin, but that
+          # directory is not guaranteed to be on PATH.
+          $gitUsrBin = Join-Path $env:ProgramFiles "Git\usr\bin"
+          if (Test-Path -LiteralPath $gitUsrBin) {
+            $gitUsrBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
           $moonscripturl = "https://github.com/leafo/moonscript/releases/download/v0.6.0/moonscript-v0.6.0-windows-x86_64.zip"
           mkdir moonscript
           Invoke-WebRequest -Uri $moonscripturl -OutFile ".\moonscript\moonscript.zip"
@@ -209,7 +215,9 @@ jobs:
         run: meson compile -C build
 
       - name: Run test
-        run: meson test -C build --verbose "gtest main"
+        # Run this project's tests without inheriting every fallback
+        # dependency's optional test suite.
+        run: meson test -C build --verbose --suite Aegisub
 
       # Windows artifacts
       - name: Generate Windows installer

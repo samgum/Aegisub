@@ -1,7 +1,7 @@
 [wrap-git]
 directory = ffmpeg
 url = https://gitlab.freedesktop.org/gstreamer/meson-ports/ffmpeg.git
-revision = meson-7.1
+revision = 82f9983361925fa1aa7e3b90d404326c00713986
 
 [provide]
 libavformat = libavformat_dep

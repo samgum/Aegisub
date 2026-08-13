@@ -45,6 +45,7 @@
 #include <libaegisub/log.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #ifdef WITH_SOUNDTOUCH
@@ -70,6 +71,40 @@ static const PaHostApiTypeId pa_host_api_priority[] = {
 	paOSS
 };
 static const size_t pa_host_api_priority_count = sizeof(pa_host_api_priority) / sizeof(pa_host_api_priority[0]);
+
+#ifdef WITH_SOUNDTOUCH
+void PortAudioPlayer::ResetSoundTouchPosition() {
+	// Reset is only used after the PortAudio stream has stopped. A concurrent
+	// UI read is still possible, so wait here rather than racing its copy. This
+	// method never runs on the real-time callback.
+	while (soundtouch_position_guard.test_and_set(std::memory_order_acquire)) { }
+	soundtouch_position.valid = false;
+	soundtouch_position_guard.clear(std::memory_order_release);
+}
+
+void PortAudioPlayer::PublishSoundTouchPosition(int64_t frame, PaTime dac_time, double speed) {
+	if (soundtouch_position_guard.test_and_set(std::memory_order_acquire))
+		return;
+
+	soundtouch_position.frame = frame;
+	soundtouch_position.dac_time = dac_time;
+	soundtouch_position.speed = speed;
+	soundtouch_position.valid = true;
+	soundtouch_position_guard.clear(std::memory_order_release);
+}
+
+bool PortAudioPlayer::ReadSoundTouchPosition(int64_t& frame, PaTime& dac_time, double& speed) const {
+	if (soundtouch_position_guard.test_and_set(std::memory_order_acquire))
+		return false;
+
+	auto position = soundtouch_position;
+	soundtouch_position_guard.clear(std::memory_order_release);
+	frame = position.frame;
+	dac_time = position.dac_time;
+	speed = position.speed;
+	return position.valid;
+}
+#endif
 
 PortAudioPlayer::PortAudioPlayer(agi::AudioProvider *provider) : AudioPlayer(provider) {
 	PaError err = Pa_Initialize();
@@ -298,6 +333,69 @@ bool PortAudioPlayer::EnsureStreamForDefaultDevice() {
 	return stream != nullptr;
 }
 
+double PortAudioPlayer::VolumeForCallback() {
+	if (!volume_guard.test_and_set(std::memory_order_acquire)) {
+		callback_volume = requested_volume;
+		volume_guard.clear(std::memory_order_release);
+	}
+	return callback_volume;
+}
+
+void PortAudioPlayer::ResetEndPosition(int64_t position) {
+	// Play calls this only after the old stream callback has stopped. A UI read
+	// can still overlap, so serialize the reset outside the real-time thread.
+	while (end_guard.test_and_set(std::memory_order_acquire)) { }
+	requested_end = position;
+	callback_end = position;
+	end_guard.clear(std::memory_order_release);
+}
+
+int64_t PortAudioPlayer::EndForCallback() {
+	// Never wait in the audio callback. If the UI is publishing a new end point,
+	// use the previous snapshot for at most one buffer.
+	if (end_guard.test_and_set(std::memory_order_acquire))
+		return callback_end;
+
+	callback_end = requested_end;
+	end_guard.clear(std::memory_order_release);
+	return callback_end;
+}
+
+int64_t PortAudioPlayer::GetEndPosition() {
+	while (end_guard.test_and_set(std::memory_order_acquire)) { }
+	auto position = requested_end;
+	end_guard.clear(std::memory_order_release);
+	return position;
+}
+
+void PortAudioPlayer::SetEndPosition(int64_t position) {
+	while (end_guard.test_and_set(std::memory_order_acquire)) { }
+	requested_end = position;
+	end_guard.clear(std::memory_order_release);
+
+	// AudioController invokes position queries and range changes on the wx UI
+	// thread, so last_position does not participate in the callback hand-off.
+	last_position = std::min(last_position, position);
+}
+
+void PortAudioPlayer::SetVolume(double vol) {
+	while (volume_guard.test_and_set(std::memory_order_acquire)) { }
+	requested_volume = static_cast<float>(vol);
+	volume_guard.clear(std::memory_order_release);
+
+#ifdef WITH_SOUNDTOUCH
+	if (tempo_processor)
+		tempo_processor->SetVolume(vol);
+#endif
+}
+
+double PortAudioPlayer::GetVolume() {
+	while (volume_guard.test_and_set(std::memory_order_acquire)) { }
+	auto volume = requested_volume;
+	volume_guard.clear(std::memory_order_release);
+	return volume;
+}
+
 void PortAudioPlayer::paStreamFinishedCallback(void *userData) {
 	auto *player = static_cast<PortAudioPlayer *>(userData);
 	player->callback_finished.store(true, std::memory_order_release);
@@ -359,14 +457,16 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 
 	current = start_sample;
 	start = start_sample;
-	end = start_sample + count;
+	ResetEndPosition(start_sample + count);
 	speed_position = 0.0;
 	callback_finished.store(false, std::memory_order_release);
 	last_position = start_sample;
 
 #ifdef WITH_SOUNDTOUCH
-	if (tempo_processor)
-		tempo_processor->Reset(start_sample, start_sample + count, playback_speed, volume);
+	if (tempo_processor) {
+		tempo_processor->Reset(start_sample, start_sample + count, playback_speed, GetVolume());
+		ResetSoundTouchPosition();
+	}
 #endif
 
 	PaError err = Pa_SetStreamFinishedCallback(stream, paStreamFinishedCallback);
@@ -392,7 +492,7 @@ void PortAudioPlayer::Stop() {
 }
 
 int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
-	unsigned long framesPerBuffer, [[maybe_unused]] const PaStreamCallbackTimeInfo* timeInfo,
+	unsigned long framesPerBuffer, const PaStreamCallbackTimeInfo* timeInfo,
 	[[maybe_unused]] PaStreamCallbackFlags statusFlags, void *userData)
 {
 	PortAudioPlayer *player = (PortAudioPlayer *)userData;
@@ -411,7 +511,8 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 #endif
 
 	// Calculate how much left
-	int64_t lenAvailable = std::min<int64_t>(player->end - player->current, framesPerBuffer);
+	auto playback_end = player->EndForCallback();
+	int64_t lenAvailable = std::min<int64_t>(playback_end - player->current, framesPerBuffer);
 	const int bytes_per_frame = player->provider->GetChannels() * player->provider->GetBytesPerSample();
 	// Play something
 	if (lenAvailable > 0 && player->playback_speed == 1.0) {
@@ -419,7 +520,7 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 		AudioSampleSafety::ApplyGainLimiter(
 			static_cast<int16_t *>(outputBuffer),
 			(size_t)lenAvailable * player->provider->GetChannels(),
-			player->GetVolume());
+			player->VolumeForCallback());
 
 		// Set play position
 		player->current += lenAvailable;
@@ -437,15 +538,21 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 #ifdef WITH_SOUNDTOUCH
 		if (player->tempo_processor) {
 			auto out = static_cast<char *>(outputBuffer);
+			player->tempo_processor->SetEndFrame(playback_end);
+			auto output_start_frame = player->tempo_processor->GetOutputFrame();
 			player->tempo_processor->Fill(out, framesPerBuffer);
-			player->current = player->tempo_processor->GetInputFrame();
+			player->current = player->tempo_processor->GetOutputFrame();
+			// PaTime has an unspecified origin, so zero is a valid timestamp.
+			// The pointer itself is the only validity condition here.
+			if (timeInfo)
+				player->PublishSoundTouchPosition(output_start_frame, timeInfo->outputBufferDacTime, player->playback_speed);
 			if (player->tempo_processor->IsFinished())
 				return paComplete;
 			return paContinue;
 		}
 #endif
 		const auto source_frames = std::min<int64_t>(
-			player->end - player->current,
+			playback_end - player->current,
 			(int64_t)(framesPerBuffer * player->playback_speed) + 2);
 
 		if (source_frames <= 0) {
@@ -458,7 +565,7 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 		AudioSampleSafety::ApplyGainLimiter(
 			reinterpret_cast<int16_t *>(player->speed_buffer.data()),
 			(size_t)source_frames * player->provider->GetChannels(),
-			player->GetVolume());
+			player->VolumeForCallback());
 
 		auto out = static_cast<char *>(outputBuffer);
 		double source_position = player->speed_position;
@@ -486,6 +593,7 @@ int PortAudioPlayer::paCallback(const void *, void *outputBuffer,
 
 	// No samples remain. PortAudio will invoke the finished callback after
 	// all output generated by this callback has actually been played.
+	memset(outputBuffer, 0, framesPerBuffer * bytes_per_frame);
 	return paComplete;
 }
 
@@ -493,10 +601,32 @@ int64_t PortAudioPlayer::GetCurrentPosition() {
 	if (!IsPlaying()) return 0;
 
 #ifdef WITH_SOUNDTOUCH
-	// When SoundTouch is active, use the tracked input position directly
-	// as it's more reliable than time-based estimation
+	// SoundTouch may read several thousand source frames before it can emit its
+	// first sample. Anchor position to the DAC time of emitted output instead of
+	// reporting that read-ahead cursor as though it had already been heard.
 	if (playback_speed != 1.0 && tempo_processor) {
-		int64_t real = current;
+		int64_t anchor_frame = start;
+		PaTime anchor_time = 0.0;
+		double anchor_speed = playback_speed;
+		int64_t real;
+		if (ReadSoundTouchPosition(anchor_frame, anchor_time, anchor_speed)) {
+			auto elapsed = Pa_GetStreamTime(stream) - anchor_time;
+			real = anchor_frame + static_cast<int64_t>(std::llround(
+				elapsed * provider->GetSampleRate() * anchor_speed));
+		}
+		else {
+			// Some host APIs do not provide outputBufferDacTime. Fall back to
+			// the stream clock adjusted for reported device latency; this is
+			// still based on elapsed output time rather than decoder read-ahead.
+			auto elapsed = Pa_GetStreamTime(stream) - pa_start;
+			if (auto info = Pa_GetStreamInfo(stream))
+				elapsed -= info->outputLatency;
+			real = start + static_cast<int64_t>(std::llround(
+				std::max<PaTime>(0.0, elapsed) * provider->GetSampleRate() * playback_speed));
+		}
+
+		auto playback_end = GetEndPosition();
+		real = std::max(start, std::min(real, playback_end));
 		if (real < last_position) real = last_position;
 		else last_position = real;
 		return real;
@@ -508,18 +638,19 @@ int64_t PortAudioPlayer::GetCurrentPosition() {
 
 	// If portaudio isn't giving us time info then estimate based on buffer fill and current latency
 	if (pa_time == 0 && pa_start == 0)
-		real = current - Pa_GetStreamInfo(stream)->outputLatency * provider->GetSampleRate();
+		real = start;
 
 #ifdef PORTAUDIO_DEBUG
 	LOG_D("audio/player/portaudio") << "GetCurrentPosition:"
 		<< " pa_time: " << pa_time
 		<< " start: " << start
-		<< " current: " << current
 		<< " pa_start: " << pa_start
 		<< " real: " << real
 		<< " diff: " << pa_time - pa_start;
 #endif
 
+	auto playback_end = GetEndPosition();
+	real = std::min(real, playback_end);
 	if (real < last_position)
 		real = last_position;
 	else
@@ -552,20 +683,30 @@ bool PortAudioPlayer::IsPlaying() {
 }
 
 void PortAudioPlayer::SetPlaybackSpeed(double speed) {
-	if (IsPlaying()) {
-		start = GetCurrentPosition();
-		current = start;
-		speed_position = 0.0;
-		pa_start = Pa_GetStreamTime(stream);
-		last_position = start;
+	auto new_speed = std::max(0.25, std::min(speed, 4.0));
+	if (std::abs(new_speed - playback_speed) < 0.001)
+		return;
+
+	if (!IsPlaying()) {
+		playback_speed = new_speed;
+		return;
 	}
 
-	playback_speed = std::max(0.25, std::min(speed, 4.0));
-
-#ifdef WITH_SOUNDTOUCH
-	if (tempo_processor)
-		tempo_processor->SetPlaybackSpeed(playback_speed);
-#endif
+	// SoundTouch is owned by the real-time callback while the stream is active.
+	// Stop it before changing tempo, then rebuild the processing chain from the
+	// sample actually being heard. This also handles transitions to and from
+	// 1x, where PortAudio bypasses SoundTouch entirely.
+	auto position = GetCurrentPosition();
+	auto playback_end = GetEndPosition();
+	auto err = Pa_AbortStream(stream);
+	if (err != paNoError) {
+		LOG_D("audio/player/portaudio") << "could not restart stream for speed change: " << Pa_GetErrorText(err);
+		return;
+	}
+	callback_finished.store(true, std::memory_order_release);
+	playback_speed = new_speed;
+	if (position < playback_end)
+		Play(position, playback_end - position);
 }
 
 std::unique_ptr<AudioPlayer> CreatePortAudioPlayer(agi::AudioProvider *provider, wxWindow *) {

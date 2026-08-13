@@ -57,6 +57,7 @@
 #include <wx/timer.h>
 
 #include <algorithm>
+#include <cmath>
 
 #ifdef WITH_SOUNDTOUCH
 #include "audio_player_soundtouch.h"
@@ -249,6 +250,10 @@ void OpenALPlayer::Play(int64_t start, int64_t count)
 #endif
 
 	FillBuffers(num_buffers);
+	if (buffers_free == num_buffers) {
+		Stop();
+		return;
+	}
 
 	// And go!
 #ifdef WITH_SOUNDTOUCH
@@ -297,12 +302,16 @@ void OpenALPlayer::FillBuffers(ALsizei count)
 	for (count = mid(1, count, buffers_free); count > 0; --count) {
 #ifdef WITH_SOUNDTOUCH
 		if (tempo_processor) {
-			tempo_processor->Fill(&decode_buffer[0], decode_buffer.size() / bpf);
+			auto fill_len = tempo_processor->Fill(&decode_buffer[0], decode_buffer.size() / bpf);
 			cur_frame = tempo_processor->GetInputFrame();
+			if (fill_len == 0)
+				break;
 		} else
 #endif
 		{
 			ALsizei fill_len = mid<ALsizei>(0, decode_buffer.size() / bpf, end_frame - cur_frame);
+			if (fill_len <= 0)
+				break;
 
 			if (fill_len > 0) {
 				// Get fill_len frames of audio
@@ -353,16 +362,41 @@ void OpenALPlayer::Notify()
 		FillBuffers(newplayed);
 	}
 
-	LOG_D("player/audio/openal") << "frames played=" << (buffers_played - num_buffers) * decode_buffer.size() / bpf << " num frames=" << end_frame - start_frame;
+	bool selected_audio_finished = cur_frame >= end_frame;
+#ifdef WITH_SOUNDTOUCH
+	if (tempo_processor)
+		selected_audio_finished = tempo_processor->IsFinished();
+#endif
+	LOG_D("player/audio/openal") << "buffers played=" << buffers_played << " buffers free=" << buffers_free;
 
-	// Check that all of the selected audio plus one full set of buffers has been queued
-	if ((buffers_played - num_buffers) * (int64_t)decode_buffer.size() > (end_frame - start_frame) * bpf) {
+	// FillBuffers never queues an all-zero buffer after the selected audio.
+	// Stop only after OpenAL has played and returned every buffer which contains
+	// real output, avoiding both slow-playback truncation and PM_ToEnd silence.
+	if (selected_audio_finished && buffers_free == num_buffers) {
 		Stop();
 	}
 }
 
 void OpenALPlayer::SetEndPosition(int64_t pos)
 {
+	if (pos == end_frame)
+		return;
+
+	if (playing) {
+		// The OpenAL queue was built for the old range. Rebuild it from the
+		// sample currently audible so shortening cannot leak stale audio and
+		// extending cannot leave queued silence in front of new audio.
+		// The final queued buffer may be zero-padded, so never restart an
+		// extension beyond the old selected end even if AL_SAMPLE_OFFSET has
+		// advanced through that padding.
+		auto restart_position = std::max(start_frame, std::min(GetCurrentPosition(), std::min(end_frame, pos)));
+		if (restart_position < pos)
+			Play(restart_position, pos - restart_position);
+		else
+			Stop();
+		return;
+	}
+
 	end_frame = pos;
 }
 
@@ -377,30 +411,37 @@ void OpenALPlayer::SetVolume(double vol)
 
 void OpenALPlayer::SetPlaybackSpeed(double speed)
 {
-	if (playing) {
-		start_frame = GetCurrentPosition() - buffers_played * decode_buffer.size() / bpf;
-		playback_segment_timer.Start();
-		last_position = start_frame;
+	auto new_speed = mid(0.25, speed, 4.0);
+	if (std::abs(new_speed - playback_speed) < 0.001)
+		return;
+	if (!playing) {
+		playback_speed = new_speed;
+		return;
 	}
-
-	playback_speed = mid(0.25, speed, 4.0);
 
 #ifdef WITH_SOUNDTOUCH
 	if (tempo_processor) {
-		tempo_processor->SetPlaybackSpeed(playback_speed);
-		if (context) {
-			alcMakeContextCurrent(context);
-			alSourcef(source, AL_PITCH, 1.0f);
-			wxTimer::Start(std::max(10, (int)(100 / playback_speed)));
-		}
+		// Buffers already queued in OpenAL were rendered at the old tempo. Keep
+		// the sample which is actually audible, discard that stale queue in
+		// Play(), and rebuild SoundTouch at the new tempo from that position.
+		auto restart_end = end_frame;
+		auto restart_position = std::max(start_frame, std::min(GetCurrentPosition(), restart_end));
+		playback_speed = new_speed;
+		if (restart_position < restart_end)
+			Play(restart_position, restart_end - restart_position);
+		else
+			Stop();
 		return;
 	}
 #endif
 
+	playback_speed = new_speed;
+
 	if (context) {
 		alcMakeContextCurrent(context);
 		alSourcef(source, AL_PITCH, (float)playback_speed);
-		wxTimer::Start(std::max(10, (int)(100 / playback_speed)));
+		if (playing)
+			wxTimer::Start(std::max(10, (int)(100 / playback_speed)));
 	}
 }
 
