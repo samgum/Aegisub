@@ -179,8 +179,12 @@ def test_portaudio_reopens_default_device_after_output_route_change():
     assert "std::atomic<bool> callback_finished{true}" in header
     assert "Pa_SetStreamFinishedCallback(stream, paStreamFinishedCallback)" in source
     assert "callback_finished.store(true, std::memory_order_release)" in source
-    assert "callback_finished.load(std::memory_order_acquire)" in source
     assert "Pa_IsStreamActive(stream) == 1" in source
+    # IsPlaying must NOT consult callback_finished: paComplete only means "no
+    # more callbacks"; the buffered output is still playing. Reporting not-
+    # playing at that point makes AudioController Stop() immediately, which
+    # drops the buffered audio (audible "last 0.x seconds cut off").
+    assert "do NOT consult callback_finished" in source
 
 
 def test_portaudio_macos_route_change_is_exception_safe():

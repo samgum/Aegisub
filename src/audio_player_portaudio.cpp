@@ -677,7 +677,15 @@ wxArrayString PortAudioPlayer::GetOutputDevices() {
 }
 
 bool PortAudioPlayer::IsPlaying() {
-	if (!stream || callback_finished.load(std::memory_order_acquire))
+	// NOTE: do NOT consult callback_finished here. After the callback returns
+	// paComplete, PortAudio keeps playing the already-buffered audio until it
+	// drains, and only then does Pa_IsStreamActive flip to 0. Reporting
+	// "not playing" at paComplete time makes AudioController::OnPlaybackTimer
+	// call Stop() immediately, which drops the buffered audio — the audible
+	// "last 0.x seconds cut off" symptom. Position overshoot is bounded in
+	// GetCurrentPosition (clamped to end), and Play() restart logic uses the
+	// stream state machine (Pa_IsStreamActive/Stopped) directly.
+	if (!stream)
 		return false;
 	return Pa_IsStreamActive(stream) == 1;
 }

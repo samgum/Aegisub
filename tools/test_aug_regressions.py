@@ -68,7 +68,9 @@ def test_audio_completion_and_position_units():
     assert "output_frames / playback_speed" not in openal
     assert "std::atomic<bool> callback_finished{true}" in portaudio_h
     assert "Pa_SetStreamFinishedCallback(stream, paStreamFinishedCallback)" in portaudio
-    assert "callback_finished.load(std::memory_order_acquire)" in portaudio
+    # IsPlaying tracks Pa_IsStreamActive only: paComplete still has buffered
+    # audio playing, and reporting not-playing early drops the clip's tail.
+    assert "do NOT consult callback_finished" in portaudio
     assert "draining" not in portaudio
     assert "draining" not in portaudio_h
 

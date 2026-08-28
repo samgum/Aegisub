@@ -1028,11 +1028,18 @@ void AudioDisplay::SetTrackCursor(int new_pos, bool show_time)
 	int old_pos = track_cursor_pos;
 	track_cursor_pos = new_pos;
 
-	RefreshRect(wxRect(old_pos - scroll_left - 1, audio_top, 2, audio_height - 1), false);
-	RefreshRect(wxRect(new_pos - scroll_left - 1, audio_top, 2, audio_height - 1), false);
-
-	// Make sure the old label gets cleared away
-	RefreshRect(track_cursor_label_rect, false);
+	// Issue a single repaint covering the old cursor, the new cursor and the
+	// old label. Three separate RefreshRect calls each trigger their own
+	// paint event (constructing a wxGCDC on macOS each time), which flickers
+	// the cursor and wastes CPU at the 50 Hz playback update rate.
+	wxRect dirty(
+		std::min(old_pos, new_pos) - scroll_left - 1,
+		audio_top,
+		std::abs(new_pos - old_pos) + 2,
+		audio_height - 1);
+	if (!track_cursor_label_rect.IsEmpty())
+		dirty.Union(track_cursor_label_rect);
+	RefreshRect(dirty, false);
 
 	if (show_time)
 	{
