@@ -50,6 +50,26 @@ def test_stride_and_bgra_are_explicit():
     assert "dst[4 * x + 3] = 255" in TONEMAP
 
 
+def test_yuv_reference_decode_path_exists():
+    """The precise BT.2100 decode path must exist: swscale hands back untouched
+    PQ/HLG YCbCr planes and the mapper performs inverse EOTF per channel, the
+    linear-domain YCbCr->RGB matrix, and range expansion — instead of letting
+    swscale apply the matrix in the nonlinear transfer domain."""
+    assert "ToneMapYUV444P16toBGRA8" in TONEMAP
+    assert "ToneMapYuvPixel" in TONEMAP
+    # Video-range expansion (10-bit limited shifted <<6 into 16 bits).
+    assert "4096.0f" in TONEMAP
+    assert "32768.0f" in TONEMAP
+    # Linear-domain YCbCr matrices for both container families.
+    assert "bt2020_matrix_" in TONEMAP
+    assert "1.474600f" in TONEMAP  # BT.2020
+    assert "1.574800f" in TONEMAP  # BT.709
+    # Provider negotiates YUV planes with an RGB fallback.
+    assert 'FFMS_GetPixFmt("yuv444p16le")' in PROVIDER
+    assert "UseYuvDecodePath" in PROVIDER
+    assert "frame->Data[1], frame->Linesize[1]" in PROVIDER
+
+
 def test_hdr_preview_size_is_bounded_and_never_zero():
     assert "if (IsHDR && Width > 1920)" in PROVIDER
     assert "preview_max_width = 1920" in PROVIDER

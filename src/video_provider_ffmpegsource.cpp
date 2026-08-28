@@ -122,6 +122,7 @@ class FFmpegSourceVideoProvider final : public VideoProvider, FFmpegSourceProvid
 	bool HasDolbyVision = false;    ///< True when FFMS2 exposes Dolby Vision RPU data
 	bool IsHDR = false;             ///< True for PQ/HLG or Dolby Vision sources
 	bool UseCpuToneMap = false;     ///< Standard PQ/HLG base layer can use the preview mapper
+	bool UseYuvDecodePath = false;  ///< FFMS hands back raw YUV444 planes for reference-order decode
 	std::unique_ptr<HDRTonemap::ToneMapper> CpuToneMapper;
 	double DAR;                     ///< display aspect ratio
 	std::vector<int> KeyFramesList; ///< list of keyframes
@@ -354,10 +355,18 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 		&& HasSupportedInputMatrix && !IsDolbyVisionIpt;
 	if (UseCpuToneMap) {
 		bool convert_bt2020 = Primaries == 9 || CS == AGI_CS_BT2020_NCL || CS == AGI_CS_BT2020_CL;
-		CpuToneMapper = std::make_unique<HDRTonemap::ToneMapper>(Transfer, convert_bt2020, MaxCLL);
+		// The container YCbCr matrix must match the RGB->YCbCr luma weights the
+		// encoder used; decode-time matrices follow the primaries in practice
+		// (BT.2020 containers use BT.2020 matrix weights), but an explicit
+		// BT.709 matrix id overrides that.
+		bool bt2020_matrix = convert_bt2020
+			&& CS != AGI_CS_BT709 && CS != AGI_CS_SMPTE170M && CS != AGI_CS_BT470BG;
+		bool limited_range = CR != FFMS_CR_JPEG;  // FFMS_CR_JPEG == full range
+		CpuToneMapper = std::make_unique<HDRTonemap::ToneMapper>(Transfer, convert_bt2020,
+			MaxCLL, bt2020_matrix, limited_range);
 		LOG_I("video/provider/ffmpegsource") << "HDR source detected (transfer=" << Transfer
 			<< ", primaries=" << Primaries << ", maxCLL=" << MaxCLL
-			<< "); using preview-grade CPU tone mapping";
+			<< "); using reference-order CPU tone mapping (linear-domain YCbCr decode)";
 	}
 	if (HasDolbyVision && UseCpuToneMap)
 		LOG_W("video/provider/ffmpegsource")
@@ -393,14 +402,6 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 			throw VideoOpenError(std::string("Failed to set input format: ") + ErrInfo.Buffer);
 	}
 
-	// Standard HDR10/HLG is converted by swscale to transfer-encoded rgb48le, then
-	// tone-mapped below. SDR retains the normal direct BGRA path. Dolby Vision
-	// IPT/ICtCp stays on BGRA because treating those nonlinear channels as RGB
-	// would be actively misleading.
-	const int bgra_fmt = FFMS_GetPixFmt("bgra");
-	const int rgb48_fmt = FFMS_GetPixFmt("rgb48le");
-	const int TargetFormat[] = { UseCpuToneMap ? rgb48_fmt : bgra_fmt, -1 };
-
 	// Performance: convert large HDR sources to a 1920-wide preview after codec
 	// decoding. This reduces swscale, upload and frame-cache costs; it does not
 	// reduce the codec's own full-resolution decode work.
@@ -417,8 +418,28 @@ void FFmpegSourceVideoProvider::LoadVideo(agi::fs::path const& filename, std::st
 	}
 
 	int resizer = IsHDR ? FFMS_RESIZER_BILINEAR : FFMS_RESIZER_BICUBIC;
-	if (FFMS_SetOutputFormatV2(VideoSource, TargetFormat, out_w, out_h, resizer, &ErrInfo))
-		throw VideoOpenError(std::string("Failed to set output format: ") + ErrInfo.Buffer);
+
+	// Standard HDR10/HLG decodes through the reference BT.2100 order: swscale
+	// only converts 4:2:0 -> 4:4:4 and hands back the untouched transfer-encoded
+	// YCbCr planes; the inverse EOTF, linear-domain matrix and tone map all run
+	// in the CPU mapper. rgb48le is the fallback if the YUV format is refused
+	// (the YCbCr -> RGB matrix is then applied by swscale in the transfer
+	// domain — slightly less accurate on saturated colours). SDR retains the
+	// normal direct BGRA path. Dolby Vision IPT/ICtCp stays on BGRA because
+	// treating those nonlinear channels as RGB would be actively misleading.
+	const int bgra_fmt = FFMS_GetPixFmt("bgra");
+	const int rgb48_fmt = FFMS_GetPixFmt("rgb48le");
+	const int yuv444_fmt = FFMS_GetPixFmt("yuv444p16le");
+	if (UseCpuToneMap) {
+		const int TargetFormat[] = { yuv444_fmt, -1 };
+		UseYuvDecodePath = FFMS_SetOutputFormatV2(VideoSource, TargetFormat, out_w, out_h, resizer, &ErrInfo) == 0;
+	}
+	if (!UseCpuToneMap || !UseYuvDecodePath) {
+		const int TargetFormat[] = { UseCpuToneMap ? rgb48_fmt : bgra_fmt, -1 };
+		if (FFMS_SetOutputFormatV2(VideoSource, TargetFormat, out_w, out_h, resizer, &ErrInfo))
+			throw VideoOpenError(std::string("Failed to set output format: ") + ErrInfo.Buffer);
+		UseYuvDecodePath = false;
+	}
 
 	if (IsHDR && Width > 1920) {
 		Width = out_w;
@@ -465,7 +486,19 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 	out.width = Width;
 	out.height = Height;
 
-	if (UseCpuToneMap) {
+	if (UseCpuToneMap && UseYuvDecodePath) {
+		// Reference BT.2100 decode: raw PQ/HLG YCbCr planes from swscale.
+		// Planes follow Data[0]/Data[1]/Data[2] with their own strides.
+		out.pitch = 4 * Width;
+		out.data.resize(static_cast<size_t>(out.pitch) * Height);
+		CpuToneMapper->ToneMapYUV444P16toBGRA8(
+			frame->Data[0], frame->Linesize[0],
+			frame->Data[1], frame->Linesize[1],
+			frame->Data[2], frame->Linesize[2],
+			out.data.data(), out.pitch, Width, Height);
+	}
+	else if (UseCpuToneMap) {
+		// Fallback: swscale-applied matrix in the transfer domain.
 		out.pitch = 4 * Width;
 		out.data.resize(static_cast<size_t>(out.pitch) * Height);
 		CpuToneMapper->ToneMapRGB48toBGRA8(frame->Data[0], frame->Linesize[0],
