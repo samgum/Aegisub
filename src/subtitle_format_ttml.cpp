@@ -39,6 +39,8 @@
 #include <string>
 #include <vector>
 
+#include <boost/algorithm/string/trim.hpp>
+
 namespace {
 // Parse a TTML clock-time or offset-time value to milliseconds.
 // Supports "HH:MM:SS.mmm", "MM:SS.mmm", "SS.mmm", "123ms", "4.5s", "2m", "1h".
@@ -147,6 +149,7 @@ struct TtmlParagraph {
 	int64_t end_ms = 0;
 	std::string karaoke_text; // ASS text with \k segments when timed spans exist
 	bool has_karaoke = false;
+	std::vector<std::pair<int64_t, std::string>> segments; // <begin_ms, text>
 };
 
 // Determine (begin, end) for a paragraph from begin/end/dur attributes.
