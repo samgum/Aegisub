@@ -127,7 +127,11 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 			else if (body.starts_with("offset:")) {
 				int64_t off = 0;
 				auto val = std::string_view(body).substr(7);
-				boost::trim(val);
+				// string_view has no erase(); strip spaces by moving the ends.
+				while (!val.empty() && (val.front() == ' ' || val.front() == '\t'))
+					val.remove_prefix(1);
+				while (!val.empty() && (val.back() == ' ' || val.back() == '\t'))
+					val.remove_suffix(1);
 				if (!val.empty())
 					if (std::from_chars(val.data(), val.data() + val.size(), off).ec == std::errc{})
 						offset_ms = off; // positive shifts lyrics earlier per spec

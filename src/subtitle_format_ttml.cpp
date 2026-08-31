@@ -43,7 +43,11 @@ namespace {
 // Parse a TTML clock-time or offset-time value to milliseconds.
 // Supports "HH:MM:SS.mmm", "MM:SS.mmm", "SS.mmm", "123ms", "4.5s", "2m", "1h".
 int64_t ParseTTMLTime(std::string_view value) {
-	boost::trim(value);
+	// string_view has no erase(), so trim by moving the ends inward.
+	while (!value.empty() && (value.front() == ' ' || value.front() == '\t' || value.front() == '\r' || value.front() == '\n'))
+		value.remove_prefix(1);
+	while (!value.empty() && (value.back() == ' ' || value.back() == '\t' || value.back() == '\r' || value.back() == '\n'))
+		value.remove_suffix(1);
 	if (value.empty()) return -1;
 
 	// Offset time with a metric suffix.
