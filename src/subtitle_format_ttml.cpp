@@ -35,6 +35,8 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -42,6 +44,19 @@
 #include <boost/algorithm/string/trim.hpp>
 
 namespace {
+// Parse a double from a string_view. std::from_chars' floating-point
+// overloads are deleted on macOS libc++, so use a bounded strtod copy —
+// TTML time components are far shorter than this buffer.
+bool ParseDouble(std::string_view str, double& out) {
+	char buf[64];
+	if (str.empty() || str.size() >= sizeof(buf)) return false;
+	std::copy(str.begin(), str.end(), buf);
+	buf[str.size()] = '\0';
+	char* end = nullptr;
+	out = std::strtod(buf, &end);
+	return end == buf + str.size();
+}
+
 // Parse a TTML clock-time or offset-time value to milliseconds.
 // Supports "HH:MM:SS.mmm", "MM:SS.mmm", "SS.mmm", "123ms", "4.5s", "2m", "1h".
 int64_t ParseTTMLTime(std::string_view value) {
@@ -62,7 +77,7 @@ int64_t ParseTTMLTime(std::string_view value) {
 			suffix = "ms";
 		}
 		double amount = 0.0;
-		if (std::from_chars(num.data(), num.data() + num.size(), amount).ec != std::errc{})
+		if (!ParseDouble(num, amount))
 			return -1;
 		if (suffix == "ms") return static_cast<int64_t>(std::llround(amount));
 		if (suffix == "s") return static_cast<int64_t>(std::llround(amount * 1000));
@@ -76,7 +91,7 @@ int64_t ParseTTMLTime(std::string_view value) {
 	if (first_colon == std::string::npos) {
 		// Bare seconds like "12.5"
 		double seconds = 0.0;
-		if (std::from_chars(value.data(), value.data() + value.size(), seconds).ec != std::errc{})
+		if (!ParseDouble(value, seconds))
 			return -1;
 		return static_cast<int64_t>(std::llround(seconds * 1000));
 	}
@@ -84,7 +99,7 @@ int64_t ParseTTMLTime(std::string_view value) {
 	auto parse_component = [](std::string_view str, double& out) -> bool {
 		if (!str.empty() && str.front() == ',') str.remove_prefix(1);
 		if (str.empty()) return false;
-		return std::from_chars(str.data(), str.data() + str.size(), out).ec == std::errc{};
+		return ParseDouble(str, out);
 	};
 
 	// Optional leading fraction on the seconds part.
@@ -125,7 +140,7 @@ int64_t ParseTTMLTime(std::string_view value) {
 				std::string_view digits = frac;
 				// "5" = .5 s, "50" = .50 s, "500" = .5 s — spec says fraction of second
 				double v = 0.0;
-				if (std::from_chars(digits.data(), digits.data() + digits.size(), v).ec == std::errc{})
+				if (ParseDouble(digits, v))
 					frac_seconds = v / std::pow(10.0, static_cast<double>(digits.size()));
 			}
 		}
