@@ -35,6 +35,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -320,10 +321,10 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 		[](TtmlParagraph const& a, TtmlParagraph const& b) { return a.begin_ms < b.begin_ms; });
 
 	for (auto const& para : paragraphs) {
-		AssDialogue diag;
-		diag.Start = agi::Time(std::max<int64_t>(para.begin_ms, 0));
-		diag.End = agi::Time(std::max(para.end_ms, para.begin_ms));
-		diag.Text = para.karaoke_text;
-		target->Events.push_back(std::move(diag));
+		auto diag = std::make_unique<AssDialogue>();
+		diag->Start = agi::Time(std::max<int64_t>(para.begin_ms, 0));
+		diag->End = agi::Time(std::max(para.end_ms, para.begin_ms));
+		diag->Text = para.karaoke_text;
+		target->Events.push_back(*diag);
 	}
 }

@@ -32,6 +32,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -214,9 +215,9 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 		int64_t end_ms = i + 1 < lines.size() ? lines[i + 1].start_ms : cur.start_ms + 5000;
 		if (end_ms < cur.start_ms + 500) end_ms = cur.start_ms + 500;
 
-		AssDialogue diag;
-		diag.Start = agi::Time(cur.start_ms);
-		diag.End = agi::Time(end_ms);
+		auto diag = std::make_unique<AssDialogue>();
+		diag->Start = agi::Time(cur.start_ms);
+		diag->End = agi::Time(end_ms);
 
 		if (cur.has_syllables && !cur.syllables.empty()) {
 			// \k takes centiseconds of *duration per segment*; the final
@@ -228,12 +229,12 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 				int64_t dur = std::max<int64_t>(seg_end - syl.first, 0);
 				text += "{\\k" + std::to_string(karaoke_cs(dur)) + "}" + syl.second;
 			}
-			diag.Text = text;
+			diag->Text = text;
 		}
 		else {
-			diag.Text = cur.text;
+			diag->Text = cur.text;
 		}
 
-		target->Events.push_back(std::move(diag));
+		target->Events.push_back(*diag);
 	}
 }
