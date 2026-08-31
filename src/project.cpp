@@ -447,12 +447,15 @@ void Project::LoadList(std::vector<agi::fs::path> const& files) {
 		".yuv"
 	};
 
-	// Subtitle formats
+	// Subtitle formats (must stay sorted for binary_search)
 	const char *subsList[] = {
 		".ass",
+		".dfxp",
+		".lrc",
 		".srt",
 		".ssa",
 		".sub",
+		".ttml",
 		".ttxt"
 	};
 

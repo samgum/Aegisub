@@ -201,6 +201,29 @@ bool ParseParagraphTimes(wxXmlNode const* p, int64_t& begin_ms, int64_t& end_ms)
 // Walk a paragraph's children, accumulating plain text and <span>-scoped
 // karaoke segments. Runs of text between spans attach to the most recent
 // span (or the paragraph preamble when no span has been seen yet).
+// Collect all visible text under a node in document order, turning <br/>
+// into \N and flattening nested elements (spans inside spans).
+std::string CollectVisibleText(wxXmlNode const* node) {
+	std::string out;
+	for (auto child = node->GetChildren(); child; child = child->GetNext()) {
+		switch (child->GetType()) {
+			case wxXML_TEXT_NODE:
+			case wxXML_CDATA_SECTION_NODE:
+				out += child->GetContent().ToStdString();
+				break;
+			case wxXML_ELEMENT_NODE:
+				if (IsElement(child, "br"))
+					out += "\\N";
+				else
+					out += CollectVisibleText(child);
+				break;
+			default:
+				break;
+		}
+	}
+	return out;
+}
+
 void BuildParagraphText(wxXmlNode *p, int64_t begin_ms, int64_t end_ms,
 	std::string& plain, bool& has_karaoke,
 	std::vector<std::pair<int64_t, std::string>>& segments) {
@@ -232,23 +255,34 @@ void BuildParagraphText(wxXmlNode *p, int64_t begin_ms, int64_t end_ms,
 						if (name == "begin") begin_attr = attr->GetValue().ToStdString();
 					}
 
-					// Collect this span's own text (and nested spans flatten).
-					std::string span_text;
-					for (auto child = node->GetChildren(); child; child = child->GetNext()) {
-						if (child->GetType() == wxXML_TEXT_NODE || child->GetType() == wxXML_CDATA_SECTION_NODE)
-							span_text += child->GetContent().ToStdString();
-						else if (IsElement(child, "br"))
-							span_text += "\\N";
-					}
-
+					// Collect this span's own visible text. Nested spans are
+					// flattened in document order — an untimed wrapper span
+					// (e.g. ttm:role="x-bg" background vocals wrapping timed
+					// word spans in Apple Music TTML) must not swallow its
+					// children, and a timed span containing nested spans
+					// (rare) uses its own begin for the whole run.
+					std::string span_text = CollectVisibleText(node);
 					int64_t span_begin = ParseTTMLTime(begin_attr);
 					if (span_begin >= 0 && !span_text.empty()) {
 						has_karaoke = true;
 						segments.emplace_back(span_begin, span_text);
 					}
 					else if (!span_text.empty()) {
-						// Untimed span: append to the plain text path.
-						plain += span_text;
+						// Untimed wrapper: its timed children still need their
+						// own segments, so recurse instead of flattening them
+						// into plain text.
+						bool child_has_karaoke = false;
+						std::vector<std::pair<int64_t, std::string>> child_segments;
+						BuildParagraphText(node, begin_ms, end_ms, plain, child_has_karaoke, child_segments);
+						if (child_has_karaoke) {
+							has_karaoke = true;
+							segments.insert(segments.end(),
+								std::make_move_iterator(child_segments.begin()),
+								std::make_move_iterator(child_segments.end()));
+						}
+						else {
+							plain += span_text;
+						}
 					}
 					break;
 				}

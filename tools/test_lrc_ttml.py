@@ -59,6 +59,36 @@ def test_lrc_multitimestamp_expansion():
     assert "out.syllables = syllables;" in src
 
 
+def test_lrc_skips_timestamp_only_spacer_lines():
+    """Apple Music exports contain bare "[00:23.05]" spacer lines; they must
+    not become empty dialogue rows."""
+    src = LRC_CPP.read_text(encoding="utf-8")
+    assert "empty_line" in src
+    assert "find_first_not_of" in src
+
+
+def test_ttml_nested_timed_spans_are_not_dropped():
+    """Apple Music word-level TTML wraps background vocals in an untimed
+    <span ttm:role="x-bg"> containing timed inner spans. The untimed wrapper
+    must recurse into its children, not flatten them to nothing."""
+    src = TTML_CPP.read_text(encoding="utf-8")
+    assert "CollectVisibleText" in src
+    assert "child_has_karaoke" in src
+    assert "std::make_move_iterator(child_segments.begin())" in src
+
+
+def test_drag_drop_accepts_lrc_and_ttml():
+    """Project::LoadList's subtitle whitelist drives the file drop target;
+    .lrc/.ttml/.dfxp must be recognized (and the list stays sorted for
+    binary_search)."""
+    proj = (ROOT / "src" / "project.cpp").read_text(encoding="utf-8")
+    assert '".lrc"' in proj
+    assert '".ttml"' in proj
+    assert '".dfxp"' in proj
+    # sorted order: .ttml must sort before .ttxt ('m' < 'x')
+    assert proj.index('".ttml"') < proj.index('".ttxt"')
+
+
 def test_lrc_syllable_maps_to_karaoke():
     """Enhanced-LRC <mm:ss.xx> markers must convert to \\k segments whose
     duration is the gap to the next marker (ASS \\k unit = centiseconds)."""
@@ -154,10 +184,13 @@ def main():
         test_wildcards,
         test_lrc_timestamp_parsing_covers_all_precision,
         test_lrc_multitimestamp_expansion,
+        test_lrc_skips_timestamp_only_spacer_lines,
         test_lrc_syllable_maps_to_karaoke,
         test_ttml_time_formats,
         test_ttml_namespace_and_br_handling,
         test_ttml_word_spans_to_karaoke,
+        test_ttml_nested_timed_spans_are_not_dropped,
+        test_drag_drop_accepts_lrc_and_ttml,
         test_samples_parse_to_expected_ass,
     ]
     for test in tests:

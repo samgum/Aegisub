@@ -197,7 +197,13 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 				out.text.erase(std::remove(out.text.begin(), out.text.end(), '\r'), out.text.end());
 			}
 			if (out.start_ms < 0) out.start_ms = 0;
-			lines.push_back(std::move(out));
+			// Timestamp-only lines (e.g. "[00:23.05]" with no text after it,
+			// common in Apple Music exports as section spacers) would become
+			// empty dialogue rows; skip them.
+			bool empty_line = !out.has_syllables
+				&& out.text.find_first_not_of(" \t") == std::string::npos;
+			if (!empty_line)
+				lines.push_back(std::move(out));
 		}
 	}
 
