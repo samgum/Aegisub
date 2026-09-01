@@ -232,7 +232,7 @@ std::string CollectVisibleText(wxXmlNode const* node) {
 	return out;
 }
 
-void BuildParagraphText(wxXmlNode *p, int64_t begin_ms, int64_t end_ms,
+void BuildParagraphText(wxXmlNode *p,
 	std::string& plain, bool& has_karaoke,
 	std::vector<TtmlSegment>& segments, bool bg_voice = false) {
 	for (auto node = p->GetChildren(); node; node = node->GetNext()) {
@@ -291,7 +291,7 @@ void BuildParagraphText(wxXmlNode *p, int64_t begin_ms, int64_t end_ms,
 						// into plain text, propagating the x-bg voice flag.
 						bool child_has_karaoke = false;
 						std::vector<TtmlSegment> child_segments;
-						BuildParagraphText(node, begin_ms, end_ms, plain, child_has_karaoke, child_segments, voice_bg);
+						BuildParagraphText(node, plain, child_has_karaoke, child_segments, voice_bg);
 						if (child_has_karaoke) {
 							has_karaoke = true;
 							segments.insert(segments.end(),
@@ -305,7 +305,7 @@ void BuildParagraphText(wxXmlNode *p, int64_t begin_ms, int64_t end_ms,
 					break;
 				}
 				// Other elements: recurse so metadata wrappers never eat text.
-				BuildParagraphText(node, begin_ms, end_ms, plain, has_karaoke, segments, bg_voice);
+				BuildParagraphText(node, plain, has_karaoke, segments, bg_voice);
 				break;
 			}
 			default:
@@ -338,9 +338,6 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 	// under body/div in valid TTML, but real-world files vary).
 	for (auto node = doc.GetRoot(); node; node = node->GetNext()) {
 		if (node->GetType() != wxXML_ELEMENT_NODE) continue;
-		if (IsElement(node, "p")) {
-			// unreachable: root itself is <tt>; kept for symmetry
-		}
 
 		// Iterative traversal from this top-level node.
 		std::vector<wxXmlNode*> stack{node};
@@ -351,15 +348,31 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 
 			if (IsElement(cur, "p")) {
 				TtmlParagraph para;
-				if (!ParseParagraphTimes(cur, para.begin_ms, para.end_ms)) continue;
+				if (!ParseParagraphTimes(cur, para.begin_ms, para.end_ms)) {
+					// Apple Music exports songs without any timing at all
+					// (itunes:timing="None"): every <p> is bare text. Import
+					// them like the plain-text reader does — one untimed row
+					// per paragraph — instead of failing the whole file.
+					para.begin_ms = 0;
+					para.end_ms = 0;
+				}
 
 				std::string plain;
-				BuildParagraphText(cur, para.begin_ms, para.end_ms, plain, para.has_karaoke, para.segments);
+				BuildParagraphText(cur, plain, para.has_karaoke, para.segments);
 
 				boost::trim(plain);
 				if (para.has_karaoke) {
 					std::stable_sort(para.segments.begin(), para.segments.end(),
 						[](TtmlSegment const& a, TtmlSegment const& b) { return a.begin_ms < b.begin_ms; });
+					if (para.end_ms <= para.begin_ms) {
+						// Untimed <p> whose word spans still carry timing:
+						// derive the row's bounds from the spans themselves.
+						para.begin_ms = para.segments.front().begin_ms;
+						para.end_ms = 0;
+						for (auto const& seg : para.segments)
+							para.end_ms = std::max(para.end_ms,
+								seg.end_ms > seg.begin_ms ? seg.end_ms : seg.begin_ms);
+					}
 					auto karaoke_cs = [](int64_t ms) { return static_cast<int>((ms + 5) / 10); };
 					// Word spans that carry their own end keep it (Apple Music
 					// data does), so held notes keep their real length; others

@@ -121,6 +121,27 @@ def test_lrc_rows_never_overlap():
     assert "end_ms = lines[i + 1].start_ms;" in src
 
 
+def test_lrc_untimed_files_import_as_plain_text():
+    """Some sources export plain lyric text with no timestamps under an .lrc
+    extension; they must import as untimed rows (the TXT-reader convention)
+    instead of failing with 'no timed lyrics lines found'."""
+    src = LRC_CPP.read_text(encoding="utf-8")
+    assert "untimed_lines" in src
+    assert "untimed_lines.push_back(std::move(line));" in src
+    assert "lines.empty() && !untimed_lines.empty()" in src
+
+
+def test_ttml_untimed_paragraphs_import():
+    """Apple Music itunes:timing="None" exports have <p> elements with no
+    begin/end at all; they must import as untimed rows like the plain-text
+    reader instead of failing the whole file. An untimed <p> whose word
+    spans still carry timing derives its bounds from those spans."""
+    src = TTML_CPP.read_text(encoding="utf-8")
+    assert "para.begin_ms = 0;" in src
+    assert "para.end_ms = 0;" in src
+    assert "para.begin_ms = para.segments.front().begin_ms;" in src
+
+
 def test_ttml_background_vocals_split_when_overlapping():
     """Apple Music marks harmony with ttm:role="x-bg". When the harmony
     enters before the lead voice finishes, one gapless \\kf chain would
@@ -287,6 +308,8 @@ def main():
         test_lrc_rows_never_overlap,
         test_ttml_background_vocals_split_when_overlapping,
         test_ttml_word_end_times_are_honored,
+        test_lrc_untimed_files_import_as_plain_text,
+        test_ttml_untimed_paragraphs_import,
         test_samples_parse_to_expected_ass,
     ]
     for test in tests:

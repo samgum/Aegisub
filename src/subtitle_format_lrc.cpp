@@ -103,15 +103,21 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 
 	int64_t offset_ms = 0;
 	std::vector<LrcLine> lines;
+	std::vector<std::string> untimed_lines;
 
 	while (file.HasMoreLines()) {
 		std::string line = file.ReadLineFromFile();
 		boost::trim(line);
-		if (line.empty() || line[0] != '[') continue;
+		if (line.empty()) continue;
+		if (line[0] != '[') {
+			// Some sources export plain lyrics text under an .lrc extension
+			// with no timestamps at all; keep those lines as a fallback.
+			untimed_lines.push_back(std::move(line));
+			continue;
+		}
 
 		// Peel leading [tags] off the line.
 		std::vector<int64_t> timestamps;
-		std::string syllable_payload; // remainder after timestamp tags
 		std::vector<std::pair<int64_t, std::string>> syllables;
 		bool has_syllables = false;
 		int64_t end_marker_ms = -1;
@@ -140,10 +146,6 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 						offset_ms = off; // positive shifts lyrics earlier per spec
 			}
 			// other metadata tags (ti/ar/al/by/re/ve/...) are ignored
-			else if (!timestamps.empty()) {
-				// Content after the last timestamp tag: might itself contain
-				// enhanced-LRC <syllable> tags; handled below.
-			}
 
 			pos = close + 1;
 		}
@@ -177,7 +179,7 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 
 			pending_text += text.substr(scan, lt - scan);
 			if (!pending_text.empty()) {
-				syllables.emplace_back(last_syllable_ms, pending_text);
+				syllables.emplace_back(std::max<int64_t>(last_syllable_ms, 0), pending_text);
 				pending_text.clear();
 			}
 			last_syllable_ms = ms - offset_ms;
@@ -186,7 +188,7 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 		}
 		boost::trim(pending_text);
 		if (has_syllables && !pending_text.empty())
-			syllables.emplace_back(last_syllable_ms, pending_text);
+			syllables.emplace_back(std::max<int64_t>(last_syllable_ms, 0), pending_text);
 		else if (has_syllables)
 			// A word timestamp with no text after it (the trailing
 			// "<mm:ss.xx>" Apple Music exports) marks where the line ends,
@@ -207,13 +209,25 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 			}
 			if (out.start_ms < 0) out.start_ms = 0;
 			// Timestamp-only lines (e.g. "[00:23.05]" with no text after it,
-			// common in Apple Music exports as section spacers) would become
-			// empty dialogue rows; skip them.
-			bool empty_line = !out.has_syllables
+			// common in Apple Music exports as section spacers) and lines
+			// whose word markers carry no text would become empty dialogue
+			// rows; skip them.
+			bool empty_line = (!out.has_syllables || out.syllables.empty())
 				&& out.text.find_first_not_of(" \t") == std::string::npos;
 			if (!empty_line)
 				lines.push_back(std::move(out));
 		}
+	}
+
+	if (lines.empty() && !untimed_lines.empty()) {
+		// Untimed LRC: import like the plain-text reader does, one untimed
+		// row per lyric line, for the user to time.
+		for (std::string& text : untimed_lines) {
+			auto diag = new AssDialogue;
+			diag->Text = std::move(text);
+			target->Events.push_back(*diag);
+		}
+		return;
 	}
 
 	if (lines.empty())
