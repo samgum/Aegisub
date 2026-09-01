@@ -112,6 +112,38 @@ def test_lrc_trailing_timestamp_marks_line_end():
     assert "end_ms = cur.end_marker_ms;" in src
 
 
+def test_lrc_rows_never_overlap():
+    """Apple Music LRC layers echo/harmony lines whose end markers can run
+    past the next line's start; imported rows must be clamped so the grid
+    never contains overlapping times."""
+    src = LRC_CPP.read_text(encoding="utf-8")
+    assert "end_ms > lines[i + 1].start_ms" in src
+    assert "end_ms = lines[i + 1].start_ms;" in src
+
+
+def test_ttml_background_vocals_split_when_overlapping():
+    """Apple Music marks harmony with ttm:role="x-bg". When the harmony
+    enters before the lead voice finishes, one gapless \\kf chain would
+    scramble word order and truncate held notes, so the harmony must become
+    its own dialogue row with its real word timings."""
+    src = TTML_CPP.read_text(encoding="utf-8")
+    assert "bool bg = false;" in src  # segment carries its voice
+    assert 'rfind("x-bg", 0) == 0' in src
+    assert "bg_segs.front().begin_ms < lead_last_end" in src
+    assert "harmony.begin_ms = std::max<int64_t>(para.begin_ms, bg_segs.front().begin_ms);" in src
+    # Both rows keep karaoke text built from their own voice's words.
+    assert "build_karaoke(bg_segs, harmony.end_ms)" in src
+    assert "build_karaoke(lead_segs, para.end_ms)" in src
+
+
+def test_ttml_word_end_times_are_honored():
+    """Apple Music word spans carry their own end attributes; a held note
+    must keep its real length instead of stopping at the next word's begin."""
+    src = TTML_CPP.read_text(encoding="utf-8")
+    assert 'name == "end"' in src
+    assert "segs[s].end_ms > segs[s].begin_ms" in src
+
+
 def test_ttml_time_formats():
     """TTML clock times ("HH:MM:SS.mmm", "MM:SS.mmm") and offset times
     ("1.5s", "500ms", "2m", "1h") must all parse."""
@@ -196,15 +228,25 @@ def test_samples_parse_to_expected_ass():
     assert out == "{\\kf86}I'll {\\kf49}drink {\\kf19}it {\\kf1427}all "
     assert end == 73990 and end < next_line_start
 
-    # --- TTML word spans ---
-    spans = [(1000, "Hello "), (1500, "world")]
-    end = 4000
+    # --- TTML word spans (word-level end keeps held notes real) ---
+    spans = [(1000, 1500, "Hello "), (1500, 4000, "world")]
     out = ""
-    for i, (t, text) in enumerate(spans):
-        seg_end = spans[i + 1][0] if i + 1 < len(spans) else max(end, t + 500)
-        cs = (seg_end - t + 5) // 10
+    for i, (b, e, text) in enumerate(spans):
+        seg_end = e if e > b else max(spans[i + 1][0] if i + 1 < len(spans) else 4000, b + 500)
+        cs = (seg_end - b + 5) // 10
         out += "{\\kf%d}%s" % (cs, text)
     assert out == "{\\kf50}Hello {\\kf250}world"
+
+    # --- simultaneous x-bg harmony splits into its own row ---
+    lead = [(55901, 56278, "Your "), (57282, 58229, "love ")]
+    bg = [(57629, 57853, "(Your "), (57853, 58149, "love)")]
+    lead_last_end = max(e for _, e, _ in lead)
+    split = bg and lead and bg[0][0] < lead_last_end
+    assert split  # harmony entered while "love" was still being sung
+    lead_durs = [(e - b, t) for b, e, t in lead]
+    assert (lead_durs[-1][0] + 5) // 10 == 95  # "love" keeps 947 ms, not cut to 237
+    bg_durs = [(e - b, t) for b, e, t in bg]
+    assert [(d + 5) // 10 for d, _ in bg_durs] == [22, 30]
 
 
 def test_events_are_raw_new_not_smart_pointer():
@@ -242,6 +284,9 @@ def main():
         test_drag_drop_accepts_lrc_and_ttml,
         test_events_are_raw_new_not_smart_pointer,
         test_lrc_trailing_timestamp_marks_line_end,
+        test_lrc_rows_never_overlap,
+        test_ttml_background_vocals_split_when_overlapping,
+        test_ttml_word_end_times_are_honored,
         test_samples_parse_to_expected_ass,
     ]
     for test in tests:

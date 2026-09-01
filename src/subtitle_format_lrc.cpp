@@ -228,7 +228,8 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 	// least 500 ms so zero-length gaps never produce empty renders), and the
 	// final line gets a nominal 5 s display time. An explicit trailing word
 	// timestamp overrides the synthesized end so held final notes keep their
-	// real duration instead of stretching across instrumental gaps.
+	// real duration, but echo/harmony layers in Apple Music exports can start
+	// before the previous line's marked end — rows must never overlap.
 	auto karaoke_cs = [](int64_t ms) { return static_cast<int>((ms + 5) / 10); };
 
 	for (size_t i = 0; i < lines.size(); ++i) {
@@ -236,6 +237,8 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 		int64_t end_ms = i + 1 < lines.size() ? lines[i + 1].start_ms : cur.start_ms + 5000;
 		if (cur.end_marker_ms >= 0)
 			end_ms = cur.end_marker_ms;
+		if (i + 1 < lines.size() && end_ms > lines[i + 1].start_ms)
+			end_ms = lines[i + 1].start_ms;
 		if (end_ms < cur.start_ms + 500) end_ms = cur.start_ms + 500;
 
 		// The events list uses an auto-unlink intrusive hook and owns its
