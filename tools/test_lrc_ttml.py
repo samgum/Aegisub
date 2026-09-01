@@ -90,13 +90,26 @@ def test_drag_drop_accepts_lrc_and_ttml():
 
 
 def test_lrc_syllable_maps_to_karaoke():
-    """Enhanced-LRC <mm:ss.xx> markers must convert to \\k segments whose
-    duration is the gap to the next marker (ASS \\k unit = centiseconds)."""
+    """Enhanced-LRC <mm:ss.xx> markers must convert to \\kf segments whose
+    duration is the gap to the next marker (ASS \\kf unit = centiseconds,
+    sweeping word-fill highlight)."""
     src = LRC_CPP.read_text(encoding="utf-8")
     assert "has_syllables" in src
-    assert '"{\\\\k" + std::to_string(karaoke_cs(dur)) + "}"' in src
+    assert '"{\\\\kf" + std::to_string(karaoke_cs(dur)) + "}"' in src
     # Last segment runs to the line end (next line's start).
     assert "cur.syllables[s + 1].first : end_ms" in src
+
+
+def test_lrc_trailing_timestamp_marks_line_end():
+    """Apple Music syllable LRC ends lines with a bare trailing "<mm:ss.xx>"
+    (no word after it) that marks where the line ends. Without it the final
+    word would stretch to the NEXT line's start, turning held notes into
+    absurd durations like \\k4595 across instrumental gaps."""
+    src = LRC_CPP.read_text(encoding="utf-8")
+    assert "end_marker_ms" in src
+    assert "out.end_marker_ms = end_marker_ms;" in src
+    assert "if (cur.end_marker_ms >= 0)" in src
+    assert "end_ms = cur.end_marker_ms;" in src
 
 
 def test_ttml_time_formats():
@@ -121,11 +134,11 @@ def test_ttml_namespace_and_br_handling():
 
 
 def test_ttml_word_spans_to_karaoke():
-    """<span begin="..">word</span> sequences must convert to \\k segments,
+    """<span begin="..">word</span> sequences must convert to \\kf segments,
     with the final segment running to the paragraph end."""
     src = TTML_CPP.read_text(encoding="utf-8")
     assert 'IsElement(node, "span")' in src
-    assert '"{\\\\k" + std::to_string(karaoke_cs(dur)) + "}"' in src
+    assert '"{\\\\kf" + std::to_string(karaoke_cs(dur)) + "}"' in src
     # Segments sorted by begin time before conversion.
     assert "std::stable_sort(para.segments.begin(), para.segments.end()" in src
 
@@ -157,15 +170,31 @@ def test_samples_parse_to_expected_ass():
     assert parsed[1] == (17200, "second line")
     assert parsed[2] == (30000, "second line")
 
-    # --- enhanced LRC syllable -> \k centiseconds ---
+    # --- enhanced LRC syllable -> \kf centiseconds ---
     syllables = [(12000, "wor"), (12500, "ds "), (13000, "here")]
     end = 17000
     out = ""
     for i, (t, text) in enumerate(syllables):
         seg_end = syllables[i + 1][0] if i + 1 < len(syllables) else end
         cs = (seg_end - t + 5) // 10
-        out += "{\\k%d}%s" % (cs, text)
-    assert out == "{\\k50}wor{\\k50}ds {\\k400}here"
+        out += "{\\kf%d}%s" % (cs, text)
+    assert out == "{\\kf50}wor{\\kf50}ds {\\kf400}here"
+
+    # --- trailing bare timestamp sets the line end, not the next line ---
+    # "[00:58.18]<00:58.18>I'll <00:59.04>drink <00:59.53>it <00:59.72>all <01:13.99>"
+    # followed by "[01:45.67]..." must give "all" 73990-59720 = 14270 ms and
+    # end the line at 1:13.99, never 45950 ms to the next line.
+    words = [(58180, "I'll "), (59040, "drink "), (59530, "it "), (59720, "all ")]
+    line_end_marker = 73990
+    next_line_start = 105670
+    end = line_end_marker  # explicit marker overrides next-line-start
+    out = ""
+    for i, (t, text) in enumerate(words):
+        seg_end = words[i + 1][0] if i + 1 < len(words) else end
+        cs = (seg_end - t + 5) // 10
+        out += "{\\kf%d}%s" % (cs, text)
+    assert out == "{\\kf86}I'll {\\kf49}drink {\\kf19}it {\\kf1427}all "
+    assert end == 73990 and end < next_line_start
 
     # --- TTML word spans ---
     spans = [(1000, "Hello "), (1500, "world")]
@@ -174,8 +203,8 @@ def test_samples_parse_to_expected_ass():
     for i, (t, text) in enumerate(spans):
         seg_end = spans[i + 1][0] if i + 1 < len(spans) else max(end, t + 500)
         cs = (seg_end - t + 5) // 10
-        out += "{\\k%d}%s" % (cs, text)
-    assert out == "{\\k50}Hello {\\k250}world"
+        out += "{\\kf%d}%s" % (cs, text)
+    assert out == "{\\kf50}Hello {\\kf250}world"
 
 
 def test_events_are_raw_new_not_smart_pointer():
@@ -212,6 +241,7 @@ def main():
         test_ttml_nested_timed_spans_are_not_dropped,
         test_drag_drop_accepts_lrc_and_ttml,
         test_events_are_raw_new_not_smart_pointer,
+        test_lrc_trailing_timestamp_marks_line_end,
         test_samples_parse_to_expected_ass,
     ]
     for test in tests:

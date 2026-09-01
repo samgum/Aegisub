@@ -15,8 +15,9 @@
 /// @file subtitle_format_ttml.cpp
 /// @brief Reading TTML (Timed Text Markup Language) / DFXP subtitles.
 /// Paragraphs (<p>) map to dialogue lines; word-level <span begin=..> timing
-/// maps to ASS \k karaoke durations; <br/> becomes \N. Namespaced documents
-/// (any prefix, or a default namespace) are handled by comparing local names.
+/// maps to ASS \kf sweeping karaoke durations; <br/> becomes \N. Namespaced
+/// documents (any prefix, or a default namespace) are handled by comparing
+/// local names.
 /// @ingroup subtitle_io
 
 #include "subtitle_format_ttml.h"
@@ -352,7 +353,7 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 							? para.segments[s + 1].first
 							: std::max(para.end_ms, para.segments[s].first + 500);
 						int64_t dur = std::max<int64_t>(seg_end - para.segments[s].first, 0);
-						para.karaoke_text += "{\\k" + std::to_string(karaoke_cs(dur)) + "}" + para.segments[s].second;
+						para.karaoke_text += "{\\kf" + std::to_string(karaoke_cs(dur)) + "}" + para.segments[s].second;
 					}
 				}
 				else {
