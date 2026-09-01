@@ -225,7 +225,11 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 		int64_t end_ms = i + 1 < lines.size() ? lines[i + 1].start_ms : cur.start_ms + 5000;
 		if (end_ms < cur.start_ms + 500) end_ms = cur.start_ms + 500;
 
-		auto diag = std::make_unique<AssDialogue>();
+		// The events list uses an auto-unlink intrusive hook and owns its
+		// nodes via delete-on-dispose, so entries must be raw new'd like
+		// every other reader does; a smart pointer would unlink and free
+		// each row the moment it goes out of scope.
+		auto diag = new AssDialogue;
 		diag->Start = agi::Time(cur.start_ms);
 		diag->End = agi::Time(end_ms);
 

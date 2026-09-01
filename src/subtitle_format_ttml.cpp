@@ -377,7 +377,11 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 		[](TtmlParagraph const& a, TtmlParagraph const& b) { return a.begin_ms < b.begin_ms; });
 
 	for (auto const& para : paragraphs) {
-		auto diag = std::make_unique<AssDialogue>();
+		// The events list uses an auto-unlink intrusive hook and owns its
+		// nodes via delete-on-dispose, so entries must be raw new'd like
+		// every other reader does; a smart pointer would unlink and free
+		// each row the moment it goes out of scope.
+		auto diag = new AssDialogue;
 		diag->Start = agi::Time(std::max<int64_t>(para.begin_ms, 0));
 		diag->End = agi::Time(std::max(para.end_ms, para.begin_ms));
 		diag->Text = para.karaoke_text;

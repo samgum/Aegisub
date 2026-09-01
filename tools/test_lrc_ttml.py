@@ -178,6 +178,26 @@ def test_samples_parse_to_expected_ass():
     assert out == "{\\k50}Hello {\\k250}world"
 
 
+def test_events_are_raw_new_not_smart_pointer():
+    """AssFile::Events is a boost::intrusive list with an auto_unlink hook:
+    destroying a linked AssDialogue unlinks it from the list. Inserting via
+    a smart pointer (make_unique + push_back(*diag)) therefore deletes and
+    unlinks every row the moment the pointer goes out of scope, yielding an
+    "empty" document after a seemingly successful load. Rows must be raw
+    new'd (the list owns them and deletes on dispose), like every other
+    reader (see subtitle_format_srt.cpp)."""
+    for src in (LRC_CPP, TTML_CPP):
+        text = src.read_text(encoding="utf-8")
+        assert "make_unique<AssDialogue>" not in text, (
+            f"{src.name} inserts AssDialogue via make_unique; the unique_ptr "
+            "destructor unlinks (auto_unlink hook) and frees each event right "
+            "after push_back, so the file loads as empty. Use a raw "
+            "`auto diag = new AssDialogue;` like the other readers."
+        )
+        assert "new AssDialogue;" in text
+        assert "Events.push_back(*diag);" in text
+
+
 def main():
     tests = [
         test_formats_registered,
@@ -191,6 +211,7 @@ def main():
         test_ttml_word_spans_to_karaoke,
         test_ttml_nested_timed_spans_are_not_dropped,
         test_drag_drop_accepts_lrc_and_ttml,
+        test_events_are_raw_new_not_smart_pointer,
         test_samples_parse_to_expected_ass,
     ]
     for test in tests:
