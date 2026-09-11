@@ -79,6 +79,8 @@ FontMatch process_descriptor(NSFontDescriptor *desc, NSString *name) {
 	// For VSFilter compatibility we want to match based on the Windows name.
 	if (ret.family_match) {
 		auto data = (__bridge_transfer NSData *)CTFontCopyTable((__bridge CTFontRef)font, kCTFontTableName, 0);
+		// Malformed fonts can lack a 'name' table entirely
+		if (data.length > 6) {
 		auto bytes = static_cast<const uint8_t *>(data.bytes);
 		uint16_t count = get_16(bytes, 2);
 		auto strings = bytes + get_16(bytes, 4);
@@ -107,6 +109,7 @@ FontMatch process_descriptor(NSFontDescriptor *desc, NSString *name) {
 
 			ret.family_match = range.length == msFamily.length;
 			break;
+		}
 		}
 	}
 

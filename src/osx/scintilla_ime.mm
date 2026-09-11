@@ -162,8 +162,10 @@
     stc->IndicatorFillRange(pos, utf8len);
 
     // Re-enable undo if we got a zero-length string as that means we're done
-    if (!utf8len && state.undoActive)
-        stc->SetUndoCollection(true);
+    if (!utf8len) {
+        if (state.undoActive)
+            stc->SetUndoCollection(true);
+    }
     else {
         int start = pos;
         // Range is in utf-16 code units

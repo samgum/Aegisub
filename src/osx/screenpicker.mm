@@ -59,7 +59,10 @@ void DropFromScreen(int x, int y, int resx, int resy, int magnification, wxMemor
 	CGGetDisplaysWithPoint(CGPointMake(x, y), 1, &display_id, &display_count);
 
 	agi::scoped_holder<CGImageRef> img(CGDisplayCreateImageForRect(display_id, rect), CGImageRelease);
-	CopyToDC(img, capdc, resx, resy, magnification);
+	// Capture can fail (asleep display, denied permission); a NULL image
+	// would crash CGImageGetWidth.
+	if (img)
+		CopyToDC(img, capdc, resx, resy, magnification);
 #else
 	wxSemaphore screenshot_notify{0, 1};
 	wxSemaphore &screenshot_notify_ref = screenshot_notify;
@@ -82,6 +85,7 @@ void DropFromScreen(int x, int y, int resx, int resy, int magnification, wxMemor
 
 		CGDisplayModeRef displaymode = CGDisplayCopyDisplayMode(display_id);
 		int scale_factor = CGDisplayModeGetPixelWidth(displaymode) / CGDisplayModeGetWidth(displaymode);
+		CGDisplayModeRelease(displaymode);
 
 		SCDisplay* point_display = nullptr;
 
@@ -114,6 +118,11 @@ void DropFromScreen(int x, int y, int resx, int resy, int magnification, wxMemor
 			CopyToDC(sampleBuffer, capdc, resx, resy, magnification);
 			screenshot_notify_ref.Post();
 		}];
+
+		// No ARC in this project; the async API keeps its own references for
+		// the duration of the capture, so drop ours now instead of leaking.
+		[filter release];
+		[configuration release];
 	}];
 
 #else
