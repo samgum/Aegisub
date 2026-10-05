@@ -47,6 +47,7 @@ if (Test-Path $gitVersionHeaderPath) {
 $gitRevision = $lastSvnRevision + ((git -C $repositoryRootPath log --pretty=oneline "$($lastSvnHash)..HEAD" 2>$null | Measure-Object).Count)
 $gitBranch = git -C $repositoryRootPath symbolic-ref --short HEAD 2>$null
 $gitHash = git -C $repositoryRootPath rev-parse --short HEAD 2>$null
+$gitCommit = git -C $repositoryRootPath rev-parse HEAD 2>$null
 $gitVersionString = $gitRevision, $gitBranch, $gitHash -join '-'
 $exactGitTag = git -C $repositoryRootPath describe --exact-match --tags 2>$null
 $mesonVersionParts = $null
@@ -57,7 +58,8 @@ if ($mesonBuild -match $mesonVersionMatch) {
   if ($Matches[4]) { $mesonVersionParts += $Matches[4] }
 }
 
-if ($gitVersionString -eq $version['BUILD_GIT_VERSION_STRING']) {
+if ($gitVersionString -eq $version['BUILD_GIT_VERSION_STRING'] -and
+    $gitCommit -eq $version['BUILD_GIT_COMMIT']) {
   exit 0
 }
 
@@ -101,6 +103,7 @@ if (!$version.ContainsKey('RESOURCE_BASE_VERSION')) {
 
 $version['BUILD_GIT_VERSION_NUMBER'] = $gitRevision
 $version['BUILD_GIT_VERSION_STRING'] = $gitVersionString
+$version['BUILD_GIT_COMMIT'] = $gitCommit
 
 $version.GetEnumerator() | %{
   $key = $_.Key

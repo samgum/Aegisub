@@ -43,6 +43,7 @@ tests_src = [
     'tests/time.cpp',
     'tests/type_name.cpp',
     'tests/util.cpp',
+    'tests/update_checker.cpp',
     'tests/uuencode.cpp',
     'tests/vfr.cpp',
     'tests/word_split.cpp',

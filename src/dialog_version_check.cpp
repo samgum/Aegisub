@@ -33,18 +33,17 @@
 #include "format.h"
 #include "options.h"
 #include "version.h"
+#include "update_checker.h"
 
-#include <libaegisub/ass/string_codec.h>
 #include <libaegisub/dispatch.h>
 #include <libaegisub/exception.h>
-#include <libaegisub/line_iterator.h>
-#include <libaegisub/scoped_ptr.h>
-#include <libaegisub/split.h>
+#include <libaegisub/cajun/reader.h>
 
 #include <ctime>
 #include <curl/curl.h>
 #include <functional>
 #include <mutex>
+#include <memory>
 #include <sstream>
 #include <vector>
 #include <wx/button.h>
@@ -53,25 +52,14 @@
 #include <wx/event.h>
 #include <wx/hyperlink.h>
 #include <wx/intl.h>
-#include <wx/platinfo.h>
 #include <wx/sizer.h>
 #include <wx/statline.h>
 #include <wx/stattext.h>
 #include <wx/string.h>
 #include <wx/textctrl.h>
 
-#ifdef __APPLE__
-#include <CoreFoundation/CoreFoundation.h>
-#endif
-
 namespace {
 std::mutex VersionCheckLock;
-
-struct AegisubUpdateDescription {
-	std::string url;
-	std::string friendly_name;
-	std::string description;
-};
 
 class VersionCheckerResultDialog final : public wxDialog {
 	void OnCloseButton(wxCommandEvent &evt);
@@ -81,12 +69,12 @@ class VersionCheckerResultDialog final : public wxDialog {
 	wxCheckBox *automatic_check_checkbox;
 
 public:
-	VersionCheckerResultDialog(wxString const& main_text, const std::vector<AegisubUpdateDescription> &updates);
+	VersionCheckerResultDialog(wxString const& main_text, const std::vector<sgmy::updates::Release> &updates);
 
 	bool ShouldPreventAppExit() const override { return false; }
 };
 
-VersionCheckerResultDialog::VersionCheckerResultDialog(wxString const& main_text, const std::vector<AegisubUpdateDescription> &updates)
+VersionCheckerResultDialog::VersionCheckerResultDialog(wxString const& main_text, const std::vector<sgmy::updates::Release> &updates)
 : wxDialog(nullptr, -1, _("Version Checker"))
 {
 	const int controls_width = 500;
@@ -100,7 +88,7 @@ VersionCheckerResultDialog::VersionCheckerResultDialog(wxString const& main_text
 	for (auto const& update : updates) {
 		main_sizer->Add(new wxStaticLine(this), 0, wxEXPAND|wxALL, 6);
 
-		text = new wxStaticText(this, -1, to_wx(update.friendly_name));
+		text = new wxStaticText(this, -1, to_wx(update.name));
 		wxFont boldfont = text->GetFont();
 		boldfont.SetWeight(wxFONTWEIGHT_BOLD);
 		text->SetFont(boldfont);
@@ -169,173 +157,77 @@ void PostErrorEvent(bool interactive, wxString const& error_text) {
 	}
 }
 
-static const char * GetOSShortName() {
-	int osver_maj, osver_min;
-	wxOperatingSystemId osid = wxGetOsVersion(&osver_maj, &osver_min);
-
-	if (osid & wxOS_WINDOWS_NT) {
-		if (osver_maj == 5 && osver_min == 0)
-			return "win2k";
-		else if (osver_maj == 5 && osver_min == 1)
-			return "winxp";
-		else if (osver_maj == 5 && osver_min == 2)
-			return "win2k3"; // this is also xp64
-		else if (osver_maj == 6 && osver_min == 0)
-			return "win60"; // vista and server 2008
-		else if (osver_maj == 6 && osver_min == 1)
-			return "win61"; // 7 and server 2008r2
-		else if (osver_maj == 6 && osver_min == 2)
-			return "win62"; // 8 and server 2012
-		else if (osver_maj == 6 && osver_min == 3)
-			return "win63"; // 8.1 and server 2012r2
-		else if (osver_maj == 10 && osver_min == 0)
-			return "win10"; // 10 or 11 and server 2016/2019
-		else
-			return "windows"; // future proofing? I doubt we run on nt4
-	}
-	// CF returns 0x10 for some reason, which wx has recently started
-	// turning into 10
-	else if (osid & wxOS_MAC_OSX_DARWIN && (osver_maj == 0x10 || osver_maj == 10)) {
-		// ugliest hack in the world? nah.
-		static char osxstring[] = "osx00";
-		char minor = osver_min >> 4;
-		char patch = osver_min & 0x0F;
-		osxstring[3] = minor + ((minor<=9) ? '0' : ('a'-1));
-		osxstring[4] = patch + ((patch<=9) ? '0' : ('a'-1));
-		return osxstring;
-	}
-	else if (osid & wxOS_UNIX_LINUX)
-		return "linux";
-	else if (osid & wxOS_UNIX_FREEBSD)
-		return "freebsd";
-	else if (osid & wxOS_UNIX_OPENBSD)
-		return "openbsd";
-	else if (osid & wxOS_UNIX_NETBSD)
-		return "netbsd";
-	else if (osid & wxOS_UNIX_SOLARIS)
-		return "solaris";
-	else if (osid & wxOS_UNIX_AIX)
-		return "aix";
-	else if (osid & wxOS_UNIX_HPUX)
-		return "hpux";
-	else if (osid & wxOS_UNIX)
-		return "unix";
-	else if (osid & wxOS_OS2)
-		return "os2";
-	else if (osid & wxOS_DOS)
-		return "dos";
-	else
-		return "unknown";
-}
-
-#ifdef WIN32
-typedef BOOL (WINAPI * PGetUserPreferredUILanguages)(DWORD dwFlags, PULONG pulNumLanguages, wchar_t *pwszLanguagesBuffer, PULONG pcchLanguagesBuffer);
-
-// Try using Win 6+ functions if available
-static wxString GetUILanguage() {
-	agi::scoped_holder<HMODULE, BOOL (__stdcall *)(HMODULE)> kernel32(LoadLibraryW(L"kernel32.dll"), FreeLibrary);
-	if (!kernel32) return "";
-
-	PGetUserPreferredUILanguages gupuil = (PGetUserPreferredUILanguages)GetProcAddress(kernel32, "GetUserPreferredUILanguages");
-	if (!gupuil) return "";
-
-	ULONG numlang = 0, output_len = 0;
-	if (gupuil(MUI_LANGUAGE_NAME, &numlang, 0, &output_len) != TRUE || !output_len)
-		return "";
-
-	std::vector<wchar_t> output(output_len);
-	if (!gupuil(MUI_LANGUAGE_NAME, &numlang, &output[0], &output_len) || numlang < 1)
-		return "";
-
-	// We got at least one language, just treat it as the only, and a null-terminated string
-	return &output[0];
-}
-
-static wxString GetSystemLanguage() {
-	wxString res = GetUILanguage();
-	if (!res)
-		// On an old version of Windows, let's just return the LANGID as a string
-		res = fmt_wx("x-win%04x", GetUserDefaultUILanguage());
-
-	return res;
-}
-#elif __APPLE__
-static wxString GetSystemLanguage() {
-	CFLocaleRef locale = CFLocaleCopyCurrent();
-	CFStringRef localeName = (CFStringRef)CFLocaleGetValue(locale, kCFLocaleIdentifier);
-
-	char buf[128] = { 0 };
-	CFStringGetCString(localeName, buf, sizeof buf, kCFStringEncodingUTF8);
-	CFRelease(locale);
-
-	return wxString::FromUTF8(buf);
-
-}
-#else
-static wxString GetSystemLanguage() {
-	return wxLocale::GetLanguageInfo(wxLocale::GetSystemLanguage())->CanonicalName;
-}
-#endif
-
-static wxString GetAegisubLanguage() {
-	return to_wx(OPT_GET("App/Language")->GetString());
-}
-
 size_t writeToStringCb(char *contents, size_t size, size_t nmemb, std::string *s) {
-	s->append(contents, size * nmemb);
-	return size * nmemb;
+	constexpr size_t limit = 8 * 1024 * 1024;
+	if (!size || nmemb > limit / size) return 0;
+	size_t bytes = size * nmemb;
+	if (bytes > limit - s->size()) return 0;
+	try {
+		s->append(contents, bytes);
+		return bytes;
+	}
+	catch (...) {
+		return 0;
+	}
 }
 
-void DoCheck(bool interactive) {
-	CURL *curl;
-	CURLcode res_code;
-
-	curl = curl_easy_init();
+std::optional<json::UnknownElement> FetchJson(std::string const& url, bool allow_not_found = false) {
+	std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> curl(curl_easy_init(), curl_easy_cleanup);
 	if (!curl)
 		throw VersionCheckError(from_wx(_("Curl could not be initialized.")));
 
-	curl_easy_setopt(curl, CURLOPT_URL,
-		agi::format("%s%s?rev=%d&rel=%d&os=%s&lang=%s&aegilang=%s"
-			, UPDATE_CHECKER_SERVER
-			, UPDATE_CHECKER_BASE_URL
-			, GetSVNRevision()
-			, (GetIsOfficialRelease() ? 1 : 0)
-			, GetOSShortName()
-			, GetSystemLanguage()
-			, GetAegisubLanguage()
-		).c_str());
-	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, agi::format("Aegisub %s", GetAegisubLongVersionString()).c_str());
+	curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
+	curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl.get(), CURLOPT_MAXREDIRS, 3L);
+	curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT, 10L);
+	curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT, 30L);
+	curl_easy_setopt(curl.get(), CURLOPT_NOSIGNAL, 1L);
+	curl_easy_setopt(curl.get(), CURLOPT_USERAGENT, "Aegisub-SGMY update checker");
 
 	std::string result;
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeToStringCb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result);
+	curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, writeToStringCb);
+	curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &result);
+	auto res_code = curl_easy_perform(curl.get());
+	if (res_code != CURLE_OK)
+		throw VersionCheckError(agi::format(_("Checking for updates failed: %s."), curl_easy_strerror(res_code)));
 
-	res_code = curl_easy_perform(curl);
-	curl_easy_cleanup(curl);
-	if (res_code != CURLE_OK) {
-		std::string err_msg = agi::format(_("Checking for updates failed: %s."), curl_easy_strerror(res_code));
-		throw VersionCheckError(err_msg);
+	long status = 0;
+	curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &status);
+	// An empty repository has no latest release. Errors such as rate limiting
+	// or a failed comparison must never be presented as "no updates".
+	if (status == 404 && allow_not_found) return std::nullopt;
+	if (status != 200)
+		throw VersionCheckError(agi::format(_("Checking for updates failed: %s."),
+			"GitHub HTTP " + std::to_string(status)));
+
+	std::istringstream stream(result);
+	json::UnknownElement root;
+	try {
+		json::Reader::Read(root, stream);
 	}
+	catch (json::Exception const& e) {
+		throw VersionCheckError(agi::format(_("Checking for updates failed: %s."), e.what()));
+	}
+	return root;
+}
 
-	std::stringstream ss(result);
-	std::vector<AegisubUpdateDescription> results;
-	for (auto const& line : agi::line_iterator<std::string>(ss)) {
-		if (line.empty()) continue;
-
-		std::vector<std::string> parsed;
-		agi::Split(parsed, line, '|');
-		if (parsed.size() != 6) continue;
-
-		if (atoi(parsed[1].c_str()) <= GetSVNRevision())
-			continue;
-
-		// 0 and 2 being things that never got used
-		results.push_back(AegisubUpdateDescription{
-			agi::ass::inline_string_decode(parsed[3]),
-			agi::ass::inline_string_decode(parsed[4]),
-			agi::ass::inline_string_decode(parsed[5])
-		});
+void DoCheck(bool interactive) {
+	std::vector<sgmy::updates::Release> results;
+	std::string api = std::string(UPDATE_CHECKER_SERVER) + UPDATE_CHECKER_BASE_URL;
+	if (auto response = FetchJson(api + "/releases/latest", true)) {
+		try {
+			if (auto release = sgmy::updates::ParseRelease(*response)) {
+				std::string commit = GetBuildGitCommit();
+				if (!sgmy::updates::IsBuildCommit(commit))
+					throw std::runtime_error("This build has no Git commit for update comparison");
+				auto comparison = FetchJson(api + "/compare/" + commit + "..." + release->tag + "?per_page=1");
+				if (sgmy::updates::IsNewerRelease(*comparison))
+					results.push_back(std::move(*release));
+			}
+		}
+		catch (std::exception const& e) {
+			throw VersionCheckError(agi::format(_("Checking for updates failed: %s."), e.what()));
+		}
 	}
 
 	if (!results.empty() || interactive) {

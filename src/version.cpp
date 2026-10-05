@@ -85,3 +85,11 @@ int GetSVNRevision() {
 	return 0;
 #endif
 }
+
+const char *GetBuildGitCommit() {
+#ifdef BUILD_GIT_COMMIT
+	return BUILD_GIT_COMMIT;
+#else
+	return "";
+#endif
+}

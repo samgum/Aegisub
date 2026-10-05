@@ -73,10 +73,12 @@ else
 fi
 
 build_date="$(date "+%Y-%m-%d %H:%M %Z")"
+git_commit=$(git rev-parse HEAD)
 
 new_version_h="\
 #define BUILD_GIT_VERSION_NUMBER ${git_revision}
 #define BUILD_GIT_VERSION_STRING \"${git_version_str}\"
+#define BUILD_GIT_COMMIT \"${git_commit}\"
 #define TAGGED_RELEASE ${tagged_release}
 #define INSTALLER_VERSION \"${installer_version}\"
 #define RESOURCE_BASE_VERSION ${resource_version}"
@@ -91,7 +93,7 @@ s/@PLIST_BUILD_DATE@/${build_date}/g
 
 # Write it only if it's changed to avoid spurious rebuilds
 # This bizarre comparison method is due to that newlines in shell variables are very exciting
-case "$(cat ${version_h_path} 2> /dev/null)"
+case "$(cat "${version_h_path}" 2> /dev/null)"
 in
   "${new_version_h}");;
   *)

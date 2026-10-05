@@ -46,3 +46,5 @@ bool GetIsOfficialRelease();
 const char *GetVersionNumber();
 /// Get SVN revision
 int GetSVNRevision();
+/// Full Git commit used to build this binary, also preserved in source archives.
+const char *GetBuildGitCommit();
