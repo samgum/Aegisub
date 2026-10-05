@@ -1,0 +1,147 @@
+name: Publish SGMY release
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful Meson CI run containing the release artifacts
+        required: true
+        type: string
+      release_date:
+        description: Release date (YYYY-MM-DD)
+        required: true
+        type: string
+      notes:
+        description: Markdown release notes
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: sgmy-release-${{ inputs.release_date }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate CI, package artifacts and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ inputs.run_id }}
+          RELEASE_DATE: ${{ inputs.release_date }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+        shell: python
+        run: |
+          import datetime
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import shutil
+          import subprocess
+          import tarfile
+          import zipfile
+
+          def gh(*args):
+              return subprocess.check_output(['gh', *args], text=True).strip()
+
+          repo = os.environ['GH_REPO']
+          api = f'repos/{repo}'
+          run_id = os.environ['RUN_ID']
+          date = os.environ['RELEASE_DATE']
+          assert re.fullmatch(r'[0-9]+', run_id), 'Invalid run id'
+          assert re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', date), 'Invalid release date'
+          datetime.date.fromisoformat(date)
+          tag = f'Aegisub-SGMY-{date}'
+          notes = pathlib.Path('notes.md')
+          notes.write_text(os.environ['RELEASE_NOTES'], encoding='utf-8')
+          assert notes.stat().st_size, 'Release notes are empty'
+
+          run = json.loads(gh('api', f'{api}/actions/runs/{run_id}'))
+          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'CI must pass'
+          assert run['head_branch'] == 'master' and run['event'] in ('push', 'workflow_dispatch'), 'Use master CI'
+          assert run['path'] == '.github/workflows/ci.yml', 'Use the Meson CI workflow'
+          assert run['repository']['full_name'] == repo and run['head_repository']['full_name'] == repo, 'Wrong repository'
+          sha = run['head_sha']
+          assert re.fullmatch(r'[0-9a-f]{40}', sha), 'Invalid commit'
+          jobs = json.loads(gh('api', f'{api}/actions/runs/{run_id}/jobs?per_page=100'))['jobs']
+          expected_jobs = {
+              'Windows MSVC Release', 'Ubuntu Debug', 'Ubuntu Release',
+              'macOS x86_64 Debug', 'macOS x86_64 Release',
+              'macOS arm64 Debug', 'macOS arm64 Release',
+          }
+          assert expected_jobs <= {job['name'] for job in jobs}, 'Missing CI jobs'
+          assert all(job['conclusion'] == 'success' for job in jobs), 'A CI job did not pass'
+          artifacts = json.loads(gh('api', f'{api}/actions/runs/{run_id}/artifacts?per_page=100'))['artifacts']
+          specifications = [
+              ('Windows MSVC Release - installer', '*.exe', 'Windows-Installer.exe'),
+              ('Windows MSVC Release - portable', 'aegisub-portable-64.zip', 'Windows-Portable.zip'),
+              ('macOS x86_64 Release - installer', '*.dmg', 'macOS-x86_64.dmg'),
+              ('macOS arm64 Release - installer', '*.dmg', 'macOS-arm64.dmg'),
+              ('Source Tarball', '*.tar.xz', 'Source.tar.xz'),
+          ]
+          output = pathlib.Path('release-assets')
+          output.mkdir()
+          for index, (name, pattern, suffix) in enumerate(specifications):
+              matches = [artifact for artifact in artifacts if artifact['name'] == name and not artifact['expired']]
+              assert len(matches) == 1, f'Missing/ambiguous artifact: {name}'
+              artifact = matches[0]
+              assert artifact['workflow_run']['head_sha'] == sha, 'Artifact commit mismatch'
+              directory = pathlib.Path('downloads') / str(index)
+              gh('run', 'download', run_id, '--repo', repo, '--name', name, '--dir', str(directory))
+              files = list(directory.rglob(pattern))
+              assert len(files) == 1 and files[0].stat().st_size > 0, f'Missing/ambiguous file: {name}'
+              destination = output / f'{tag}-{suffix}'
+              shutil.copyfile(files[0], destination)
+              if suffix.endswith('.exe'):
+                  with destination.open('rb') as handle:
+                      assert handle.read(2) == b'MZ', 'Invalid Windows installer'
+              elif suffix.endswith('.zip'):
+                  with zipfile.ZipFile(destination) as archive:
+                      assert archive.testzip() is None, 'Corrupt portable archive'
+                      assert any(path.lower().endswith('aegisub.exe') for path in archive.namelist()), 'Missing application'
+              elif suffix.endswith('.dmg'):
+                  with destination.open('rb') as handle:
+                      handle.seek(-512, 2)
+                      assert handle.read(4) == b'koly', 'Invalid DMG trailer'
+              else:
+                  with tarfile.open(destination, 'r:xz') as archive:
+                      assert any(member.name.endswith('/meson.build') for member in archive.getmembers()), 'Invalid source archive'
+
+          digests = {}
+          for path in sorted(output.iterdir()):
+              with path.open('rb') as handle:
+                  digests[path.name] = hashlib.file_digest(handle, 'sha256').hexdigest()
+          manifest = output / f'{tag}-SHA256.txt'
+          manifest.write_text(''.join(f'{digest}  {name}\n' for name, digest in digests.items()), encoding='utf-8')
+          with manifest.open('rb') as handle:
+              digests[manifest.name] = hashlib.file_digest(handle, 'sha256').hexdigest()
+          published = json.loads(gh('api', f'{api}/releases?per_page=100'))
+          existing = [release for release in published if release['tag_name'] == tag]
+          assert not existing or (existing[0]['draft'] and existing[0]['target_commitish'] == sha), 'Release already published or targets another commit'
+          refs = json.loads(gh('api', f'{api}/git/matching-refs/tags/{tag}'))
+          matching = [ref for ref in refs if ref['ref'] == f'refs/tags/{tag}']
+          if matching:
+              assert matching[0]['object']['sha'] == sha, 'Existing tag targets another commit'
+          else:
+              gh('api', '--method', 'POST', f'{api}/git/refs', '-f', f'ref=refs/tags/{tag}', '-f', f'sha={sha}')
+          if not existing:
+              gh('release', 'create', tag, '--repo', repo, '--verify-tag', '--target', sha,
+                 '--draft', '--title', f'Aegisub SGMY {date}', '--notes-file', str(notes))
+          gh('release', 'upload', tag, '--repo', repo, '--clobber', *map(str, sorted(output.iterdir())))
+          release_url = json.loads(gh('release', 'view', tag, '--repo', repo, '--json', 'apiUrl'))['apiUrl']
+          release = json.loads(gh('api', release_url))
+          assert {asset['name'] for asset in release['assets']} == set(digests), 'Release attachment mismatch'
+          assert all(asset['state'] == 'uploaded' and asset['digest'] == f"sha256:{digests[asset['name']]}"
+                     for asset in release['assets']), 'Release digest mismatch'
+          gh('release', 'edit', tag, '--repo', repo, '--draft=false', '--latest',
+             '--title', f'Aegisub SGMY {date}', '--notes-file', str(notes))
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as handle:
+              handle.write(f'Published [{tag}](https://github.com/{repo}/releases/tag/{tag}) from `{sha}`\n')
+              handle.write(f'CI run: https://github.com/{repo}/actions/runs/{run_id}\n')
