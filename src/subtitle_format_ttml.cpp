@@ -24,7 +24,6 @@
 
 #include "ass_dialogue.h"
 #include "ass_file.h"
-#include "compat.h"
 #include "options.h"
 
 #include <libaegisub/ass/time.h>
@@ -36,26 +35,29 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
-#include <memory>
+#include <limits>
+#include <locale>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include <boost/algorithm/string/trim.hpp>
 
 namespace {
-// Parse a double from a string_view. std::from_chars' floating-point
-// overloads are deleted on macOS libc++, so use a bounded strtod copy —
-// TTML time components are far shorter than this buffer.
+// Use the classic locale on every platform: strtod follows LC_NUMERIC,
+// while TTML always uses '.' irrespective of the user's language settings.
 bool ParseDouble(std::string_view str, double& out) {
-	char buf[64];
-	if (str.empty() || str.size() >= sizeof(buf)) return false;
-	std::copy(str.begin(), str.end(), buf);
-	buf[str.size()] = '\0';
-	char* end = nullptr;
-	out = std::strtod(buf, &end);
-	return end == buf + str.size();
+	if (str.empty() || str.size() >= 64) return false;
+	std::istringstream stream{std::string(str)};
+	stream.imbue(std::locale::classic());
+	stream >> std::noskipws >> out;
+	return !stream.fail() && stream.eof() && std::isfinite(out) && out >= 0;
+}
+
+int64_t Milliseconds(double amount, double scale) {
+	double ms = amount * scale;
+	if (!std::isfinite(ms) || ms < 0 || ms > std::numeric_limits<int>::max()) return -1;
+	return static_cast<int64_t>(std::llround(ms));
 }
 
 // Parse a TTML clock-time or offset-time value to milliseconds.
@@ -80,10 +82,10 @@ int64_t ParseTTMLTime(std::string_view value) {
 		double amount = 0.0;
 		if (!ParseDouble(num, amount))
 			return -1;
-		if (suffix == "ms") return static_cast<int64_t>(std::llround(amount));
-		if (suffix == "s") return static_cast<int64_t>(std::llround(amount * 1000));
-		if (suffix == "m") return static_cast<int64_t>(std::llround(amount * 60000));
-		if (suffix == "h") return static_cast<int64_t>(std::llround(amount * 3600000));
+		if (suffix == "ms") return Milliseconds(amount, 1);
+		if (suffix == "s") return Milliseconds(amount, 1000);
+		if (suffix == "m") return Milliseconds(amount, 60000);
+		if (suffix == "h") return Milliseconds(amount, 3600000);
 		return -1;
 	}
 
@@ -94,66 +96,38 @@ int64_t ParseTTMLTime(std::string_view value) {
 		double seconds = 0.0;
 		if (!ParseDouble(value, seconds))
 			return -1;
-		return static_cast<int64_t>(std::llround(seconds * 1000));
+		return Milliseconds(seconds, 1000);
 	}
 
-	auto parse_component = [](std::string_view str, double& out) -> bool {
-		if (!str.empty() && str.front() == ',') str.remove_prefix(1);
-		if (str.empty()) return false;
-		return ParseDouble(str, out);
+	// Colon-separated clock time: only integral hour/minute components,
+	// and a seconds component with an optional decimal fraction.
+	size_t last_colon = value.find_last_of(':');
+	std::string seconds_part(value.substr(last_colon + 1));
+	std::replace(seconds_part.begin(), seconds_part.end(), ',', '.');
+	double seconds = 0;
+	if (!ParseDouble(seconds_part, seconds) || seconds >= 60) return -1;
+	auto integer = [](std::string_view part, int64_t& out) {
+		if (part.empty() || part.find_first_not_of("0123456789") != std::string_view::npos) return false;
+		auto parsed = std::from_chars(part.data(), part.data() + part.size(), out);
+		return parsed.ec == std::errc{} && parsed.ptr == part.data() + part.size();
 	};
-
-	// Optional leading fraction on the seconds part.
-	double seconds = 0.0;
-	size_t sec_start = value.find_last_of(':');
-	std::string_view sec_part = value.substr(sec_start + 1);
-	size_t dot = sec_part.find_first_of(".,");
-	std::string_view frac;
-	if (dot != std::string::npos) {
-		frac = sec_part.substr(dot);
-		sec_part = sec_part.substr(0, dot);
-	}
-	if (!parse_component(sec_part, seconds)) return -1;
-
 	int64_t hours = 0, minutes = 0;
-	if (sec_start > 0) {
-		std::string_view mm_part = value.substr(0, sec_start);
-		size_t mm_colon = mm_part.find_last_of(':');
-		std::string_view mm_sv = mm_colon == std::string::npos ? mm_part : mm_part.substr(mm_colon + 1);
-		double mm = 0.0;
-		if (!parse_component(mm_sv, mm)) return -1;
-		minutes = static_cast<int64_t>(mm);
-
-		if (mm_colon != std::string::npos) {
-			double hh = 0.0;
-			if (!parse_component(mm_part.substr(0, mm_colon), hh)) return -1;
-			hours = static_cast<int64_t>(hh);
-		}
+	if (first_colon == last_colon) {
+		if (!integer(value.substr(0, first_colon), minutes)) return -1;
 	}
-
-	double frac_seconds = 0.0;
-	if (!frac.empty()) {
-		// frac includes its separator ('.' or ',') and possibly more colons
-		// (frame-based "begin" values are not supported; treat '.' only).
-		if (frac.front() == '.' || frac.front() == ',') {
-			frac.remove_prefix(1);
-			if (!frac.empty() && frac.find(':') == std::string::npos) {
-				std::string_view digits = frac;
-				// "5" = .5 s, "50" = .50 s, "500" = .5 s — spec says fraction of second
-				double v = 0.0;
-				if (ParseDouble(digits, v))
-					frac_seconds = v / std::pow(10.0, static_cast<double>(digits.size()));
-			}
-		}
+	else {
+		if (!integer(value.substr(0, first_colon), hours)
+			|| !integer(value.substr(first_colon + 1, last_colon - first_colon - 1), minutes)
+			|| minutes >= 60) return -1;
 	}
-
-	return ((hours * 60 + minutes) * 60 + static_cast<int64_t>(seconds)) * 1000
-		+ static_cast<int64_t>(std::llround(frac_seconds * 1000));
+	return Milliseconds(static_cast<double>(hours) * 3600 + static_cast<double>(minutes) * 60 + seconds, 1000);
 }
 
 // Local name of an XML node with any namespace prefix stripped.
 std::string LocalName(wxXmlNode const* node) {
-	return node->GetName().ToStdString(); // wxXml already reports unprefixed names for parsed docs
+	std::string name = node->GetName().ToStdString(wxConvUTF8);
+	auto colon = name.find(':');
+	return colon == std::string::npos ? name : name.substr(colon + 1);
 }
 
 bool IsElement(wxXmlNode const* node, std::string_view local) {
@@ -179,12 +153,12 @@ struct TtmlParagraph {
 bool ParseParagraphTimes(wxXmlNode const* p, int64_t& begin_ms, int64_t& end_ms) {
 	std::string begin_str, end_str, dur_str;
 	for (auto attr = p->GetAttributes(); attr; attr = attr->GetNext()) {
-		std::string name = attr->GetName().ToStdString();
+		std::string name = attr->GetName().ToStdString(wxConvUTF8);
 		auto pos = name.find(':');
 		if (pos != std::string::npos) name = name.substr(pos + 1);
-		if (name == "begin") begin_str = attr->GetValue().ToStdString();
-		else if (name == "end") end_str = attr->GetValue().ToStdString();
-		else if (name == "dur") dur_str = attr->GetValue().ToStdString();
+		if (name == "begin") begin_str = attr->GetValue().ToStdString(wxConvUTF8);
+		else if (name == "end") end_str = attr->GetValue().ToStdString(wxConvUTF8);
+		else if (name == "dur") dur_str = attr->GetValue().ToStdString(wxConvUTF8);
 	}
 
 	begin_ms = ParseTTMLTime(begin_str);
@@ -192,11 +166,12 @@ bool ParseParagraphTimes(wxXmlNode const* p, int64_t& begin_ms, int64_t& end_ms)
 
 	if (!end_str.empty()) {
 		end_ms = ParseTTMLTime(end_str);
-		if (end_ms < 0) end_ms = begin_ms;
+		if (end_ms < 0) return false;
 	}
 	else if (!dur_str.empty()) {
 		int64_t dur = ParseTTMLTime(dur_str);
-		end_ms = dur < 0 ? begin_ms : begin_ms + dur;
+		if (dur < 0 || dur > std::numeric_limits<int>::max() - begin_ms) return false;
+		end_ms = begin_ms + dur;
 	}
 	else {
 		end_ms = begin_ms;
@@ -217,7 +192,7 @@ std::string CollectVisibleText(wxXmlNode const* node) {
 		switch (child->GetType()) {
 			case wxXML_TEXT_NODE:
 			case wxXML_CDATA_SECTION_NODE:
-				out += child->GetContent().ToStdString();
+				out += child->GetContent().ToStdString(wxConvUTF8);
 				break;
 			case wxXML_ELEMENT_NODE:
 				if (IsElement(child, "br"))
@@ -239,7 +214,7 @@ void BuildParagraphText(wxXmlNode *p,
 		switch (node->GetType()) {
 			case wxXML_TEXT_NODE:
 			case wxXML_CDATA_SECTION_NODE: {
-				std::string text = node->GetContent().ToStdString();
+				std::string text = node->GetContent().ToStdString(wxConvUTF8);
 				if (has_karaoke && !segments.empty())
 					segments.back().text += text;
 				else
@@ -258,15 +233,15 @@ void BuildParagraphText(wxXmlNode *p,
 					std::string begin_attr, end_attr;
 					bool role_bg = false;
 					for (auto attr = node->GetAttributes(); attr; attr = attr->GetNext()) {
-						std::string name = attr->GetName().ToStdString();
+						std::string name = attr->GetName().ToStdString(wxConvUTF8);
 						auto pos = name.find(':');
 						if (pos != std::string::npos) name = name.substr(pos + 1);
-						if (name == "begin") begin_attr = attr->GetValue().ToStdString();
-						else if (name == "end") end_attr = attr->GetValue().ToStdString();
+						if (name == "begin") begin_attr = attr->GetValue().ToStdString(wxConvUTF8);
+						else if (name == "end") end_attr = attr->GetValue().ToStdString(wxConvUTF8);
 						else if (name == "role") {
 							// Apple Music marks background vocals with
 							// ttm:role="x-bg"; they sing alongside the lead.
-							std::string role = attr->GetValue().ToStdString();
+							std::string role = attr->GetValue().ToStdString(wxConvUTF8);
 							if (role.rfind("x-bg", 0) == 0) role_bg = true;
 						}
 					}
@@ -289,18 +264,9 @@ void BuildParagraphText(wxXmlNode *p,
 						// Untimed wrapper: its timed children still need their
 						// own segments, so recurse instead of flattening them
 						// into plain text, propagating the x-bg voice flag.
-						bool child_has_karaoke = false;
-						std::vector<TtmlSegment> child_segments;
-						BuildParagraphText(node, plain, child_has_karaoke, child_segments, voice_bg);
-						if (child_has_karaoke) {
-							has_karaoke = true;
-							segments.insert(segments.end(),
-								std::make_move_iterator(child_segments.begin()),
-								std::make_move_iterator(child_segments.end()));
-						}
-						else {
-							plain += span_text;
-						}
+						// Share the current text/segments so untimed wrapper text
+						// is appended exactly once at its document position.
+						BuildParagraphText(node, plain, has_karaoke, segments, voice_bg);
 					}
 					break;
 				}
@@ -328,7 +294,7 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 	target->LoadDefault(false, OPT_GET("Subtitle Format/TTXT/Default Style Catalog")->GetString());
 
 	wxXmlDocument doc;
-	if (!doc.Load(filename.wstring())) throw SubtitleFormatParseError("Failed loading TTML XML file.");
+	if (!doc.Load(wxString::FromUTF8(filename.string()))) throw SubtitleFormatParseError("Failed loading TTML XML file.");
 	if (!doc.GetRoot() || !IsElement(doc.GetRoot(), "tt"))
 		throw SubtitleFormatParseError("Invalid TTML file: root element is not <tt>.");
 
@@ -348,7 +314,14 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 
 			if (IsElement(cur, "p")) {
 				TtmlParagraph para;
-				if (!ParseParagraphTimes(cur, para.begin_ms, para.end_ms)) {
+				bool paragraph_timed = ParseParagraphTimes(cur, para.begin_ms, para.end_ms);
+				if (!paragraph_timed) {
+					bool has_begin = false;
+					for (auto attr = cur->GetAttributes(); attr; attr = attr->GetNext()) {
+						auto name = attr->GetName().ToStdString(wxConvUTF8);
+						if (name == "begin" || name.ends_with(":begin")) has_begin = true;
+					}
+					if (has_begin) continue;
 					// Apple Music exports songs without any timing at all
 					// (itunes:timing="None"): every <p> is bare text. Import
 					// them like the plain-text reader does — one untimed row
@@ -360,35 +333,40 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 				std::string plain;
 				BuildParagraphText(cur, plain, para.has_karaoke, para.segments);
 
-				boost::trim(plain);
+				boost::trim_left(plain);
 				if (para.has_karaoke) {
 					std::stable_sort(para.segments.begin(), para.segments.end(),
 						[](TtmlSegment const& a, TtmlSegment const& b) { return a.begin_ms < b.begin_ms; });
 					if (para.end_ms <= para.begin_ms) {
 						// Untimed <p> whose word spans still carry timing:
 						// derive the row's bounds from the spans themselves.
-						para.begin_ms = para.segments.front().begin_ms;
+						if (!paragraph_timed) para.begin_ms = para.segments.front().begin_ms;
 						para.end_ms = 0;
 						for (auto const& seg : para.segments)
 							para.end_ms = std::max(para.end_ms,
-								seg.end_ms > seg.begin_ms ? seg.end_ms : seg.begin_ms);
+								seg.end_ms > seg.begin_ms ? seg.end_ms : std::min<int64_t>(seg.begin_ms + 500, std::numeric_limits<int>::max()));
+						para.end_ms = std::max(para.end_ms, para.begin_ms);
 					}
 					auto karaoke_cs = [](int64_t ms) { return static_cast<int>((ms + 5) / 10); };
 					// Word spans that carry their own end keep it (Apple Music
 					// data does), so held notes keep their real length; others
 					// run to the next word or the line end.
-					auto build_karaoke = [&](std::vector<TtmlSegment> const& segs, int64_t line_end) {
+					auto build_karaoke = [&](std::vector<TtmlSegment> const& segs, int64_t line_begin, int64_t line_end) {
 						std::string out;
+						int64_t elapsed_cs = 0;
 						for (size_t s = 0; s < segs.size(); ++s) {
-							int64_t seg_end;
-							if (segs[s].end_ms > segs[s].begin_ms)
-								seg_end = segs[s].end_ms;
-							else if (s + 1 < segs.size() && segs[s + 1].begin_ms > segs[s].begin_ms)
-								seg_end = segs[s + 1].begin_ms;
-							else
-								seg_end = std::max(line_end, segs[s].begin_ms + 500);
-							int64_t dur = std::max<int64_t>(seg_end - segs[s].begin_ms, 0);
-							out += "{\\kf" + std::to_string(karaoke_cs(dur)) + "}" + segs[s].text;
+							int64_t seg_begin = std::clamp(segs[s].begin_ms, line_begin, line_end);
+							int64_t begin_cs = karaoke_cs(seg_begin - line_begin);
+							if (begin_cs > elapsed_cs) {
+								out += "{\\k" + std::to_string(begin_cs - elapsed_cs) + "}";
+								elapsed_cs = begin_cs;
+							}
+							int64_t seg_end = segs[s].end_ms > segs[s].begin_ms ? segs[s].end_ms : line_end;
+							if (s + 1 < segs.size()) seg_end = std::min(seg_end, segs[s + 1].begin_ms);
+							int64_t end_cs = karaoke_cs(std::clamp(seg_end, seg_begin, line_end) - line_begin);
+							int64_t dur_cs = std::max<int64_t>(end_cs - elapsed_cs, 0);
+							out += "{\\kf" + std::to_string(dur_cs) + "}" + segs[s].text;
+							elapsed_cs += dur_cs;
 						}
 						return out;
 					};
@@ -413,9 +391,9 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 						TtmlParagraph harmony;
 						harmony.begin_ms = std::max<int64_t>(para.begin_ms, bg_segs.front().begin_ms);
 						harmony.end_ms = std::max(para.end_ms, harmony.begin_ms);
-						harmony.karaoke_text = build_karaoke(bg_segs, harmony.end_ms);
+						harmony.karaoke_text = build_karaoke(bg_segs, harmony.begin_ms, harmony.end_ms);
 						boost::trim(harmony.karaoke_text);
-						para.karaoke_text = plain + build_karaoke(lead_segs, para.end_ms);
+						para.karaoke_text = plain + build_karaoke(lead_segs, para.begin_ms, para.end_ms);
 						boost::trim(para.karaoke_text);
 
 						if (!harmony.karaoke_text.empty() && !para.karaoke_text.empty()) {
@@ -424,7 +402,7 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 							continue;
 						}
 					}
-					para.karaoke_text = plain + build_karaoke(para.segments, para.end_ms);
+					para.karaoke_text = plain + build_karaoke(para.segments, para.begin_ms, para.end_ms);
 				}
 				else {
 					para.karaoke_text = plain;
@@ -436,8 +414,12 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 				continue; // do not recurse into a <p>
 			}
 
+			// A LIFO stack must push siblings in reverse to visit them in
+			// document order, especially for untimed/equal-time paragraphs.
+			std::vector<wxXmlNode*> children;
 			for (auto child = cur->GetChildren(); child; child = child->GetNext())
-				stack.push_back(child);
+				children.push_back(child);
+			stack.insert(stack.end(), children.rbegin(), children.rend());
 		}
 	}
 

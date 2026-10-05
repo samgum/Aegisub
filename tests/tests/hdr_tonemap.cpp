@@ -160,4 +160,80 @@ TEST(HDRToneMap, SaturatedBT2020InputIsCompressedIntoLegalOutput) {
 	EXPECT_FALSE(r == 255 && g == 255 && b == 255);
 }
 
+// Compare against independently reconstructed transfer-encoded RGB. Checking
+// only legal byte ranges would miss an entirely black or tinted YUV path.
+TEST(HDRToneMap, YuvNeutralRampMatchesRGBForBothRangesAndTransfers) {
+	for (int transfer : {HDRTonemap::kTransferPQ, HDRTonemap::kTransferHLG}) {
+		for (bool limited : {false, true}) {
+			HDRTonemap::ToneMapper mapper(transfer, true, 1000, true, limited);
+			int last = -1;
+			for (int step = 0; step <= 16; ++step) {
+				float code = step / 16.0f;
+				uint16_t y = static_cast<uint16_t>(limited ? 4096 + code * 56064 : code * 65535);
+				uint16_t rgb = static_cast<uint16_t>(code * 65535 + 0.5f);
+				uint8_t b, g, r, ref_b, ref_g, ref_r;
+				mapper.ToneMapYuvPixel(y, 32768, 32768, 0, 0, b, g, r);
+				mapper.ToneMapPixel(rgb, rgb, rgb, 0, 0, ref_b, ref_g, ref_r);
+				EXPECT_NEAR(b, ref_b, 1);
+				EXPECT_NEAR(g, ref_g, 1);
+				EXPECT_NEAR(r, ref_r, 1);
+				EXPECT_GE(r, last);
+				last = r;
+			}
+			EXPECT_EQ(last, 255);
+		}
+	}
+}
+
+TEST(HDRToneMap, YuvNclColoursReconstructRGBBeforeInverseTransfer) {
+	for (int transfer : {HDRTonemap::kTransferPQ, HDRTonemap::kTransferHLG}) {
+		for (bool bt2020 : {false, true}) {
+			for (bool limited : {false, true}) {
+				HDRTonemap::ToneMapper mapper(transfer, bt2020, 1000, bt2020, limited);
+				double kr = bt2020 ? 0.2627 : 0.2126;
+				double kb = bt2020 ? 0.0593 : 0.0722;
+				for (auto rgb : {std::array<double, 3>{0.7, 0.4, 0.2}, {0.2, 0.6, 0.4}, {0.4, 0.2, 0.7}}) {
+					double y = kr * rgb[0] + (1 - kr - kb) * rgb[1] + kb * rgb[2];
+					double cb = (rgb[2] - y) / (2 * (1 - kb));
+					double cr = (rgb[0] - y) / (2 * (1 - kr));
+					uint8_t b, g, r, ref_b, ref_g, ref_r;
+					mapper.ToneMapYuvPixel(static_cast<uint16_t>(std::lround(limited ? 4096 + y * 56064 : y * 65535)),
+						static_cast<uint16_t>(std::lround(32768 + cb * (limited ? 57344 : 65535))),
+						static_cast<uint16_t>(std::lround(32768 + cr * (limited ? 57344 : 65535))),
+						3, 4, b, g, r);
+					mapper.ToneMapPixel(static_cast<uint16_t>(std::lround(rgb[0] * 65535)),
+						static_cast<uint16_t>(std::lround(rgb[1] * 65535)), static_cast<uint16_t>(std::lround(rgb[2] * 65535)),
+						3, 4, ref_b, ref_g, ref_r);
+					EXPECT_NEAR(b, ref_b, 1);
+					EXPECT_NEAR(g, ref_g, 1);
+					EXPECT_NEAR(r, ref_r, 1);
+				}
+			}
+		}
+	}
+}
+
+TEST(HDRToneMap, YuvPlanesHonourIndependentAndNegativeStrides) {
+	std::array<uint8_t, 12> yp{}, up{}, vp{};
+	std::array<uint8_t, 16> output;
+	output.fill(0xa5);
+	StoreLE16(yp.data(), 4096);
+	StoreLE16(yp.data() + 6, 60160);
+	StoreLE16(up.data(), 32768);
+	StoreLE16(up.data() + 8, 32768);
+	StoreLE16(vp.data(), 32768);
+	StoreLE16(vp.data() + 10, 32768);
+	HDRTonemap::ToneMapper mapper;
+	mapper.ToneMapYUV444P16toBGRA8(yp.data() + 6, -6, up.data() + 8, -8,
+		vp.data() + 10, -10, output.data(), 8, 1, 2);
+	for (int channel = 0; channel < 3; ++channel) {
+		EXPECT_EQ(output[channel], 255);
+		EXPECT_EQ(output[8 + channel], 0);
+	}
+	EXPECT_EQ(output[3], 255);
+	EXPECT_EQ(output[11], 255);
+	EXPECT_EQ(output[4], 0xa5);
+	EXPECT_EQ(output[12], 0xa5);
+}
+
 } // namespace

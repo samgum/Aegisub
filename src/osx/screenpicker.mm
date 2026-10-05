@@ -20,6 +20,8 @@
 #include <wx/dcmemory.h>
 #include <wx/thread.h>
 
+#include <algorithm>
+
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreGraphics/CGDirectDisplay.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
@@ -29,13 +31,16 @@ namespace osx {
 namespace {
 
 void CopyToDC(CGImageRef img, wxMemoryDC &capdc, int resx, int resy, int magnification) {
+	if (!img) return;
 	int width = CGImageGetWidth(img);
 	int height = CGImageGetHeight(img);
+	if (width <= 0 || height <= 0) return;
 	std::vector<uint8_t> imgdata(height * width * 4);
 
 	agi::scoped_holder<CGColorSpaceRef> colorspace(CGColorSpaceCreateDeviceRGB(), CGColorSpaceRelease);
 	agi::scoped_holder<CGContextRef> bmp_context(CGBitmapContextCreate(&imgdata[0], width, height, 8, 4 * width, colorspace, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big), CGContextRelease);
 
+	if (!bmp_context) return;
 	CGContextDrawImage(bmp_context, CGRectMake(0, 0, width, height), img);
 
 	for (int x = 0; x < resx && x < width; x++) {
@@ -54,9 +59,10 @@ void DropFromScreen(int x, int y, int resx, int resy, int magnification, wxMemor
 
 #if MAC_OS_X_VERSION_MIN_REQUIRED < 150000
 	// Doesn't bother handling the case where the rect overlaps two monitors
-	CGDirectDisplayID display_id;
-	uint32_t display_count;
-	CGGetDisplaysWithPoint(CGPointMake(x, y), 1, &display_id, &display_count);
+	CGDirectDisplayID display_id = 0;
+	uint32_t display_count = 0;
+	if (CGGetDisplaysWithPoint(CGPointMake(x, y), 1, &display_id, &display_count) != kCGErrorSuccess
+		|| display_count == 0) return;
 
 	agi::scoped_holder<CGImageRef> img(CGDisplayCreateImageForRect(display_id, rect), CGImageRelease);
 	// Capture can fail (asleep display, denied permission); a NULL image
@@ -79,12 +85,21 @@ void DropFromScreen(int x, int y, int resx, int resy, int magnification, wxMemor
 			return;
 		}
 
-		CGDirectDisplayID display_id;
-		uint32_t display_count;
-		CGGetDisplaysWithPoint(CGPointMake(x, y), 1, &display_id, &display_count);
+		CGDirectDisplayID display_id = 0;
+		uint32_t display_count = 0;
+		if (CGGetDisplaysWithPoint(CGPointMake(x, y), 1, &display_id, &display_count) != kCGErrorSuccess
+			|| display_count == 0) {
+			screenshot_notify_ref.Post();
+			return;
+		}
 
 		CGDisplayModeRef displaymode = CGDisplayCopyDisplayMode(display_id);
-		int scale_factor = CGDisplayModeGetPixelWidth(displaymode) / CGDisplayModeGetWidth(displaymode);
+		if (!displaymode) {
+			screenshot_notify_ref.Post();
+			return;
+		}
+		auto mode_width = CGDisplayModeGetWidth(displaymode);
+		int scale_factor = mode_width ? std::max<size_t>(1, CGDisplayModeGetPixelWidth(displaymode) / mode_width) : 1;
 		CGDisplayModeRelease(displaymode);
 
 		SCDisplay* point_display = nullptr;

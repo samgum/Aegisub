@@ -33,7 +33,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstdint>
-#include <memory>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -54,26 +54,35 @@ int64_t ParseLrcTimestamp(std::string const& body) {
 	size_t colon = body.find(':');
 	if (colon == std::string::npos) return -1;
 
+	auto parse_integer = [](std::string_view value, int64_t& out) {
+		if (value.empty() || value.find_first_not_of("0123456789") != std::string_view::npos)
+			return false;
+		auto result = std::from_chars(value.data(), value.data() + value.size(), out);
+		return result.ec == std::errc{} && result.ptr == value.data() + value.size();
+	};
 	int64_t minutes = 0;
-	if (std::from_chars(body.data(), body.data() + colon, minutes).ec != std::errc{})
-		return -1;
+	if (!parse_integer(std::string_view(body).substr(0, colon), minutes)) return -1;
 
 	size_t dot = body.find('.', colon);
-	std::string_view sec_str(body.data() + colon + 1, dot == std::string::npos ? std::string::npos : dot - colon - 1);
+	// A string_view's explicit length is never npos: that produces an
+	// invalid pointer range for from_chars on ordinary [mm:ss] timestamps.
+	size_t sec_end = dot == std::string::npos ? body.size() : dot;
+	std::string_view sec_str(body.data() + colon + 1, sec_end - colon - 1);
 	int64_t seconds = 0;
-	if (std::from_chars(sec_str.data(), sec_str.data() + sec_str.size(), seconds).ec != std::errc{})
-		return -1;
+	if (!parse_integer(sec_str, seconds) || seconds >= 60) return -1;
 
 	int64_t frac_ms = 0;
 	if (dot != std::string::npos) {
 		std::string_view frac_str(body.data() + dot + 1, body.size() - dot - 1);
 		if (frac_str.empty() || frac_str.size() > 3) return -1;
 		int64_t frac = 0;
-		if (std::from_chars(frac_str.data(), frac_str.data() + frac_str.size(), frac).ec != std::errc{})
-			return -1;
+		if (!parse_integer(frac_str, frac)) return -1;
 		// 1 digit = tenths, 2 = centiseconds, 3 = milliseconds
 		frac_ms = frac_str.size() == 1 ? frac * 100 : frac_str.size() == 2 ? frac * 10 : frac;
 	}
+	// agi::Time consumes int milliseconds. Bound input before arithmetic.
+	if (minutes > (std::numeric_limits<int>::max() - seconds * 1000 - frac_ms) / 60000)
+		return -1;
 
 	return (minutes * 60 + seconds) * 1000 + frac_ms;
 }
@@ -141,9 +150,13 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 					val.remove_prefix(1);
 				while (!val.empty() && (val.back() == ' ' || val.back() == '\t'))
 					val.remove_suffix(1);
-				if (!val.empty())
-					if (std::from_chars(val.data(), val.data() + val.size(), off).ec == std::errc{})
-						offset_ms = off; // positive shifts lyrics earlier per spec
+				if (!val.empty() && val.front() == '+') val.remove_prefix(1);
+				if (!val.empty()) {
+					auto parsed = std::from_chars(val.data(), val.data() + val.size(), off);
+					if (parsed.ec == std::errc{} && parsed.ptr == val.data() + val.size()
+						&& off >= -int64_t(std::numeric_limits<int>::max()) && off <= std::numeric_limits<int>::max())
+						offset_ms = off; // applied to all rows after reading the file
+				}
 			}
 			// other metadata tags (ti/ar/al/by/re/ve/...) are ignored
 
@@ -155,9 +168,8 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 		boost::trim(text);
 
 		// Enhanced LRC: split <mm:ss.xx> syllable markers inside the text.
-		LrcLine entry;
 		size_t scan = 0;
-		int64_t last_syllable_ms = timestamps.front() - offset_ms;
+		int64_t last_syllable_ms = timestamps.front();
 		std::string pending_text;
 		while (true) {
 			size_t lt = text.find('<', scan);
@@ -179,16 +191,16 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 
 			pending_text += text.substr(scan, lt - scan);
 			if (!pending_text.empty()) {
-				syllables.emplace_back(std::max<int64_t>(last_syllable_ms, 0), pending_text);
+				syllables.emplace_back(last_syllable_ms, pending_text);
 				pending_text.clear();
 			}
-			last_syllable_ms = ms - offset_ms;
+			last_syllable_ms = ms;
 			has_syllables = true;
 			scan = gt + 1;
 		}
 		boost::trim(pending_text);
 		if (has_syllables && !pending_text.empty())
-			syllables.emplace_back(std::max<int64_t>(last_syllable_ms, 0), pending_text);
+			syllables.emplace_back(last_syllable_ms, pending_text);
 		else if (has_syllables)
 			// A word timestamp with no text after it (the trailing
 			// "<mm:ss.xx>" Apple Music exports) marks where the line ends,
@@ -197,17 +209,18 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 
 		for (auto ts : timestamps) {
 			LrcLine out;
-			out.start_ms = ts - offset_ms;
-			out.end_marker_ms = end_marker_ms;
+			out.start_ms = ts;
+			out.end_marker_ms = end_marker_ms < 0 ? -1 : end_marker_ms + ts - timestamps.front();
 			out.has_syllables = has_syllables;
 			if (has_syllables) {
 				out.syllables = syllables;
+				for (auto& syl : out.syllables)
+					syl.first += ts - timestamps.front();
 			}
 			else {
 				out.text = text;
 				out.text.erase(std::remove(out.text.begin(), out.text.end(), '\r'), out.text.end());
 			}
-			if (out.start_ms < 0) out.start_ms = 0;
 			// Timestamp-only lines (e.g. "[00:23.05]" with no text after it,
 			// common in Apple Music exports as section spacers) and lines
 			// whose word markers carry no text would become empty dialogue
@@ -233,17 +246,23 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 	if (lines.empty())
 		throw SubtitleFormatParseError("No timed lyrics lines found in LRC file.");
 
+	// offset is file-wide metadata and may appear after the lyric rows.
+	auto adjusted_time = [&](int64_t time) {
+		return std::clamp<int64_t>(time - offset_ms, 0, std::numeric_limits<int>::max() - 5000);
+	};
+	for (auto& line : lines) {
+		line.start_ms = adjusted_time(line.start_ms);
+		if (line.end_marker_ms >= 0) line.end_marker_ms = adjusted_time(line.end_marker_ms);
+		for (auto& syl : line.syllables) syl.first = adjusted_time(syl.first);
+	}
+
 	// Sort by start time; LRC files are usually ordered but multi-timestamp
 	// expansion can interleave.
 	std::stable_sort(lines.begin(), lines.end(),
 		[](LrcLine const& a, LrcLine const& b) { return a.start_ms < b.start_ms; });
 
-	// Build dialogues; each line ends where the next begins (clamped to at
-	// least 500 ms so zero-length gaps never produce empty renders), and the
-	// final line gets a nominal 5 s display time. An explicit trailing word
-	// timestamp overrides the synthesized end so held final notes keep their
-	// real duration, but echo/harmony layers in Apple Music exports can start
-	// before the previous line's marked end — rows must never overlap.
+	// Next-row starts and explicit end markers are authoritative, even
+	// for words shorter than 500 ms. Only missing/invalid ends need a fallback.
 	auto karaoke_cs = [](int64_t ms) { return static_cast<int>((ms + 5) / 10); };
 
 	for (size_t i = 0; i < lines.size(); ++i) {
@@ -253,7 +272,7 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 			end_ms = cur.end_marker_ms;
 		if (i + 1 < lines.size() && end_ms > lines[i + 1].start_ms)
 			end_ms = lines[i + 1].start_ms;
-		if (end_ms < cur.start_ms + 500) end_ms = cur.start_ms + 500;
+		if (end_ms <= cur.start_ms) end_ms = cur.start_ms + 500;
 
 		// The events list uses an auto-unlink intrusive hook and owns its
 		// nodes via delete-on-dispose, so entries must be raw new'd like
@@ -268,11 +287,20 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 			// highlight across each word for that duration (the Apple Music
 			// word-fill look); the final segment runs to the line end.
 			std::string text;
+			int64_t elapsed_cs = 0;
 			for (size_t s = 0; s < cur.syllables.size(); ++s) {
 				auto const& syl = cur.syllables[s];
+				int64_t seg_begin = std::clamp(syl.first, cur.start_ms, end_ms);
+				int64_t begin_cs = karaoke_cs(seg_begin - cur.start_ms);
+				if (begin_cs > elapsed_cs) {
+					text += "{\\k" + std::to_string(begin_cs - elapsed_cs) + "}";
+					elapsed_cs = begin_cs;
+				}
 				int64_t seg_end = s + 1 < cur.syllables.size() ? cur.syllables[s + 1].first : end_ms;
-				int64_t dur = std::max<int64_t>(seg_end - syl.first, 0);
-				text += "{\\kf" + std::to_string(karaoke_cs(dur)) + "}" + syl.second;
+				int64_t end_cs = karaoke_cs(std::clamp(seg_end, seg_begin, end_ms) - cur.start_ms);
+				int64_t dur_cs = std::max<int64_t>(end_cs - elapsed_cs, 0);
+				text += "{\\kf" + std::to_string(dur_cs) + "}" + syl.second;
+				elapsed_cs += dur_cs;
 			}
 			diag->Text = text;
 		}

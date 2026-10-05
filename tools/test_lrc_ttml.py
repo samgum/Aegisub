@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for the LRC and TTML subtitle readers.
+r"""Tests for the LRC and TTML subtitle readers.
 
 Verifies registration, wildcards, the parse algorithms' observable output on
 representative samples (plain LRC, multi-timestamp, enhanced/syllable LRC,
@@ -54,7 +54,8 @@ def test_lrc_multitimestamp_expansion():
     timestamp, all offset-corrected."""
     src = LRC_CPP.read_text(encoding="utf-8")
     assert "for (auto ts : timestamps)" in src
-    assert "ts - offset_ms" in src
+    assert "time - offset_ms" in src
+    assert "syl.first += ts - timestamps.front();" in src
     # Multi-timestamp entries share the syllable data (reference semantics).
     assert "out.syllables = syllables;" in src
 
@@ -73,8 +74,7 @@ def test_ttml_nested_timed_spans_are_not_dropped():
     must recurse into its children, not flatten them to nothing."""
     src = TTML_CPP.read_text(encoding="utf-8")
     assert "CollectVisibleText" in src
-    assert "child_has_karaoke" in src
-    assert "std::make_move_iterator(child_segments.begin())" in src
+    assert "BuildParagraphText(node, plain, has_karaoke, segments, voice_bg);" in src
 
 
 def test_drag_drop_accepts_lrc_and_ttml():
@@ -95,7 +95,7 @@ def test_lrc_syllable_maps_to_karaoke():
     sweeping word-fill highlight)."""
     src = LRC_CPP.read_text(encoding="utf-8")
     assert "has_syllables" in src
-    assert '"{\\\\kf" + std::to_string(karaoke_cs(dur)) + "}"' in src
+    assert '"{\\\\kf" + std::to_string(dur_cs) + "}"' in src
     # Last segment runs to the line end (next line's start).
     assert "cur.syllables[s + 1].first : end_ms" in src
 
@@ -107,7 +107,7 @@ def test_lrc_trailing_timestamp_marks_line_end():
     absurd durations like \\k4595 across instrumental gaps."""
     src = LRC_CPP.read_text(encoding="utf-8")
     assert "end_marker_ms" in src
-    assert "out.end_marker_ms = end_marker_ms;" in src
+    assert "end_marker_ms + ts - timestamps.front()" in src
     assert "if (cur.end_marker_ms >= 0)" in src
     assert "end_ms = cur.end_marker_ms;" in src
 
@@ -153,8 +153,8 @@ def test_ttml_background_vocals_split_when_overlapping():
     assert "bg_segs.front().begin_ms < lead_last_end" in src
     assert "harmony.begin_ms = std::max<int64_t>(para.begin_ms, bg_segs.front().begin_ms);" in src
     # Both rows keep karaoke text built from their own voice's words.
-    assert "build_karaoke(bg_segs, harmony.end_ms)" in src
-    assert "build_karaoke(lead_segs, para.end_ms)" in src
+    assert "build_karaoke(bg_segs, harmony.begin_ms, harmony.end_ms)" in src
+    assert "build_karaoke(lead_segs, para.begin_ms, para.end_ms)" in src
 
 
 def test_ttml_word_end_times_are_honored():
@@ -191,7 +191,7 @@ def test_ttml_word_spans_to_karaoke():
     with the final segment running to the paragraph end."""
     src = TTML_CPP.read_text(encoding="utf-8")
     assert 'IsElement(node, "span")' in src
-    assert '"{\\\\kf" + std::to_string(karaoke_cs(dur)) + "}"' in src
+    assert '"{\\\\kf" + std::to_string(dur_cs) + "}"' in src
     # Segments sorted by begin time before conversion.
     assert "std::stable_sort(para.segments.begin(), para.segments.end()" in src
 
@@ -290,9 +290,18 @@ def test_events_are_raw_new_not_smart_pointer():
         assert "Events.push_back(*diag);" in text
 
 
+def test_native_reader_tests_registered():
+    meson = (ROOT / "tests" / "meson.build").read_text(encoding="utf-8")
+    assert "test('lyric readers', lyric_runner)" in meson
+    assert "tests/lyric_readers.cpp" in meson
+    assert "../src/subtitle_format_lrc.cpp" in meson
+    assert "../src/subtitle_format_ttml.cpp" in meson
+
+
 def main():
     tests = [
         test_formats_registered,
+        test_native_reader_tests_registered,
         test_wildcards,
         test_lrc_timestamp_parsing_covers_all_precision,
         test_lrc_multitimestamp_expansion,

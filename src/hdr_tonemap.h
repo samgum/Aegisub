@@ -173,12 +173,8 @@ public:
 			r *= scale; g *= scale; b *= scale;
 		}
 
-		if (convert_bt2020_) {
-			float rr =  1.660491f * r - 0.587641f * g - 0.072850f * b;
-			float gg = -0.124550f * r + 1.132900f * g - 0.008349f * b;
-			float bb = -0.018151f * r - 0.100579f * g + 1.118730f * b;
-			r = rr; g = gg; b = bb;
-		}
+		if (convert_bt2020_)
+			ApplyGamut(r, g, b);
 
 		float luma_nits = std::max(0.0f, 0.2126f * r + 0.7152f * g + 0.0722f * b);
 		float mapped_luma = ToneMapLuma(luma_nits);
@@ -212,18 +208,10 @@ public:
 		}
 	}
 
-	// --- Reference decoding path (BT.2100 order) ---
-	//
-	// ToneMapRGB48toBGRA8 consumes swscale RGB that was produced by applying
-	// the YCbCr -> RGB matrix in the *transfer-encoded* (PQ/HLG) domain, which
-	// is not the ITU-defined decoding order and introduces hue/luma errors on
-	// saturated colours. The path below receives the untouched YCbCr planes
-	// and performs the reference sequence instead:
-	//   1. video-range -> full-range expansion
-	//   2. inverse EOTF per channel (Y, Cb, Cr) to linear-light signals
-	//   3. linear-domain YCbCr -> RGB matrix for the source primaries
-	//   4. (HLG) scene -> display OOTF
-	//   5. tone map, gamut compress, encode — shared with the RGB path.
+	// Decode non-constant-luminance YCbCr in the transfer-encoded domain.
+	// BT.2020 NCL / BT.709 matrices reconstruct R'G'B' BEFORE applying
+	// PQ's EOTF or HLG's inverse OETF. Chroma is a signed colour difference,
+	// not a transfer-encoded light signal and must never enter the EOTF.
 
 	// ToneMapYUV444P16toBGRA8: three contiguous 16-bit planes (Y, Cb, Cr),
 	// each row-strided independently.
@@ -262,75 +250,36 @@ private:
 		return static_cast<float>(v) * (1.0f / 65535.0f);
 	}
 
-	// Chroma is centred at mid-scale (video-range 32768) and spans
-	// [-0.5, 0.5] after normalisation, so the inverse EOTF input needs a
-	// 0.5 offset back into [0,1].
+	// Chroma is centred at 32768 in both limited and full 16-bit range.
+	// Return the signed difference in [-0.5, 0.5].
 	float ExpandChroma(uint16_t v) const {
-		if (limited_range_)
-			return std::clamp((static_cast<float>(v) - 32768.0f) * (1.0f / 57344.0f) + 0.5f, 0.0f, 1.0f);
-		return std::clamp((static_cast<float>(v) * (1.0f / 65535.0f)) + 0.5f, 0.0f, 1.0f);
+		float range = limited_range_ ? 57344.0f : 65535.0f;
+		return std::clamp((static_cast<float>(v) - 32768.0f) / range, -0.5f, 0.5f);
 	}
 
-	// Linear-domain YCbCr -> RGB for the source primaries, normalised chroma.
-	// BT.2020: Kr=0.2627 Kb=0.0593. BT.709: Kr=0.2126 Kb=0.0722.
-	void YcbcrToLinearRgb(float y_linear, float cb_linear, float cr_linear,
-		float& r, float& g, float& b) const {
-		float u = cb_linear - 0.5f;
-		float v = cr_linear - 0.5f;
-		if (bt2020_matrix_) {
-			r = y_linear + 1.474600f * v;
-			b = y_linear + 1.881400f * u;
-			g = y_linear - 0.164541f * u - 0.571349f * v;
-		}
-		else {
-			r = y_linear + 1.574800f * v;
-			b = y_linear + 1.855600f * u;
-			g = y_linear - 0.187000f * u - 0.468000f * v;
-		}
+	uint16_t TransferCode(float value) const {
+		return static_cast<uint16_t>(std::clamp(value, 0.0f, 1.0f) * (kLutSize - 1) + 0.5f);
 	}
 
 public:
 	// YUV path entry: consumes PQ/HLG-encoded YCbCr and produces display SDR.
 	void ToneMapYuvPixel(uint16_t y16, uint16_t cb16, uint16_t cr16,
 		int x, int y, uint8_t& b8, uint8_t& g8, uint8_t& r8) const {
-		// 1. Range expansion + inverse EOTF per channel to linear signals.
-		float y_lin = eotf_[ExpandLuma(y16)];
-		float cb_lin = eotf_[ExpandChroma(cb16)];
-		float cr_lin = eotf_[ExpandChroma(cr16)];
-
-		// 2. Linear-domain matrix to source-primary RGB.
+		float luma = ExpandLuma(y16);
+		float u = ExpandChroma(cb16);
+		float v = ExpandChroma(cr16);
 		float r, g, b;
-		YcbcrToLinearRgb(y_lin, cb_lin, cr_lin, r, g, b);
-
-		// 3. HLG scene-referred signal needs the OOTF to become display light.
-		//    (For HLG the EOTF output above is scene-linear; for PQ it is
-		//    already absolute display light, so this step is PQ-only skipped.)
-		if (transfer_ == kTransferHLG) {
-			float scene_luma = 0.2627f * r + 0.6780f * g + 0.0593f * b;
-			float scale = HLGScale(std::clamp(scene_luma, 0.0f, 1.0f));
-			r *= scale; g *= scale; b *= scale;
-		}
-
-		// 4. Wide gamut -> BT.709 primaries (linear domain).
-		if (convert_bt2020_)
-			ApplyGamut(r, g, b);
-
-		// 5. Luminance-preserving tone map — one scale factor for all three
-		//    channels, so hue is exactly preserved (no chroma break-up).
-		float luma_nits = std::max(0.0f, 0.2126f * r + 0.7152f * g + 0.0722f * b);
-		float mapped = ToneMapLuma(luma_nits);
-		if (luma_nits > 1e-8f) {
-			float scale = mapped / luma_nits;
-			r *= scale; g *= scale; b *= scale;
+		if (bt2020_matrix_) {
+			r = luma + 1.474600f * v;
+			b = luma + 1.881400f * u;
+			g = luma - 0.164553f * u - 0.571353f * v;
 		}
 		else {
-			r = g = b = 0.0f;
+			r = luma + 1.574800f * v;
+			b = luma + 1.855600f * u;
+			g = luma - 0.187324f * u - 0.468124f * v;
 		}
-
-		CompressGamut(mapped, r, g, b);
-		b8 = EncodeLinear(b, x, y);
-		g8 = EncodeLinear(g, x, y);
-		r8 = EncodeLinear(r, x, y);
+		ToneMapPixel(TransferCode(r), TransferCode(g), TransferCode(b), x, y, b8, g8, r8);
 	}
 };
 

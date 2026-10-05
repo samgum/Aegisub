@@ -69,6 +69,19 @@ runner = executable(
 )
 
 test('gtest main', runner)
+
+# Exercise real lyric readers without launching the application's UI.
+lyric_runner = executable('lyric-reader-tests',
+    'support/main.cpp', 'support/lyric_reader_stubs.cpp',
+    'tests/lyric_readers.cpp',
+    '../src/subtitle_format_lrc.cpp', '../src/subtitle_format_ttml.cpp',
+    '../src/text_file_reader.cpp',
+    include_directories: [tests_inc, libaegisub_inc],
+    dependencies: [tests_deps, deps],
+    cpp_args: tests_args,
+    link_with: libaegisub,
+)
+test('lyric readers', lyric_runner)
 test('luajit-52', executable('luajit-52', 'tests/luajit_52.c', dependencies: luajit))
 
 python = import('python').find_installation()

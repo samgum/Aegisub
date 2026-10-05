@@ -51,17 +51,18 @@ def test_stride_and_bgra_are_explicit():
 
 
 def test_yuv_reference_decode_path_exists():
-    """The precise BT.2100 decode path must exist: swscale hands back untouched
-    PQ/HLG YCbCr planes and the mapper performs inverse EOTF per channel, the
-    linear-domain YCbCr->RGB matrix, and range expansion — instead of letting
-    swscale apply the matrix in the nonlinear transfer domain."""
+    """The NCL path must expand range and reconstruct transfer-encoded RGB
+    before the common inverse transfer/tone-mapping pipeline."""
     assert "ToneMapYUV444P16toBGRA8" in TONEMAP
     assert "ToneMapYuvPixel" in TONEMAP
     # Video-range expansion (10-bit limited shifted <<6 into 16 bits).
     assert "4096.0f" in TONEMAP
     assert "32768.0f" in TONEMAP
-    # Linear-domain YCbCr matrices for both container families.
+    # Transfer-encoded YCbCr matrices for both container families.
     assert "bt2020_matrix_" in TONEMAP
+    assert "ToneMapPixel(TransferCode(r), TransferCode(g), TransferCode(b)" in TONEMAP
+    assert "eotf_[Expand" not in TONEMAP
+    assert "CS == AGI_CS_BT2020_NCL || CS == AGI_CS_BT709" in PROVIDER
     assert "1.474600f" in TONEMAP  # BT.2020
     assert "1.574800f" in TONEMAP  # BT.709
     # Provider negotiates YUV planes with an RGB fallback.
