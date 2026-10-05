@@ -46,6 +46,7 @@ jobs:
           import shutil
           import subprocess
           import tarfile
+          import time
           import zipfile
 
           def gh(*args):
@@ -64,10 +65,16 @@ jobs:
           assert notes.stat().st_size, 'Release notes are empty'
 
           run = json.loads(gh('api', f'{api}/actions/runs/{run_id}'))
-          assert run['status'] == 'completed' and run['conclusion'] == 'success', 'CI must pass'
           assert run['head_branch'] == 'master' and run['event'] in ('push', 'workflow_dispatch'), 'Use master CI'
           assert run['path'] == '.github/workflows/ci.yml', 'Use the Meson CI workflow'
           assert run['repository']['full_name'] == repo and run['head_repository']['full_name'] == repo, 'Wrong repository'
+          deadline = time.monotonic() + 60 * 60
+          while run['status'] != 'completed':
+              assert time.monotonic() < deadline, 'Timed out waiting for CI'
+              print(f"Waiting for CI run {run_id}: {run['status']}", flush=True)
+              time.sleep(30)
+              run = json.loads(gh('api', f'{api}/actions/runs/{run_id}'))
+          assert run['conclusion'] == 'success', 'CI must pass'
           sha = run['head_sha']
           assert re.fullmatch(r'[0-9a-f]{40}', sha), 'Invalid commit'
           jobs = json.loads(gh('api', f'{api}/actions/runs/{run_id}/jobs?per_page=100'))['jobs']
