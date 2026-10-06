@@ -136,10 +136,8 @@ jobs:
           assert existing[0]['author']['login'] == repo.split('/')[0], 'Release draft must be authored by the repository owner'
           refs = json.loads(gh('api', f'{api}/git/matching-refs/tags/{tag}'))
           matching = [ref for ref in refs if ref['ref'] == f'refs/tags/{tag}']
-          if matching:
-              assert matching[0]['object']['sha'] == sha, 'Existing tag targets another commit'
-          else:
-              gh('api', '--method', 'POST', f'{api}/git/refs', '-f', f'ref=refs/tags/{tag}', '-f', f'sha={sha}')
+          assert len(matching) == 1, 'Create the release tag with the repository owner account first'
+          assert matching[0]['object']['sha'] == sha, 'Existing tag targets another commit'
           gh('release', 'upload', tag, '--repo', repo, '--clobber', *map(str, sorted(output.iterdir())))
           release_url = json.loads(gh('release', 'view', tag, '--repo', repo, '--json', 'apiUrl'))['apiUrl']
           release = json.loads(gh('api', release_url))
