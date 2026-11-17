@@ -245,6 +245,20 @@ def test_preview_output_uses_shared_peak_limiter():
     assert "AudioSampleSafety::ApplyGainLimiter(" in openal
 
 
+def test_dsound2_openal_and_playback_speed_fixes():
+    openal = OPENAL.read_text(encoding="utf-8")
+    dsound2 = (ROOT / "src" / "audio_player_dsound2.cpp").read_text(encoding="utf-8")
+    audio_box = (ROOT / "src" / "audio_box.cpp").read_text(encoding="utf-8")
+    audio_cmd = (ROOT / "src" / "command" / "audio.cpp").read_text(encoding="utf-8")
+    assert "silent_bytes_written" in dsound2
+    assert "tempo_stream.IsFinished()" in dsound2
+    assert "std::min<int64_t>(end_frame, std::max<int64_t>(start_frame, start_frame + output_frames))" in openal
+    assert "AL_SOURCE_STATE" in openal
+    expected_speeds = "{ 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400 }"
+    assert expected_speeds in audio_box
+    assert expected_speeds in audio_cmd
+
+
 def main():
     tests = [
         test_openal_uses_provider_sample_format,
@@ -262,6 +276,7 @@ def main():
         test_portaudio_macos_route_change_is_exception_safe,
         test_portaudio_play_guards_null_stream,
         test_preview_output_uses_shared_peak_limiter,
+        test_dsound2_openal_and_playback_speed_fixes,
     ]
     for test in tests:
         test()

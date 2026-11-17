@@ -224,6 +224,13 @@ def test_auto_wrapped_line_gets_per_visual_line_ruby():
     ]
 
 
+def test_furigana_wrap_and_alignment_fixes():
+    source = SOURCE.read_text(encoding="utf-8")
+    assert "token.allow_wrap = state.wrap_style != 2;" in source
+    assert "block->GetType() != AssBlockType::PLAIN" in source
+    assert "non_cjk_units += furigana_codepoint_units(cp);" in source
+
+
 def main():
     tests = [
         test_source_does_not_scale_ruby_glyphs,
@@ -238,6 +245,7 @@ def main():
         test_explicit_multiline_below_keeps_each_ruby_line_adjacent,
         test_explicit_multiline_above_keeps_each_ruby_line_adjacent,
         test_auto_wrapped_line_gets_per_visual_line_ruby,
+        test_furigana_wrap_and_alignment_fixes,
     ]
     for test in tests:
         test()

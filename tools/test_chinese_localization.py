@@ -30,10 +30,26 @@ def test_standard_apply_buttons_use_aegisub_translation():
     assert 'apply_button->SetLabel(_("Apply"))' in selection
 
 
+def test_readme_bilingual_switchers_and_docs():
+    en_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    cn_readme = (ROOT / "README_CN.md").read_text(encoding="utf-8")
+    switcher = "**[English](README.md)** | **[简体中文](README_CN.md)**"
+    assert switcher in en_readme
+    assert switcher in cn_readme
+    for doc in (en_readme, cn_readme):
+        assert "SudachiPy" in doc
+        assert "Stitch Timings" in doc
+        assert "tools/run_source_regressions.py" in doc
+        assert ("0.25x" in doc) or ("0.25×" in doc)
+    assert "Check Style Overlaps" in en_readme
+    assert ("检查样式重叠" in cn_readme) or ("Check Style Overlaps" in cn_readme)
+
+
 def main():
     tests = [
         test_apply_is_translated_in_chinese_catalogs,
         test_standard_apply_buttons_use_aegisub_translation,
+        test_readme_bilingual_switchers_and_docs,
     ]
     for test in tests:
         test()

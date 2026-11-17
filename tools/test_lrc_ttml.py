@@ -298,10 +298,21 @@ def test_native_reader_tests_registered():
     assert "../src/subtitle_format_ttml.cpp" in meson
 
 
+def test_lrc_and_ttml_edge_case_fixes():
+    lrc = LRC_CPP.read_text(encoding="utf-8")
+    ttml = TTML_CPP.read_text(encoding="utf-8")
+    assert "clear_markers" in lrc
+    assert "scan = lt + 1;" in lrc
+    assert "NormalizeXmlText" in ttml
+    assert "wxXMLDOC_KEEP_WHITESPACE_NODES" in ttml
+    assert "HasTimedChildSpan" in ttml
+
+
 def main():
     tests = [
         test_formats_registered,
         test_native_reader_tests_registered,
+        test_lrc_and_ttml_edge_case_fixes,
         test_wildcards,
         test_lrc_timestamp_parsing_covers_all_precision,
         test_lrc_multitimestamp_expansion,

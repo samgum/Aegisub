@@ -95,6 +95,17 @@ def test_ai_cache_does_not_include_api_key():
     assert "response_cache[cache_key]" in ai
 
 
+def test_ai_json_unescape_and_cjk_cleanup_fixes():
+    ai = AI.read_text(encoding="utf-8")
+    edit_box = EDIT_BOX.read_text(encoding="utf-8")
+    timing_tools = TIMING_TOOLS.read_text(encoding="utf-8")
+    assert "CURLOPT_NOSIGNAL" in ai
+    assert "body.imbue(std::locale::classic());" in ai
+    assert "0xD800" in ai
+    assert 'OPT_SUB("Tool/AI Analysis/Enabled"' in edit_box
+    assert "convert_chinese_with_transliterator" in timing_tools
+
+
 def main():
     tests = [
         test_chinese_conversion_uses_icu_transliterator_and_plain_blocks_only,
@@ -103,6 +114,7 @@ def main():
         test_ai_button_and_openai_compatible_request_are_present,
         test_ai_analysis_request_is_backgrounded_and_target_language_driven,
         test_ai_cache_does_not_include_api_key,
+        test_ai_json_unescape_and_cjk_cleanup_fixes,
     ]
     for test in tests:
         test()

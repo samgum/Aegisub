@@ -189,6 +189,14 @@ def test_lyric_scroll_ui_strings_are_localized():
     assert 'msgid "Update Preview"\nmsgstr "更新預覽"' in zh_tw
 
 
+def test_lyric_scroll_tag_preservation_and_safe_clear():
+    source = TOOL.read_text(encoding="utf-8")
+    assert "pos += tag.size();" in source
+    assert "settings.strip_tags ? escape_ass_text(std::move(text)) : normalize_line_breaks(std::move(text))" in source
+    assert "disposed.emplace_back(line);" in source
+    assert "finalize_cleared_selection" in source
+
+
 def main():
     tests = [
         test_dialog_preview_does_not_write_subtitles,
@@ -201,6 +209,7 @@ def main():
         test_lyric_scroll_does_not_rewrite_text_encoding,
         test_transition_uses_continuous_move_tags,
         test_lyric_scroll_ui_strings_are_localized,
+        test_lyric_scroll_tag_preservation_and_safe_clear,
     ]
     for test in tests:
         test()

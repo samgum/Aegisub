@@ -201,6 +201,14 @@ def test_chinese_translations():
             assert ('msgid "%s"' % msgid) in src, "%s missing in %s" % (msgid, po.name)
 
 
+def test_fix_common_errors_persists_thresholds_and_clamps_short_duration():
+    src = DIALOG_CPP.read_text(encoding="utf-8")
+    assert 'OPT_SET("Tool/Fix Errors/Min Gap")->SetInt(min_gap)' in src
+    assert 'OPT_SET("Tool/Fix Errors/Min Duration")->SetInt(min_dur)' in src
+    assert 'OPT_SET("Tool/Fix Errors/Max Duration")->SetInt(max_dur)' in src
+    assert "next_start_of" in src
+
+
 def main():
     tests = [
         test_command_registered,
@@ -218,6 +226,7 @@ def main():
         test_ass_aware_empty_detection_preserves_non_dialogue_content,
         test_delete_all_keeps_one_editable_line_and_precise_commit,
         test_chinese_translations,
+        test_fix_common_errors_persists_thresholds_and_clamps_short_duration,
     ]
     for test in tests:
         test()

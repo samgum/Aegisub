@@ -236,6 +236,21 @@ def test_positioned_lines_use_video_bounds_not_style_margins():
     assert "if (layout.positioned)\n\t\treturn video_w;" in source
 
 
+def test_libass_edge_touch_and_override_parsing_fixes():
+    source = SOURCE.read_text(encoding="utf-8")
+    libass = (ROOT / "src" / "subtitles_provider_libass.cpp").read_text(encoding="utf-8")
+    edit = EDIT_CTRL.read_text(encoding="utf-8")
+    assert "bounds.left <= 0 || bounds.top <= 0 || bounds.right >= video_w || bounds.bottom >= video_h" in source
+    assert "!normal.has_pixels" in source
+    assert "layout.positioned" in source
+    assert source.index('starts_with(text, pos, "fsp")') < source.index('starts_with(text, pos, "fs")')
+    assert "text[pos] == 't'" in source and "text[p] == '('" in source
+    assert "is_single_letter_tag" in source
+    assert "file.Attachments = source.Attachments;" not in source
+    assert "ass_clear_fonts(library)" in libass
+    assert "context->ass->AddCommitListener" in edit
+
+
 def main():
     tests = [
         test_edit_box_checks_live_text_not_cached_line_text,
@@ -257,6 +272,7 @@ def main():
         test_old_rendered_width_mode_does_not_force_cjk_dc_fallback,
         test_character_limit_mode_counts_plain_text_only,
         test_positioned_lines_use_video_bounds_not_style_margins,
+        test_libass_edge_touch_and_override_parsing_fixes,
     ]
     for test in tests:
         test()
