@@ -58,8 +58,8 @@ cd ${CURRENT_DIR}
 
 echo
 echo "---- Copying dictionaries ----"
-if test -f "${DICT_DIR}"; then
-  cp -v "${DICT_DIR}/*" "${PKG_DIR}/Contents/SharedSupport/dictionaries"
+if test -d "${DICT_DIR}"; then
+  cp -v "${DICT_DIR}"/* "${PKG_DIR}/Contents/SharedSupport/dictionaries"
 else
   mkdir -p "${BUILD_DIR}/dictionaries"
   if ! test -f "${BUILD_DIR}/dictionaries/en_US.aff"; then
@@ -103,7 +103,7 @@ mkdir -vp "${PKG_DIR}/Contents/Resources/en.lproj"
 
 echo
 echo "---- Fixing libraries ----"
-sudo python3 "${SRC_DIR}/tools/osx-fix-libs.py" "${PKG_DIR}/Contents/MacOS/aegisub" || exit $?
+python3 "${SRC_DIR}/tools/osx-fix-libs.py" "${PKG_DIR}/Contents/MacOS/aegisub" || exit $?
 
 echo
 echo "---- Signing ----"

@@ -59,12 +59,18 @@ def collectlibs(lib, masterlist, targetdir):
                 print(f"{lib} uses @rpath but has no rpath set!")
                 exit(-1)
 
-            # all cases of libs using rpath so far just had a single directory in rpath...
-            # so let's just hope it stays that way and worry about the other cases when we get to them
-            if len(rpath) >= 2:
-                print(f"Warning: {lib} uses @rpath with more than one entry in rpath. Guessing one entry...")
-
-            l = os.path.join(rpath[0], l[len("@rpath/"):])
+            rel = l[len("@rpath/"):]
+            resolved = None
+            for rp in rpath:
+                if rp.startswith("@loader_path"):
+                    rp = os.path.join(os.path.dirname(lib), rp[len("@loader_path"):].lstrip("/"))
+                elif rp.startswith("@executable_path"):
+                    rp = os.path.join(targetdir, rp[len("@executable_path"):].lstrip("/"))
+                candidate = os.path.join(rp, rel)
+                if os.path.exists(candidate):
+                    resolved = candidate
+                    break
+            l = resolved if resolved else os.path.join(rpath[0], rel)
 
         if l.startswith("@loader_path/"):
             l = os.path.join(os.path.dirname(lib), l[len("@loader_path/"):])

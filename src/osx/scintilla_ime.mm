@@ -200,6 +200,9 @@
 - (NSArray *)validAttributesForMarkedText {
     return @[];
 }
+
+- (void)doCommandBySelector:(SEL)aSelector {
+}
 @end
 
 namespace osx { namespace ime {
@@ -219,7 +222,20 @@ void invalidate(wxStyledTextCtrl *ctrl) {
 
 bool process_key_event(wxStyledTextCtrl *ctrl, wxKeyEvent &evt) {
     if (evt.GetModifiers() != 0) return false;
-    if (evt.GetKeyCode() != WXK_RETURN && evt.GetKeyCode() != WXK_TAB) return false;
+    switch (evt.GetKeyCode()) {
+    case WXK_RETURN:
+    case WXK_NUMPAD_ENTER:
+    case WXK_TAB:
+    case WXK_BACK:
+    case WXK_ESCAPE:
+    case WXK_LEFT:
+    case WXK_RIGHT:
+    case WXK_UP:
+    case WXK_DOWN:
+        break;
+    default:
+        return false;
+    }
     if (![(ScintillaNSView *)ctrl->GetHandle() hasMarkedText]) return false;
 
     evt.Skip();

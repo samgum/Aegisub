@@ -275,6 +275,9 @@ std::string keypress_to_str(int key_code, int modifier) {
 	std::string combo;
 	if ((modifier != wxMOD_NONE)) {
 		if ((modifier & wxMOD_CMD) != 0) combo.append("Ctrl-");
+#ifdef __APPLE__
+		if ((modifier & wxMOD_RAW_CONTROL) != 0) combo.append("RawCtrl-");
+#endif
 		if ((modifier & wxMOD_ALT) != 0) combo.append("Alt-");
 		if ((modifier & wxMOD_SHIFT) != 0) combo.append("Shift-");
 	}

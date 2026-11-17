@@ -242,15 +242,37 @@ std::string cache_signature(agi::Context *context, AssDialogue const& line) {
 }
 
 void apply_override_block(std::string_view text, TextState& state, TextState const& base, LayoutState& layout, AssFile const& ass) {
+	auto is_single_letter_tag = [&](size_t tag_pos) {
+		return tag_pos + 1 >= text.size() || !std::isalpha(static_cast<unsigned char>(text[tag_pos + 1]));
+	};
+
 	for (size_t pos = 0; pos < text.size(); ++pos) {
 		if (text[pos] != '\\')
 			continue;
 		++pos;
+		if (pos >= text.size())
+			break;
+
+		if (text[pos] == 't') {
+			size_t p = pos + 1;
+			skip_spaces(text, p);
+			if (p < text.size() && text[p] == '(') {
+				int depth = 1;
+				++p;
+				while (p < text.size() && depth > 0) {
+					if (text[p] == '(') ++depth;
+					else if (text[p] == ')') --depth;
+					++p;
+				}
+				pos = p - 1;
+				continue;
+			}
+		}
 
 		if (starts_with(text, pos, "pos")) {
 			pos += 3;
 			double values[2] = { layout.x, 0. };
-			if (parse_tag_numbers(text, pos, values, 2)) {
+			if (parse_tag_numbers(text, pos, values, 2) && !layout.positioned) {
 				layout.positioned = true;
 				layout.x = values[0];
 				layout.x2 = values[0];
@@ -261,7 +283,7 @@ void apply_override_block(std::string_view text, TextState& state, TextState con
 		else if (starts_with(text, pos, "move")) {
 			pos += 4;
 			double values[4] = { layout.x, 0., layout.x, 0. };
-			if (parse_tag_numbers(text, pos, values, 4)) {
+			if (parse_tag_numbers(text, pos, values, 4) && !layout.positioned) {
 				layout.positioned = true;
 				layout.x = values[0];
 				layout.x2 = values[2];
@@ -281,17 +303,23 @@ void apply_override_block(std::string_view text, TextState& state, TextState con
 			size_t start = pos;
 			while (pos < text.size() && text[pos] != '\\')
 				++pos;
-			state.font = std::string(text.substr(start, pos - start));
+			std::string font_name(text.substr(start, pos - start));
+			state.font = font_name.empty() ? base.font : std::move(font_name);
 			--pos;
 		}
 		else if (starts_with(text, pos, "fscx")) {
 			pos += 4;
-			state.scalex = parse_number(text, pos, state.scalex);
+			state.scalex = parse_number(text, pos, base.scalex);
 			--pos;
 		}
 		else if (starts_with(text, pos, "fscy")) {
 			pos += 4;
-			state.scaley = parse_number(text, pos, state.scaley);
+			state.scaley = parse_number(text, pos, base.scaley);
+			--pos;
+		}
+		else if (starts_with(text, pos, "fsp")) {
+			pos += 3;
+			state.spacing = parse_number(text, pos, base.spacing);
 			--pos;
 		}
 		else if (starts_with(text, pos, "fs")) {
@@ -302,48 +330,48 @@ void apply_override_block(std::string_view text, TextState& state, TextState con
 				state.fontsize = std::max(1., state.fontsize + (sign == '-' ? -value : value));
 			}
 			else {
-				state.fontsize = std::max(1., parse_number(text, pos, state.fontsize));
+				state.fontsize = std::max(1., parse_number(text, pos, base.fontsize));
 			}
-			--pos;
-		}
-		else if (starts_with(text, pos, "fsp")) {
-			pos += 3;
-			state.spacing = parse_number(text, pos, state.spacing);
 			--pos;
 		}
 		else if (starts_with(text, pos, "xbord")) {
 			pos += 5;
-			state.outline_w = std::max(0., parse_number(text, pos, state.outline_w));
+			state.outline_w = std::max(0., parse_number(text, pos, base.outline_w));
 			--pos;
 		}
 		else if (starts_with(text, pos, "bord")) {
 			pos += 4;
-			state.outline_w = std::max(0., parse_number(text, pos, state.outline_w));
+			state.outline_w = std::max(0., parse_number(text, pos, base.outline_w));
 			--pos;
 		}
 		else if (starts_with(text, pos, "xshad")) {
 			pos += 5;
-			state.shadow_w = parse_number(text, pos, state.shadow_w);
+			state.shadow_w = parse_number(text, pos, base.shadow_w);
 			--pos;
 		}
 		else if (starts_with(text, pos, "shad")) {
 			pos += 4;
-			state.shadow_w = parse_number(text, pos, state.shadow_w);
+			state.shadow_w = parse_number(text, pos, base.shadow_w);
 			--pos;
 		}
-		else if (text[pos] == 'b') {
+		else if (text[pos] == 'b' && is_single_letter_tag(pos)) {
 			++pos;
-			state.bold = parse_boolish(text, pos, base.bold);
+			size_t before = pos;
+			double val = parse_number(text, pos, -1.);
+			if (pos == before)
+				state.bold = base.bold;
+			else
+				state.bold = (val == 1. || val >= 600.);
 			--pos;
 		}
-		else if (text[pos] == 'i') {
+		else if (text[pos] == 'i' && is_single_letter_tag(pos)) {
 			++pos;
 			state.italic = parse_boolish(text, pos, base.italic);
 			--pos;
 		}
-		else if (text[pos] == 'p') {
+		else if (text[pos] == 'p' && is_single_letter_tag(pos)) {
 			++pos;
-			state.drawing = std::max(0, static_cast<int>(parse_number(text, pos, state.drawing)));
+			state.drawing = std::max(0, static_cast<int>(parse_number(text, pos, 0.)));
 			--pos;
 		}
 		else if (text[pos] == 'r') {
@@ -365,7 +393,7 @@ void apply_override_block(std::string_view text, TextState& state, TextState con
 			}
 			--pos;
 		}
-		else if (text[pos] == 'a') {
+		else if (text[pos] == 'a' && is_single_letter_tag(pos)) {
 			++pos;
 			int align = AssStyle::SsaToAss(static_cast<int>(parse_number(text, pos, AssStyle::AssToSsa(layout.alignment))));
 			if (align >= 1 && align <= 9)
@@ -492,7 +520,8 @@ AssFile make_single_line_file(AssFile const& source, AssDialogue const& line, st
 	for (auto const& style : source.Styles)
 		file.Styles.push_back(*new AssStyle(style));
 
-	file.Attachments = source.Attachments;
+	// Embedded fonts are already loaded into libass by LoadSubtitles; copying
+	// source.Attachments here would re-decode and accumulate duplicate fontdata.
 	file.Extradata = source.Extradata;
 	file.next_extradata_id = source.next_extradata_id;
 
@@ -508,14 +537,16 @@ std::vector<int> sample_times(AssDialogue const& line, std::string const& text) 
 	int end = std::max(start + 1, static_cast<int>(line.End));
 	int mid = start + (end - start) / 2;
 
-	if (text.find("\\t") == std::string::npos)
+	if (text.find("\\t") == std::string::npos && text.find("\\move") == std::string::npos)
 		return { mid };
 
 	return { start, mid, std::max(start, end - 1) };
 }
 
 bool outside_video(libass::RenderedBounds const& bounds, int video_w, int video_h) {
-	return bounds.has_pixels && (bounds.left < 0 || bounds.top < 0 || bounds.right > video_w || bounds.bottom > video_h);
+	// libass clips all ASS_Image bitmaps to [0, video_w) x [0, video_h), so
+	// boundary contact (<= 0 or >= video_w/h) indicates clipping/overflow.
+	return bounds.has_pixels && (bounds.left <= 0 || bounds.top <= 0 || bounds.right >= video_w || bounds.bottom >= video_h);
 }
 
 bool appears_auto_wrapped(libass::RenderedBounds const& normal, libass::RenderedBounds const& nowrap, int video_w, int video_h) {
@@ -562,6 +593,14 @@ subtitle_overflow::Result check_with_libass(agi::Context *context, AssDialogue c
 			return result;
 		}
 		if (outside_video(normal, video_w, video_h)) {
+			result.overflow = true;
+			return result;
+		}
+		if (!normal.has_pixels
+		&& (text.find("\\pos") != std::string::npos || text.find("\\move") != std::string::npos)
+		&& text.find("\\clip") == std::string::npos && text.find("\\iclip") == std::string::npos
+		&& text.find("\\alpha&HFF") == std::string::npos && text.find("\\1a&HFF") == std::string::npos
+		&& !line->GetStrippedText().empty()) {
 			result.overflow = true;
 			return result;
 		}
@@ -887,6 +926,9 @@ Result Check(agi::Context *context, AssDialogue const *line, wxDC *dc) {
 	if (OPT_GET("Subtitle/Overflow Highlight/Mode")->GetInt() == 1)
 		return check_with_character_limit(line, text);
 
+	if (!context->project->VideoProvider())
+		return {};
+
 	auto signature = cache_signature(context, *line);
 	Result cached;
 	if (cache_hit(exact_result_cache, line->Id, text, signature, cached))
@@ -918,6 +960,9 @@ Result CheckText(agi::Context *context, AssDialogue const *line, std::string con
 	if (OPT_GET("Subtitle/Overflow Highlight/Mode")->GetInt() == 1)
 		return check_with_character_limit(line, text);
 
+	if (!context->project->VideoProvider())
+		return {};
+
 	auto signature = cache_signature(context, *line);
 	Result result;
 	if (cache_hit(fast_result_cache, line->Id, text, signature, result))
@@ -936,6 +981,9 @@ Result CheckTextExact(agi::Context *context, AssDialogue const *line, std::strin
 
 	if (OPT_GET("Subtitle/Overflow Highlight/Mode")->GetInt() == 1)
 		return check_with_character_limit(line, text);
+
+	if (!context->project->VideoProvider())
+		return {};
 
 	auto signature = cache_signature(context, *line);
 	Result result;

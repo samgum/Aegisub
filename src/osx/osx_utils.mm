@@ -38,14 +38,22 @@ void SetFloatOnParent(wxWindow *window) {
         return;
 
     NSNotificationCenter *nc = [NSNotificationCenter defaultCenter];
-    [nc addObserverForName:@"NSWindowWillEnterFullScreenNotification"
-                    object:nsWindow
-                     queue:nil
-                usingBlock:^(NSNotification *) { [nsWindow setLevel:NSNormalWindowLevel]; }];
-    [nc addObserverForName:@"NSWindowWillExitFullScreenNotification"
-                    object:nsWindow
-                     queue:nil
-                usingBlock:^(NSNotification *) { [nsWindow setLevel:NSFloatingWindowLevel]; }];
+    id enterObs = [[nc addObserverForName:@"NSWindowWillEnterFullScreenNotification"
+                                   object:nsWindow
+                                    queue:nil
+                               usingBlock:^(NSNotification *) { [nsWindow setLevel:NSNormalWindowLevel]; }] retain];
+    id exitObs = [[nc addObserverForName:@"NSWindowWillExitFullScreenNotification"
+                                  object:nsWindow
+                                   queue:nil
+                              usingBlock:^(NSNotification *) { [nsWindow setLevel:NSFloatingWindowLevel]; }] retain];
+    window->Bind(wxEVT_DESTROY, [enterObs, exitObs](wxWindowDestroyEvent &evt) {
+        NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+        [center removeObserver:enterObs];
+        [center removeObserver:exitObs];
+        [enterObs release];
+        [exitObs release];
+        evt.Skip();
+    });
 }
 
 void SetPlaceholderText(wxWindow *window, wxString const& placeholder) {

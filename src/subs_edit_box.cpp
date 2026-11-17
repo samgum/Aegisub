@@ -200,7 +200,6 @@ SubsEditBox::SubsEditBox(wxWindow *parent, agi::Context *context)
 
 	// Text editor
 	edit_ctrl = new SubsTextEditCtrl(this, FromDIP(wxSize(300,50)), wxBORDER_SUNKEN, c);
-	edit_ctrl->Bind(wxEVT_CHAR_HOOK, &SubsEditBox::OnKeyDown, this);
 	ai_analyze_button = new wxButton(this, -1, "AI", wxDefaultPosition, wxSize(GetTextExtent("AI").GetWidth() + 24, -1));
 	ai_analyze_button->SetToolTip(_("Analyze the current subtitle line with AI"));
 	ai_analyze_button->Bind(wxEVT_BUTTON, &SubsEditBox::OnAIAnalyze, this);
@@ -223,6 +222,8 @@ SubsEditBox::SubsEditBox(wxWindow *parent, agi::Context *context)
 	main_sizer->Hide(bottom_sizer);
 
 	SetSizerAndFit(main_sizer);
+	edit_row->Show(ai_analyze_button, OPT_GET("Tool/AI Analysis/Enabled")->GetBool());
+	Layout();
 
 	edit_ctrl->Bind(wxEVT_STC_MODIFIED, &SubsEditBox::OnChange, this);
 	edit_ctrl->SetModEventMask(wxSTC_MOD_INSERTTEXT | wxSTC_MOD_DELETETEXT | wxSTC_STARTACTION);
@@ -244,6 +245,12 @@ SubsEditBox::SubsEditBox(wxWindow *parent, agi::Context *context)
 		context->selectionController->AddActiveLineListener(&SubsEditBox::OnActiveLineChanged, this),
 		context->selectionController->AddSelectionListener(&SubsEditBox::OnSelectedSetChanged, this),
 		context->initialLineState->AddChangeListener(&SubsEditBox::OnLineInitialTextChanged, this),
+		OPT_SUB("Tool/AI Analysis/Enabled", [this, edit_row](agi::OptionValue const& opt) {
+			if (ai_analyze_button) {
+				edit_row->Show(ai_analyze_button, opt.GetBool());
+				Layout();
+			}
+		}),
 	 });
 
 	context->textSelectionController->SetControl(edit_ctrl);

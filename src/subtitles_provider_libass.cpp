@@ -230,6 +230,7 @@ public:
 	void LoadSubtitles(const char *data, size_t len) override {
 		if (ass_track) ass_free_track(ass_track);
 		std::lock_guard<std::mutex> lock(library_mutex);
+		ass_clear_fonts(library);
 		ass_track = ass_read_memory(library, const_cast<char *>(data), len, nullptr);
 		if (!ass_track) throw agi::InternalError("libass failed to load subtitles.");
 	}
@@ -274,19 +275,24 @@ LibassSubtitlesProvider::~LibassSubtitlesProvider() {
 #define _a(c) ((c)&0xFF)
 
 void LibassSubtitlesProvider::DrawSubtitles(VideoFrame &frame,double time) {
-	ass_set_frame_size(renderer(), frame.width, frame.height);
-	// Note: this relies on Aegisub always rendering at video storage res
-	ass_set_storage_size(renderer(), frame.width, frame.height);
+	auto r = renderer();
+	ASS_Image* img = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(library_mutex);
+		ass_set_frame_size(r, frame.width, frame.height);
+		// Note: this relies on Aegisub always rendering at video storage res
+		ass_set_storage_size(r, frame.width, frame.height);
 
-	// Add 1e-6 to guard against floating point imprecision errors on int -> float -> *1000 -> int round trips
-	ASS_Image* img = ass_render_frame(renderer(), ass_track, floor(time * 1000 + 1e-6), nullptr);
+		// Add 1e-6 to guard against floating point imprecision errors on int -> float -> *1000 -> int round trips
+		img = ass_render_frame(r, ass_track, floor(time * 1000 + 1e-6), nullptr);
+	}
 
 	// libass actually returns several alpha-masked monochrome images.
 	// Here, we loop through their linked list, get the colour of the current, and blend into the frame.
 	// This is repeated for all of them.
 
 	using namespace boost::gil;
-	auto dst = interleaved_view(frame.width, frame.height, (bgra8_pixel_t*)frame.data.data(), frame.width * 4);
+	auto dst = interleaved_view(frame.width, frame.height, (bgra8_pixel_t*)frame.data.data(), frame.pitch);
 	if (frame.flipped)
 		dst = flipped_up_down_view(dst);
 
@@ -330,11 +336,8 @@ RenderedBounds GetRenderedBounds(AssFile *subs, int time_ms, int width, int heig
 		return bounds;
 
 	auto data = serialize_subtitles(subs);
-	ASS_Track *track;
-	{
-		std::lock_guard<std::mutex> llock(library_mutex);
-		track = ass_read_memory(library, data.data(), data.size(), nullptr);
-	}
+	std::lock_guard<std::mutex> llock(library_mutex);
+	ASS_Track *track = ass_read_memory(library, data.data(), data.size(), nullptr);
 	if (!track)
 		return bounds;
 

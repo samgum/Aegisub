@@ -56,7 +56,8 @@ BOOST_NOINLINE void throw_error(GLenum err, const char *msg) {
 /// @brief Structure tracking all precomputable information about a subtexture
 struct VideoOutGL::TextureInfo {
 	GLuint textureID = 0;
-	int dataOffset = 0;
+	int sourceX = 0;
+	int sourceY = 0;
 	int sourceH = 0;
 	int sourceW = 0;
 };
@@ -102,6 +103,7 @@ void VideoOutGL::DetectOpenGLCapabilities() {
 /// @param bpp The frame's bytes per pixel
 void VideoOutGL::InitTextures(int width, int height, GLenum format, int bpp, bool flipped) {
 	using namespace std;
+	(void)bpp;
 
 	// Do nothing if the frame size and format are unchanged
 	if (width == frameWidth && height == frameHeight && format == frameFormat && flipped == frameFlipped) return;
@@ -186,12 +188,10 @@ void VideoOutGL::InitTextures(int width, int height, GLenum format, int bpp, boo
 			// Width and height of the area read from the frame data
 			int sourceX = col * textureArea;
 			int sourceY = row * textureArea;
+			ti.sourceX  = sourceX;
+			ti.sourceY  = sourceY;
 			ti.sourceW  = std::min(frameWidth  - sourceX, maxTextureSize);
 			ti.sourceH  = std::min(frameHeight - sourceY, maxTextureSize);
-
-			// Used instead of GL_PACK_SKIP_ROWS/GL_PACK_SKIP_PIXELS due to
-			// performance issues with the emulation
-			ti.dataOffset = sourceY * frameWidth * bpp + sourceX * bpp;
 
 			int textureHeight = SmallestPowerOf2(ti.sourceH);
 			int textureWidth  = SmallestPowerOf2(ti.sourceW);
@@ -256,9 +256,10 @@ void VideoOutGL::UploadFrameData(VideoFrame const& frame) {
 	CHECK_ERROR(glPixelStorei(GL_UNPACK_ROW_LENGTH, frame.pitch / 4));
 
 	for (auto& ti : textureList) {
+		size_t offset = static_cast<size_t>(ti.sourceY) * frame.pitch + static_cast<size_t>(ti.sourceX) * 4;
 		CHECK_ERROR(glBindTexture(GL_TEXTURE_2D, ti.textureID));
 		CHECK_ERROR(glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, ti.sourceW,
-			ti.sourceH, GL_BGRA_EXT, GL_UNSIGNED_BYTE, &frame.data[ti.dataOffset]));
+			ti.sourceH, GL_BGRA_EXT, GL_UNSIGNED_BYTE, &frame.data[offset]));
 	}
 
 	CHECK_ERROR(glPixelStorei(GL_UNPACK_ROW_LENGTH, 0));

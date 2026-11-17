@@ -740,20 +740,23 @@ void BaseGrid::OnKeyDown(wxKeyEvent &event) {
 	auto active_line = context->selectionController->GetActiveLine();
 	int old_extend = extendRow;
 	int next = mid(0, (active_line ? active_line->Row : 0) + dir * step, GetRows() - 1);
-	context->selectionController->SetActiveLine(GetDialogue(next));
 
 	// Move selection
 	if (!ctrl && !shift && !alt) {
+		context->selectionController->SetActiveLine(GetDialogue(next));
 		SelectRow(next);
 		return;
 	}
 
 	// Move active only
-	if (alt && !shift && !ctrl)
+	if (alt && !shift && !ctrl) {
+		context->selectionController->SetActiveLine(GetDialogue(next));
 		return;
+	}
 
 	// Shift-selection
 	if (shift && !ctrl && !alt) {
+		context->selectionController->SetActiveLine(GetDialogue(next));
 		extendRow = old_extend;
 		// Set range
 		int begin = next;

@@ -30,6 +30,7 @@
 #include "subs_edit_ctrl.h"
 
 #include "ass_dialogue.h"
+#include "ass_file.h"
 #include "base_grid.h"
 #include "command/command.h"
 #include "compat.h"
@@ -126,6 +127,10 @@ SubsTextEditCtrl::SubsTextEditCtrl(wxWindow* parent, wxSize wsize, long style, a
 		Bind(wxEVT_MENU, bind(&cmd::call, "edit/line/split/estimate", context), EDIT_MENU_SPLIT_ESTIMATE);
 		Bind(wxEVT_MENU, bind(&cmd::call, "edit/line/split/video", context), EDIT_MENU_SPLIT_VIDEO);
 		BindConnection(context->project->AddVideoProviderListener([this](AsyncVideoProvider *) { UpdateStyle(); }));
+		BindConnection(context->ass->AddCommitListener([this](int type, const AssDialogue *) {
+			if (type != AssFile::COMMIT_DIAG_TEXT)
+				UpdateOverflowHighlight();
+		}));
 	}
 
 	Bind(wxEVT_CONTEXT_MENU, &SubsTextEditCtrl::OnContextMenu, this);

@@ -49,8 +49,9 @@ wxImage GetImageWithAlpha(VideoFrame const &frame) {
 	wxImage img = GetImage(frame);
 	img.InitAlpha();
 	uint8_t *dst = img.GetAlpha();
-	const uint8_t *src = frame.data.data() + 3;
 	for (int y = 0; y < frame.height; y++) {
+		int src_y = frame.flipped ? (frame.height - 1 - y) : y;
+		const uint8_t *src = frame.data.data() + static_cast<size_t>(src_y) * frame.pitch + 3;
 		for (int x = 0; x < frame.width; x++) {
 			*(dst++) = *src;
 			src += 4;
