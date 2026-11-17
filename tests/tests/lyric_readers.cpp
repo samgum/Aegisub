@@ -130,5 +130,29 @@ TEST_F(LyricReaders, UntimedLrcPreservesRows) {
 	EXPECT_EQ(Text(0), "first");
 	EXPECT_EQ(Text(1), "second");
 }
+TEST_F(LyricReaders, LrcPreservesFinalWordLeadingSpaceAndLiteralLt) {
+	Read("[00:01.00]<00:01.00>Hello<00:01.50> world<00:02.00>\n[00:03.00]3 < <00:03.50>five<00:04.00>\n");
+	ASSERT_EQ(std::distance(file.Events.begin(), file.Events.end()), 2);
+	EXPECT_EQ(Text(0), "{\\kf50}Hello{\\kf50} world");
+	EXPECT_EQ(Text(1), "{\\kf50}3 < {\\kf50}five");
+}
+TEST_F(LyricReaders, LrcEmptyTimestampLineStopsPreviousRow) {
+	Read("[00:10.00]First\n[00:12.00]\n[01:00.00]Second\n");
+	ASSERT_EQ(std::distance(file.Events.begin(), file.Events.end()), 2);
+	EXPECT_EQ(int(file.Events.front().End), 12000);
+}
+TEST_F(LyricReaders, TtmlPreservesInterSpanSpacesAndFoldsXmlIndentation) {
+	Read("<tt><body>\n  <p begin=\"1s\" end=\"3s\">\n    <span begin=\"1s\" end=\"2s\">Hello</span>\n    <span begin=\"2s\" end=\"3s\">world</span>\n  </p>\n</body></tt>", true);
+	ASSERT_EQ(std::distance(file.Events.begin(), file.Events.end()), 1);
+	EXPECT_EQ(Text(0), "{\\kf100}Hello {\\kf100}world");
+}
+TEST_F(LyricReaders, TtmlTimedBackgroundWrapperPreservesChildWordTimingsAndParens) {
+	Read(R"(<tt><body><p begin="1s" end="5s"><span begin="1s" end="4s">Lead</span><span xmlns:ttm="http://www.w3.org/ns/ttml#metadata" ttm:role="x-bg" begin="2s" end="3s">(<span begin="2s" end="2.5s">Ooh</span>)</span></p></body></tt>)", true);
+	ASSERT_EQ(std::distance(file.Events.begin(), file.Events.end()), 2);
+	EXPECT_EQ(Text(0), "{\\kf300}Lead");
+	EXPECT_EQ(Text(1), "{\\kf50}(Ooh)");
+	EXPECT_EQ(int(file.Events.back().Start), 2000);
+	EXPECT_EQ(int(file.Events.back().End), 2500);
+}
 
 }

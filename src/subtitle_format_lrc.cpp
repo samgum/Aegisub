@@ -112,6 +112,7 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 
 	int64_t offset_ms = 0;
 	std::vector<LrcLine> lines;
+	std::vector<int64_t> clear_markers;
 	std::vector<std::string> untimed_lines;
 
 	while (file.HasMoreLines()) {
@@ -184,8 +185,8 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 			if (!TryParseTag(tag_body, ms)) {
 				// Not a syllable timestamp; keep it verbatim (could be an
 				// ASS-injected tag someone left in) and move past this '<'.
-				pending_text += text.substr(scan, gt - scan + 1);
-				scan = gt + 1;
+				pending_text += text.substr(scan, lt - scan + 1);
+				scan = lt + 1;
 				continue;
 			}
 
@@ -198,8 +199,8 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 			has_syllables = true;
 			scan = gt + 1;
 		}
-		boost::trim(pending_text);
-		if (has_syllables && !pending_text.empty())
+		boost::trim_right(pending_text);
+		if (has_syllables && pending_text.find_first_not_of(" \t\r\n") != std::string::npos)
 			syllables.emplace_back(last_syllable_ms, pending_text);
 		else if (has_syllables)
 			// A word timestamp with no text after it (the trailing
@@ -222,13 +223,15 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 				out.text.erase(std::remove(out.text.begin(), out.text.end(), '\r'), out.text.end());
 			}
 			// Timestamp-only lines (e.g. "[00:23.05]" with no text after it,
-			// common in Apple Music exports as section spacers) and lines
-			// whose word markers carry no text would become empty dialogue
-			// rows; skip them.
+			// common in Apple Music exports as section spacers) must not
+			// become empty dialogue rows, but they do mark where the
+			// preceding lyric line ends.
 			bool empty_line = (!out.has_syllables || out.syllables.empty())
 				&& out.text.find_first_not_of(" \t") == std::string::npos;
 			if (!empty_line)
 				lines.push_back(std::move(out));
+			else
+				clear_markers.push_back(ts);
 		}
 	}
 
@@ -255,6 +258,9 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 		if (line.end_marker_ms >= 0) line.end_marker_ms = adjusted_time(line.end_marker_ms);
 		for (auto& syl : line.syllables) syl.first = adjusted_time(syl.first);
 	}
+	for (auto& marker : clear_markers)
+		marker = adjusted_time(marker);
+	std::sort(clear_markers.begin(), clear_markers.end());
 
 	// Sort by start time; LRC files are usually ordered but multi-timestamp
 	// expansion can interleave.
@@ -268,6 +274,9 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 	for (size_t i = 0; i < lines.size(); ++i) {
 		auto const& cur = lines[i];
 		int64_t end_ms = i + 1 < lines.size() ? lines[i + 1].start_ms : cur.start_ms + 5000;
+		auto clear_it = std::upper_bound(clear_markers.begin(), clear_markers.end(), cur.start_ms);
+		if (clear_it != clear_markers.end() && *clear_it < end_ms)
+			end_ms = *clear_it;
 		if (cur.end_marker_ms >= 0)
 			end_ms = cur.end_marker_ms;
 		if (i + 1 < lines.size() && end_ms > lines[i + 1].start_ms)

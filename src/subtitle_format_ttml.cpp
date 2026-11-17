@@ -181,6 +181,63 @@ bool ParseParagraphTimes(wxXmlNode const* p, int64_t& begin_ms, int64_t& end_ms)
 	return true;
 }
 
+std::string NormalizeXmlText(wxXmlNode const* node) {
+	std::string raw = node->GetContent().ToStdString(wxConvUTF8);
+	bool has_newline = false;
+	bool all_ws = true;
+	for (char ch : raw) {
+		if (ch == '\r' || ch == '\n')
+			has_newline = true;
+		if (ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n')
+			all_ws = false;
+	}
+	if (!has_newline)
+		return raw;
+	if (all_ws) {
+		auto prev = node->GetPrev();
+		auto next = node->GetNext();
+		if (!prev || !next
+			|| (prev->GetType() == wxXML_ELEMENT_NODE && IsElement(prev, "br"))
+			|| (next->GetType() == wxXML_ELEMENT_NODE && IsElement(next, "br")))
+			return {};
+		return " ";
+	}
+	std::string out;
+	out.reserve(raw.size());
+	bool in_ws = false;
+	for (unsigned char ch : raw) {
+		if (ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
+			if (!in_ws) {
+				out.push_back(' ');
+				in_ws = true;
+			}
+		}
+		else {
+			out.push_back(static_cast<char>(ch));
+			in_ws = false;
+		}
+	}
+	return out;
+}
+
+bool HasTimedChildSpan(wxXmlNode const* node) {
+	for (auto child = node->GetChildren(); child; child = child->GetNext()) {
+		if (child->GetType() != wxXML_ELEMENT_NODE) continue;
+		if (IsElement(child, "span")) {
+			for (auto attr = child->GetAttributes(); attr; attr = attr->GetNext()) {
+				std::string name = attr->GetName().ToStdString(wxConvUTF8);
+				auto pos = name.find(':');
+				if (pos != std::string::npos) name = name.substr(pos + 1);
+				if (name == "begin" && ParseTTMLTime(attr->GetValue().ToStdString(wxConvUTF8)) >= 0)
+					return true;
+			}
+		}
+		if (HasTimedChildSpan(child))
+			return true;
+	}
+	return false;
+}
+
 // Walk a paragraph's children, accumulating plain text and <span>-scoped
 // karaoke segments. Runs of text between spans attach to the most recent
 // span (or the paragraph preamble when no span has been seen yet).
@@ -192,7 +249,7 @@ std::string CollectVisibleText(wxXmlNode const* node) {
 		switch (child->GetType()) {
 			case wxXML_TEXT_NODE:
 			case wxXML_CDATA_SECTION_NODE:
-				out += child->GetContent().ToStdString(wxConvUTF8);
+				out += NormalizeXmlText(child);
 				break;
 			case wxXML_ELEMENT_NODE:
 				if (IsElement(child, "br"))
@@ -207,77 +264,113 @@ std::string CollectVisibleText(wxXmlNode const* node) {
 	return out;
 }
 
+struct ParagraphBuilder {
+	std::string pending_bg_prefix;
+	std::string pending_lead_prefix;
+
+	void BuildParagraphText(wxXmlNode *p,
+		std::string& plain, bool& has_karaoke,
+		std::vector<TtmlSegment>& segments, bool bg_voice = false) {
+		auto append_text = [&](std::string const& text, bool is_bg) {
+			if (text.empty()) return;
+			if (has_karaoke && !segments.empty() && segments.back().bg == is_bg)
+				segments.back().text += text;
+			else if (is_bg)
+				pending_bg_prefix += text;
+			else if (!has_karaoke)
+				plain += text;
+			else
+				pending_lead_prefix += text;
+		};
+
+		for (auto node = p->GetChildren(); node; node = node->GetNext()) {
+			switch (node->GetType()) {
+				case wxXML_TEXT_NODE:
+				case wxXML_CDATA_SECTION_NODE:
+					append_text(NormalizeXmlText(node), bg_voice);
+					break;
+				case wxXML_ELEMENT_NODE: {
+					if (IsElement(node, "br")) {
+						append_text("\\N", bg_voice);
+						break;
+					}
+					if (IsElement(node, "span")) {
+						std::string begin_attr, end_attr;
+						bool role_bg = false;
+						for (auto attr = node->GetAttributes(); attr; attr = attr->GetNext()) {
+							std::string name = attr->GetName().ToStdString(wxConvUTF8);
+							auto pos = name.find(':');
+							if (pos != std::string::npos) name = name.substr(pos + 1);
+							if (name == "begin") begin_attr = attr->GetValue().ToStdString(wxConvUTF8);
+							else if (name == "end") end_attr = attr->GetValue().ToStdString(wxConvUTF8);
+							else if (name == "role") {
+								// Apple Music marks background vocals with
+								// ttm:role="x-bg"; they sing alongside the lead.
+								std::string role = attr->GetValue().ToStdString(wxConvUTF8);
+								if (role.rfind("x-bg", 0) == 0) role_bg = true;
+							}
+						}
+						bool voice_bg = bg_voice || role_bg;
+
+						// Collect this span's own visible text. Nested spans are
+						// flattened in document order — an untimed wrapper span or
+						// a timed wrapper containing timed child spans (e.g.
+						// ttm:role="x-bg" wrapping word spans in Apple Music TTML)
+						// recurses into its children rather than flattening them.
+						std::string span_text = CollectVisibleText(node);
+						int64_t span_begin = ParseTTMLTime(begin_attr);
+						int64_t span_end = end_attr.empty() ? -1 : ParseTTMLTime(end_attr);
+						if (span_begin >= 0 && !span_text.empty() && !HasTimedChildSpan(node)) {
+							has_karaoke = true;
+							std::string& prefix = voice_bg ? pending_bg_prefix : pending_lead_prefix;
+							if (!prefix.empty()) {
+								span_text = prefix + span_text;
+								prefix.clear();
+							}
+							segments.push_back({span_begin, span_end, span_text, voice_bg});
+						}
+						else if (!span_text.empty()) {
+							// Untimed or wrapper span: recurse so timed children
+							// still get their own segments with the x-bg voice flag.
+							BuildParagraphText(node, plain, has_karaoke, segments, voice_bg);
+						}
+						break;
+					}
+					// Other elements: recurse so metadata wrappers never eat text.
+					BuildParagraphText(node, plain, has_karaoke, segments, bg_voice);
+					break;
+				}
+				default:
+					break;
+			}
+		}
+	}
+
+	void FlushTrailing(std::string& plain, std::vector<TtmlSegment>& segments) {
+		auto flush_one = [&](std::string& pending, bool is_bg) {
+			if (pending.empty()) return;
+			for (auto it = segments.rbegin(); it != segments.rend(); ++it) {
+				if (it->bg == is_bg) {
+					it->text += pending;
+					pending.clear();
+					return;
+				}
+			}
+			if (!is_bg)
+				plain += pending;
+			pending.clear();
+		};
+		flush_one(pending_bg_prefix, true);
+		flush_one(pending_lead_prefix, false);
+	}
+};
+
 void BuildParagraphText(wxXmlNode *p,
 	std::string& plain, bool& has_karaoke,
 	std::vector<TtmlSegment>& segments, bool bg_voice = false) {
-	for (auto node = p->GetChildren(); node; node = node->GetNext()) {
-		switch (node->GetType()) {
-			case wxXML_TEXT_NODE:
-			case wxXML_CDATA_SECTION_NODE: {
-				std::string text = node->GetContent().ToStdString(wxConvUTF8);
-				if (has_karaoke && !segments.empty())
-					segments.back().text += text;
-				else
-					plain += text;
-				break;
-			}
-			case wxXML_ELEMENT_NODE: {
-				if (IsElement(node, "br")) {
-					if (has_karaoke && !segments.empty())
-						segments.back().text += "\\N";
-					else
-						plain += "\\N";
-					break;
-				}
-				if (IsElement(node, "span")) {
-					std::string begin_attr, end_attr;
-					bool role_bg = false;
-					for (auto attr = node->GetAttributes(); attr; attr = attr->GetNext()) {
-						std::string name = attr->GetName().ToStdString(wxConvUTF8);
-						auto pos = name.find(':');
-						if (pos != std::string::npos) name = name.substr(pos + 1);
-						if (name == "begin") begin_attr = attr->GetValue().ToStdString(wxConvUTF8);
-						else if (name == "end") end_attr = attr->GetValue().ToStdString(wxConvUTF8);
-						else if (name == "role") {
-							// Apple Music marks background vocals with
-							// ttm:role="x-bg"; they sing alongside the lead.
-							std::string role = attr->GetValue().ToStdString(wxConvUTF8);
-							if (role.rfind("x-bg", 0) == 0) role_bg = true;
-						}
-					}
-					bool voice_bg = bg_voice || role_bg;
-
-					// Collect this span's own visible text. Nested spans are
-					// flattened in document order — an untimed wrapper span
-					// (e.g. ttm:role="x-bg" background vocals wrapping timed
-					// word spans in Apple Music TTML) must not swallow its
-					// children, and a timed span containing nested spans
-					// (rare) uses its own begin for the whole run.
-					std::string span_text = CollectVisibleText(node);
-					int64_t span_begin = ParseTTMLTime(begin_attr);
-					int64_t span_end = end_attr.empty() ? -1 : ParseTTMLTime(end_attr);
-					if (span_begin >= 0 && !span_text.empty()) {
-						has_karaoke = true;
-						segments.push_back({span_begin, span_end, span_text, voice_bg});
-					}
-					else if (!span_text.empty()) {
-						// Untimed wrapper: its timed children still need their
-						// own segments, so recurse instead of flattening them
-						// into plain text, propagating the x-bg voice flag.
-						// Share the current text/segments so untimed wrapper text
-						// is appended exactly once at its document position.
-						BuildParagraphText(node, plain, has_karaoke, segments, voice_bg);
-					}
-					break;
-				}
-				// Other elements: recurse so metadata wrappers never eat text.
-				BuildParagraphText(node, plain, has_karaoke, segments, bg_voice);
-				break;
-			}
-			default:
-				break;
-		}
-	}
+	ParagraphBuilder builder;
+	builder.BuildParagraphText(p, plain, has_karaoke, segments, bg_voice);
+	builder.FlushTrailing(plain, segments);
 }
 }
 
@@ -294,7 +387,8 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 	target->LoadDefault(false, OPT_GET("Subtitle Format/TTXT/Default Style Catalog")->GetString());
 
 	wxXmlDocument doc;
-	if (!doc.Load(wxString::FromUTF8(filename.string()))) throw SubtitleFormatParseError("Failed loading TTML XML file.");
+	if (!doc.Load(wxString::FromUTF8(filename.string()), "UTF-8", wxXMLDOC_KEEP_WHITESPACE_NODES))
+		throw SubtitleFormatParseError("Failed loading TTML XML file.");
 	if (!doc.GetRoot() || !IsElement(doc.GetRoot(), "tt"))
 		throw SubtitleFormatParseError("Invalid TTML file: root element is not <tt>.");
 
@@ -382,15 +476,25 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 						(seg.bg ? bg_segs : lead_segs).push_back(seg);
 
 					int64_t lead_last_end = 0;
-					for (auto const& seg : lead_segs)
-						lead_last_end = std::max(lead_last_end,
-							seg.end_ms > seg.begin_ms ? seg.end_ms : seg.begin_ms);
+					for (size_t i = 0; i < lead_segs.size(); ++i) {
+						int64_t seg_end = lead_segs[i].end_ms > lead_segs[i].begin_ms
+							? lead_segs[i].end_ms
+							: (i + 1 < lead_segs.size() ? lead_segs[i + 1].begin_ms : para.end_ms);
+						lead_last_end = std::max(lead_last_end, std::max(lead_segs[i].begin_ms, seg_end));
+					}
 
 					if (!bg_segs.empty() && !lead_segs.empty()
 						&& bg_segs.front().begin_ms < lead_last_end) {
 						TtmlParagraph harmony;
 						harmony.begin_ms = std::max<int64_t>(para.begin_ms, bg_segs.front().begin_ms);
-						harmony.end_ms = std::max(para.end_ms, harmony.begin_ms);
+						bool bg_all_have_end = std::all_of(bg_segs.begin(), bg_segs.end(),
+							[](TtmlSegment const& s) { return s.end_ms > s.begin_ms; });
+						int64_t bg_max_end = 0;
+						for (auto const& seg : bg_segs)
+							bg_max_end = std::max(bg_max_end, seg.end_ms);
+						harmony.end_ms = bg_all_have_end
+							? std::max(bg_max_end, harmony.begin_ms)
+							: std::max(para.end_ms, harmony.begin_ms);
 						harmony.karaoke_text = build_karaoke(bg_segs, harmony.begin_ms, harmony.end_ms);
 						boost::trim(harmony.karaoke_text);
 						para.karaoke_text = plain + build_karaoke(lead_segs, para.begin_ms, para.end_ms);
