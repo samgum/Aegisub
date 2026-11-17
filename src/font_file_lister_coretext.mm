@@ -17,9 +17,18 @@
 #include <AppKit/AppKit.h>
 #include <CoreText/CoreText.h>
 
+#include <memory>
+
 #include "font_file_lister.h"
 
 namespace {
+struct CFDataDeleter {
+	void operator()(CFDataRef ref) const {
+		if (ref) CFRelease(ref);
+	}
+};
+using ScopedCFData = std::unique_ptr<const __CFData, CFDataDeleter>;
+
 struct FontMatch {
 	NSURL *url = nil;
 	NSCharacterSet *codepoints = nil;
@@ -34,22 +43,26 @@ FontMatch process_descriptor(NSFontDescriptor *desc, NSString *name) {
 	FontMatch ret;
 
 	// For whatever reason there is no NSFontURLAttribute
-	ret.url = [desc objectForKey:(__bridge NSString *)kCTFontURLAttribute];
+	ret.url = [desc objectForKey:(NSString *)kCTFontURLAttribute];
 	if (!ret.url)
 		return ret;
 
 	NSFont *font = [NSFont fontWithDescriptor:desc size:10];
+	if (!font) {
+		ret.url = nil;
+		return ret;
+	}
 
 	// Ask CoreText if the font is italic, but if it says no double-check
 	// by reading the macStyle field of the 'head' table as CT doesn't honor
 	// that
-	auto traits = CTFontGetSymbolicTraits((__bridge CTFontRef)font);
+	auto traits = CTFontGetSymbolicTraits((CTFontRef)font);
 	ret.italic = !!(traits & kCTFontItalicTrait);
 	ret.bold = !!(traits & kCTFontBoldTrait);
 	if (!ret.italic) {
-		auto data = (__bridge_transfer NSData *)CTFontCopyTable((__bridge CTFontRef)font, kCTFontTableHead, 0);
-		if (data.length > 45) {
-			ret.italic = static_cast<const char *>(data.bytes)[45] & 2;
+		ScopedCFData head_data(CTFontCopyTable((CTFontRef)font, kCTFontTableHead, 0));
+		if (head_data && CFDataGetLength(head_data.get()) > 45) {
+			ret.italic = CFDataGetBytePtr(head_data.get())[45] & 2;
 		}
 	}
 
@@ -59,9 +72,9 @@ FontMatch process_descriptor(NSFontDescriptor *desc, NSString *name) {
 
 	// Get the weight from the OS/2 table because the weights reported by CT
 	// are often uncorrelated with the OS/2 weight, which is what GDI uses
-	auto data = (__bridge_transfer NSData *)CTFontCopyTable((__bridge CTFontRef)font, kCTFontTableOS2, 0);
-	if (data.length > 7) {
-		auto bytes = static_cast<const uint8_t *>(data.bytes);
+	ScopedCFData os2_data(CTFontCopyTable((CTFontRef)font, kCTFontTableOS2, 0));
+	if (os2_data && CFDataGetLength(os2_data.get()) > 7) {
+		auto bytes = CFDataGetBytePtr(os2_data.get());
 		ret.weight = get_16(bytes, 4);
 		ret.width = get_16(bytes, 6);
 	}
@@ -78,38 +91,49 @@ FontMatch process_descriptor(NSFontDescriptor *desc, NSString *name) {
 	// the main family with different families for the other variants on Windows.
 	// For VSFilter compatibility we want to match based on the Windows name.
 	if (ret.family_match) {
-		auto data = (__bridge_transfer NSData *)CTFontCopyTable((__bridge CTFontRef)font, kCTFontTableName, 0);
-		// Malformed fonts can lack a 'name' table entirely
-		if (data.length > 6) {
-		auto bytes = static_cast<const uint8_t *>(data.bytes);
+		ScopedCFData name_data(CTFontCopyTable((CTFontRef)font, kCTFontTableName, 0));
+		if (!name_data || CFDataGetLength(name_data.get()) < 6)
+			return ret;
+
+		auto bytes = CFDataGetBytePtr(name_data.get());
+		auto table_size = static_cast<size_t>(CFDataGetLength(name_data.get()));
 		uint16_t count = get_16(bytes, 2);
-		auto strings = bytes + get_16(bytes, 4);
+		size_t strings_offset = get_16(bytes, 4);
+		if (count > (table_size - 6) / 12 || strings_offset > table_size)
+			return ret;
+		auto strings = bytes + strings_offset;
+		auto strings_size = table_size - strings_offset;
 
 		for (uint16_t i = 0; i < count; ++i) {
 			auto name_record = bytes + 6 + i * 12;
 			auto platform_id = get_16(name_record, 0);
 			auto encoding_id = get_16(name_record, 2);
 			auto name_id = get_16(name_record, 6);
-			auto length = get_16(name_record, 8);
-			auto offset = get_16(name_record, 10);
+			size_t length = get_16(name_record, 8);
+			size_t offset = get_16(name_record, 10);
 
 			if (name_id != 1) // font family
 				continue;
 			if (platform_id != 3 || encoding_id != 1) // only look at MS Unicode
+				continue;
+			if ((length & 1) || offset > strings_size || length > strings_size - offset)
 				continue;
 
 			NSString *msFamily = [[NSString alloc] initWithBytesNoCopy:(void *)(strings + offset)
 			                                                    length:length
 			                                                  encoding:NSUTF16BigEndianStringEncoding
 			                                              freeWhenDone:NO];
+			if (!msFamily)
+				continue;
 			auto range = [msFamily rangeOfString:font.familyName];
+			auto msFamilyLen = msFamily.length;
+			[msFamily release];
 			// If it's not even a prefix then it's probably for a different language
 			if (range.location != 0)
 				continue;
 
-			ret.family_match = range.length == msFamily.length;
+			ret.family_match = range.length == msFamilyLen;
 			break;
-		}
 		}
 	}
 
@@ -149,7 +173,7 @@ CollectionResult CoreTextFontFileLister::GetFontPaths(std::string const& facenam
 			return weight_penalty(bold, m.weight) < weight_penalty(bold, best.weight);
 		}
 		else if (m.bold != best.bold) {
-			return m.bold == bold > 550;
+			return m.bold == (bold > 550);
 		}
 		if (m.italic != best.italic) {
 			return (m.italic != italic) < (best.italic != italic);
@@ -171,7 +195,7 @@ CollectionResult CoreTextFontFileLister::GetFontPaths(std::string const& facenam
 	};
 
 	@autoreleasepool {
-		NSString *name = @(facename.c_str() + (facename[0] == '@'));
+		NSString *name = @(facename.c_str() + (!facename.empty() && facename[0] == '@'));
 
 		NSArray *attrs = @[
 			[NSFontDescriptor fontDescriptorWithFontAttributes:@{NSFontFamilyAttribute: name}],
@@ -192,7 +216,8 @@ CollectionResult CoreTextFontFileLister::GetFontPaths(std::string const& facenam
 		ret.fake_italic = italic && !best.italic;
 		ret.fake_bold = bold > 400 && best.weight < bold;
 
-		ret.paths.push_back(best.url.fileSystemRepresentation);
+		if (const char *fs_rep = best.url.fileSystemRepresentation)
+			ret.paths.push_back(fs_rep);
 		for (int chr : characters) {
 			if (![best.codepoints longCharacterIsMember:chr]) {
 				ret.missing += chr;
