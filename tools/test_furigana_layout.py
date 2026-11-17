@@ -228,7 +228,7 @@ def test_furigana_wrap_and_alignment_fixes():
     source = SOURCE.read_text(encoding="utf-8")
     assert "token.allow_wrap = state.wrap_style != 2;" in source
     assert "block->GetType() != AssBlockType::PLAIN" in source
-    assert "non_cjk_units += furigana_codepoint_units(cp);" in source
+    assert "non_cjk_units += furigana_display_units(cp);" in source
 
 
 def main():

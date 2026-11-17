@@ -834,16 +834,6 @@ bool convert_chinese_with_transliterator(std::string& text, icu::Transliterator&
 	return true;
 }
 
-bool convert_chinese_text(std::string& text, bool to_traditional) {
-	UErrorCode status = U_ZERO_ERROR;
-	icu::UnicodeString transform_id = icu::UnicodeString::fromUTF8(to_traditional ? "Simplified-Traditional" : "Traditional-Simplified");
-	std::unique_ptr<icu::Transliterator> transliterator(
-		icu::Transliterator::createInstance(transform_id, UTRANS_FORWARD, status));
-	if (U_FAILURE(status) || !transliterator)
-		return false;
-	return convert_chinese_with_transliterator(text, *transliterator);
-}
-
 DialogChineseConverter::DialogChineseConverter(agi::Context *context)
 : wxDialog(context->parent, -1, _("Chinese Simplified/Traditional Conversion"))
 , context(context)
@@ -1763,10 +1753,6 @@ std::string make_aligned_reading_for_cjk_run(std::string const& run, std::map<st
 	return result;
 }
 
-void append_hidden_text_width(std::string& result, std::string const& text, FuriganaFormat const& format) {
-	append_hidden_space(result, furigana_display_units(text) * format.base_size, format);
-}
-
 std::string make_aligned_reading_line(std::string const& raw_text, std::map<std::string, std::string> const& readings, FuriganaFormat const& format, bool& any_reading, int row, int& occurrence) {
 	bool had_furigana = false;
 	AssDialogue line;
@@ -1796,7 +1782,7 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 
 		for (size_t pos = 0; pos < text.size(); ) {
 			if (text[pos] == '\\' && pos + 1 < text.size() && text[pos + 1] == 'h') {
-				non_cjk_units += furigana_codepoint_units(' ');
+				non_cjk_units += furigana_display_units(static_cast<uint32_t>(' '));
 				pos += 2;
 				continue;
 			}
@@ -1806,7 +1792,7 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 			read_utf8_codepoint(text, pos, cp, len);
 
 			if (!is_cjk_ideograph(cp)) {
-				non_cjk_units += furigana_codepoint_units(cp);
+				non_cjk_units += furigana_display_units(cp);
 				pos += len;
 				continue;
 			}
