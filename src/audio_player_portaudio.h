@@ -185,7 +185,7 @@ public:
 
 	/// @brief Get current volume level
 	/// @return Volume level
-	double GetVolume() override;
+	double GetVolume();
 
 	/// Get list of available output devices
 	static wxArrayString GetOutputDevices();

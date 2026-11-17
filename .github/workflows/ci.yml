@@ -67,18 +67,6 @@ jobs:
             buildtype: release,
             args: -Ddefault_library=static -Dbuild_osx_bundle=true -Dlocal_boost=true --force-fallback-for=ffms2
           }
-          - {
-            name: macOS arm64 Debug,
-            os: macos-14,
-            buildtype: debugoptimized,
-            args: -Ddefault_library=static -Dbuild_osx_bundle=false -Dlocal_boost=true --force-fallback-for=ffms2
-          }
-          - {
-            name: macOS arm64 Release,
-            os: macos-15,
-            buildtype: release,
-            args: -Ddefault_library=static -Dbuild_osx_bundle=true -Dlocal_boost=true --force-fallback-for=ffms2
-          }
 
     steps:
       - uses: actions/checkout@v6
@@ -289,4 +277,92 @@ jobs:
         with:
           name: Source Tarball
           path: build/meson-dist/*.tar.xz
+          if-no-files-found: error
+
+  build_arm64:
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.os }}
+
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        config:
+          - {
+            name: macOS arm64 Release,
+            os: macos-15,
+            buildtype: release,
+            args: -Ddefault_library=static -Dbuild_osx_bundle=true -Dlocal_boost=true --force-fallback-for=ffms2
+          }
+          - {
+            name: macOS arm64 Debug,
+            os: macos-15,
+            buildtype: debugoptimized,
+            args: -Ddefault_library=static -Dbuild_osx_bundle=false -Dlocal_boost=true --force-fallback-for=ffms2
+          }
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: '0'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - name: Run targeted source regression checks
+        run: python tools/run_source_regressions.py
+
+      - name: Setup Meson
+        run: |
+          python -m pip install --upgrade pip setuptools
+          pip install meson
+
+      - name: Install dependencies (MacOS)
+        run: |
+          export HOMEBREW_NO_INSTALL_CLEANUP=1
+          missing_formulae=()
+          for formula in ninja libass zlib ffms2 fftw hunspell pulseaudio sound-touch portaudio; do
+            if ! brew list --formula "$formula" >/dev/null 2>&1; then
+              missing_formulae+=("$formula")
+            fi
+          done
+          if [ ${#missing_formulae[@]} -gt 0 ]; then
+            brew install "${missing_formulae[@]}"
+          fi
+
+      - name: Configure
+        run: meson setup build ${{ matrix.config.args }} -Dbuildtype=${{ matrix.config.buildtype }} ${{ github.ref_type == 'tag' && '-Dofficial_release=true' || '' }}
+
+      - name: Build
+        run: meson compile -C build
+
+      - name: Run test
+        run: meson test -C build --verbose --suite Aegisub
+
+      - name: Generate macOS installer
+        if: matrix.config.buildtype == 'release'
+        run: |
+          set -e
+          max_attempts=10
+          attempt=1
+          while true; do
+            echo "Attempt $attempt of $max_attempts"
+            if meson compile osx-bundle -C build && meson compile osx-build-dmg -C build; then
+              break
+            fi
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "osx bundle/dmg failed after $max_attempts attempts"
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep 15
+          done
+
+      - name: Upload artifacts - macOS dmg
+        uses: actions/upload-artifact@v6
+        if: matrix.config.buildtype == 'release'
+        with:
+          name: ${{ matrix.config.name }} - installer
+          path: build/Aegisub-*.dmg
           if-no-files-found: error
