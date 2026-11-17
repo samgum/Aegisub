@@ -115,6 +115,9 @@ bool update_video_properties(AssFile *file, const AsyncVideoProvider *new_provid
 	if (!set_properties)
 		return false;
 
+	if (sx <= 0 || sy <= 0 || vx <= 0 || vy <= 0)
+		return commit_subs;
+
 	// Treat exact multiples of the video resolution as equaling the resolution
 	// for the people who use that for subpixel precision (which is mostly
 	// pointless these days due to decimals being supported almost everywhere)

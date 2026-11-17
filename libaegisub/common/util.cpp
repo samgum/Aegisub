@@ -24,11 +24,18 @@
 #include <boost/locale/util.hpp>
 #include <boost/range/distance.hpp>
 #include <ctime>
+#include <sstream>
+#include <thread>
+#include <unistd.h>
 #include <unicode/edits.h>
 #include <unicode/casemap.h>
 #include <unicode/ucasemap.h>
 #include <unicode/bytestream.h>
 #include <unicode/locid.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 namespace {
 const size_t bad_pos = (size_t)-1;
@@ -159,6 +166,27 @@ void tagless_find_helper::map_range(size_t &s, size_t &e) {
 	}
 }
 
+std::string ThreadId() {
+	auto impl = [&]() {
+		auto id = std::this_thread::get_id();
+
+		std::ostringstream stream;
+
+#ifdef _WIN32
+		stream << GetCurrentProcessId();
+		stream << "-";
+#elif defined(__linux__) || defined(__APPLE__)
+		stream << getpid();
+		stream << "-";
+#endif
+		stream << id;	// For some reason thread ids can only be serialized like this
+		return stream.str();
+	};
+
+	thread_local std::string result = impl();
+	return result;
+}
+
 void InitLocale() {
 	auto id = boost::locale::util::get_system_locale(true);
 	UErrorCode err = U_ZERO_ERROR;
@@ -186,6 +214,13 @@ void InitLocale() {
 	// FIXME: Should the ICU locale also be forced to en_US here?
 	if (result != std::codecvt_base::ok)
 		locale = boost::locale::generator().generate("en_US.UTF-8");
+
+	// Use the standard library's number parsing and formatting rather than
+	// Boost.Locale's, which nothing relies on. Boost.Locale's facets fall back
+	// to std::num_get code inlined from the SDK's libc++ headers, and with
+	// newer SDKs that code overflows a stack buffer when it calls into an
+	// older system libc++ (e.g. on macOS 13).
+	locale = std::locale(locale, std::locale::classic(), std::locale::numeric);
 	std::locale::global(locale);
 }
 } // namespace util

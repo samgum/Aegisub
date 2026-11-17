@@ -19,6 +19,7 @@
 #include "libaegisub/log.h"
 #include "libaegisub/util.h"
 
+#include <exception>
 #include <fstream>
 
 namespace agi::io {
@@ -38,7 +39,8 @@ std::unique_ptr<std::istream> Open(path const& file, bool binary) {
 
 Save::Save(path const& file, bool binary)
 : file_name(file)
-, tmp_name(file.parent_path()/(file.stem().string() + ".tmp" + file.extension().string()))
+, tmp_name(file.parent_path()/(file.stem().string() + ".tmp." + agi::util::ThreadId() + "." + file.extension().string()))
+, uncaught_exceptions(std::uncaught_exceptions())
 {
 	LOG_D("agi/io/save/file") << file;
 
@@ -51,6 +53,21 @@ Save::Save(path const& file, bool binary)
 }
 
 Save::~Save() noexcept(false) {
+	if (std::uncaught_exceptions() > uncaught_exceptions) {
+		// If Save's destructor was called as part of an unwind when throwing an exception,
+		// we must make sure to not throw a second exception since that will terminate the program.
+		//
+		// We interpret an exception being thrown as the saving process having failed in some way,
+		// so we do not write the final file in this case. If the caller wants the file to be saved
+		// even in the error case, it can catch the exception on its end.
+		fp.reset();
+		try {
+			fs::Remove(tmp_name);
+		} catch (...) { }
+
+		return;
+	}
+
 	fp.reset(); // Need to close before rename on Windows to unlock the file
 	for (int i = 0; i < 10; ++i) {
 		try {

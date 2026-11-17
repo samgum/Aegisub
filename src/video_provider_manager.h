@@ -24,5 +24,6 @@ namespace agi { class BackgroundRunner; }
 
 struct VideoProviderFactory {
 	static std::vector<std::string> GetClasses();
+	static std::vector<std::string> GetFileExtensions();
 	static std::unique_ptr<VideoProvider> GetProvider(agi::fs::path const& video_file, std::string_view colormatrix, agi::BackgroundRunner *br);
 };

@@ -31,6 +31,7 @@ class Save {
 	std::unique_ptr<std::ostream> fp;
 	const agi::fs::path file_name;
 	const agi::fs::path tmp_name;
+	int uncaught_exceptions = 0;
 
 public:
 	Save(agi::fs::path const& file, bool binary = false);

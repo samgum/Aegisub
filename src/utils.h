@@ -32,7 +32,9 @@
 #include <libaegisub/fs.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 
 #include <wx/bitmap.h>
 #include <wx/string.h>
@@ -43,6 +45,8 @@ class wxMenu;
 class wxMouseEvent;
 class wxStyledTextCtrl;
 class wxWindow;
+
+namespace agi { struct Context; }
 
 wxString PrettySize(int bytes);
 
@@ -94,8 +98,17 @@ void SetClipboard(wxBitmap const& new_value);
 
 wxString FontFace(std::string opt_prefix);
 
-agi::fs::path OpenFileSelector(wxString const& message, std::string const& option_name, std::string const& default_filename, std::string const& default_extension, std::string const& wildcard, wxWindow *parent);
-agi::fs::path SaveFileSelector(wxString const& message, std::string const& option_name, std::string const& default_filename, std::string const& default_extension, std::string const& wildcard, wxWindow *parent);
+/// Opens a file open dialog
+/// @param c Project context
+/// @param message Title of the file selector
+/// @param option_name Name of the option storing the directory of the most recently opened file
+/// @param default_filename Default filename, or empty string
+/// @param default_extension Default extension, or empty string
+/// @param wildcard File pattern to filter for
+/// @param parent Parent window
+/// @param path_anchor A path token like "?script". If set, when files from this directory are opened, the directory is saved in option_name as its token rather than its absolute path.
+agi::fs::path OpenFileSelector(agi::Context *c, wxString const& message, std::string const& option_name, std::string const& default_filename, std::string const& default_extension, std::string const& wildcard, wxWindow *parent, std::optional<std::string_view> path_anchor = std::nullopt);
+agi::fs::path SaveFileSelector(agi::Context *c, wxString const& message, std::string const& option_name, std::string const& default_filename, std::string const& default_extension, std::string const& wildcard, wxWindow *parent);
 
 wxString LocalizedLanguageName(wxString const& lang);
 
@@ -106,6 +119,12 @@ namespace osx {
 	bool activate_top_window_other_than(wxFrame *wx);
 	// Bring all windows to the front, maintaining relative z-order
 	void bring_to_front();
+	// Hide the application
+	void hide_application();
+	// Hide all other applications
+	void hide_other_applications();
+	// Unhide all applications
+	void show_all_applications();
 
 namespace ime {
 	/// Inject the IME helper into the given wxSTC
