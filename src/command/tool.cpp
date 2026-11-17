@@ -208,6 +208,7 @@ LyricScrollSettings resolve_layout_settings(LyricScrollSettings settings, Scroll
 void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings);
 std::string plain_lyric_text(AssDialogue *line, LyricScrollSettings const& settings);
 std::string escape_ass_text(std::string text);
+std::string normalize_line_breaks(std::string text);
 
 int lyric_ass_alignment(LyricScrollSettings const& settings) {
 	return 4 + std::max(0, std::min(2, settings.horizontal_alignment));

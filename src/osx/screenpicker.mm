@@ -21,6 +21,9 @@
 #include <wx/thread.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <vector>
 
 #import <ApplicationServices/ApplicationServices.h>
 #import <CoreGraphics/CGDirectDisplay.h>
