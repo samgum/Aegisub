@@ -181,7 +181,7 @@ bool ParseParagraphTimes(wxXmlNode const* p, int64_t& begin_ms, int64_t& end_ms)
 	return true;
 }
 
-std::string NormalizeXmlText(wxXmlNode const* node) {
+std::string NormalizeXmlText(wxXmlNode const* node, wxXmlNode const* prev = nullptr) {
 	std::string raw = node->GetContent().ToStdString(wxConvUTF8);
 	bool has_newline = false;
 	bool all_ws = true;
@@ -194,7 +194,6 @@ std::string NormalizeXmlText(wxXmlNode const* node) {
 	if (!has_newline)
 		return raw;
 	if (all_ws) {
-		auto prev = node->GetPrev();
 		auto next = node->GetNext();
 		if (!prev || !next
 			|| (prev->GetType() == wxXML_ELEMENT_NODE && IsElement(prev, "br"))
@@ -245,11 +244,12 @@ bool HasTimedChildSpan(wxXmlNode const* node) {
 // into \N and flattening nested elements (spans inside spans).
 std::string CollectVisibleText(wxXmlNode const* node) {
 	std::string out;
-	for (auto child = node->GetChildren(); child; child = child->GetNext()) {
+	wxXmlNode const* prev = nullptr;
+	for (auto child = node->GetChildren(); child; prev = child, child = child->GetNext()) {
 		switch (child->GetType()) {
 			case wxXML_TEXT_NODE:
 			case wxXML_CDATA_SECTION_NODE:
-				out += NormalizeXmlText(child);
+				out += NormalizeXmlText(child, prev);
 				break;
 			case wxXML_ELEMENT_NODE:
 				if (IsElement(child, "br"))
@@ -283,11 +283,12 @@ struct ParagraphBuilder {
 				pending_lead_prefix += text;
 		};
 
-		for (auto node = p->GetChildren(); node; node = node->GetNext()) {
+		wxXmlNode const* prev = nullptr;
+		for (auto node = p->GetChildren(); node; prev = node, node = node->GetNext()) {
 			switch (node->GetType()) {
 				case wxXML_TEXT_NODE:
 				case wxXML_CDATA_SECTION_NODE:
-					append_text(NormalizeXmlText(node), bg_voice);
+					append_text(NormalizeXmlText(node, prev), bg_voice);
 					break;
 				case wxXML_ELEMENT_NODE: {
 					if (IsElement(node, "br")) {
@@ -383,7 +384,7 @@ std::vector<std::string> TTMLSubtitleFormat::GetReadWildcards() const {
 	return {"ttml", "dfxp", "xml"};
 }
 
-void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename, agi::vfr::Framerate const&, const char *encoding) const {
+void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename, agi::vfr::Framerate const&, const char *) const {
 	target->LoadDefault(false, OPT_GET("Subtitle Format/TTXT/Default Style Catalog")->GetString());
 
 	wxXmlDocument doc;
