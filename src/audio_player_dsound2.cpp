@@ -36,6 +36,7 @@
 #include "include/aegisub/audio_player.h"
 
 #include "audio_controller.h"
+#include "audio_sample_safety.h"
 #include "frame_main.h"
 #include "options.h"
 #include "utils.h"
@@ -75,18 +76,11 @@ class SoundTouchTempoStream {
 
 	int channels() const { return provider->GetChannels(); }
 
-	static int16_t sample_to_int16(soundtouch::SAMPLETYPE sample) {
-		if constexpr (std::is_integral_v<soundtouch::SAMPLETYPE>)
-			return sample;
-		else
-			return mid(-32768, (int)std::lround(sample * 32768.0f), 32767);
-	}
-
 	static soundtouch::SAMPLETYPE int16_to_sample(int16_t sample) {
 		if constexpr (std::is_integral_v<soundtouch::SAMPLETYPE>)
 			return sample;
 		else
-			return sample / 32768.0f;
+			return static_cast<float>(sample) * AudioSampleSafety::kSoundTouchInputHeadroom / 32768.0f;
 	}
 
 	void feed_more() {
@@ -100,7 +94,7 @@ class SoundTouchTempoStream {
 		source_buffer.resize(sample_count);
 		process_buffer.resize(sample_count);
 
-		provider->GetAudioWithVolume(source_buffer.data(), input_frame, frames, volume);
+		provider->GetAudio(source_buffer.data(), input_frame, frames);
 		input_frame += frames;
 
 		for (size_t i = 0; i < sample_count; ++i)
@@ -169,8 +163,10 @@ public:
 
 		if (std::abs(playback_speed - 1.0) < 0.001) {
 			auto available = (DWORD)std::max<int64_t>(0, std::min<int64_t>(requested_frames, end_frame - input_frame));
-			if (available)
-				provider->GetAudioWithVolume(dst, input_frame, available, volume);
+			if (available) {
+				provider->GetAudio(dst, input_frame, available);
+				AudioSampleSafety::ApplyGainLimiter(out, static_cast<size_t>(available) * channels(), volume);
+			}
 			if (available < requested_frames)
 				memset(out + available * channels(), 0, (requested_frames - available) * bytes_per_frame);
 
@@ -186,8 +182,16 @@ public:
 		while (filled < requested_frames && !output_finished) {
 			auto got = processor.receiveSamples(output_buffer.data(), requested_frames - filled);
 			if (got) {
-				for (size_t i = 0; i < (size_t)got * channels(); ++i)
-					out[filled * channels() + i] = sample_to_int16(output_buffer[i]);
+				auto sample_count = static_cast<size_t>(got) * channels();
+				auto dst_samples = out + filled * channels();
+				if constexpr (std::is_integral_v<soundtouch::SAMPLETYPE>) {
+					for (size_t i = 0; i < sample_count; ++i)
+						dst_samples[i] = static_cast<int16_t>(output_buffer[i]);
+					AudioSampleSafety::ApplyGainLimiter(dst_samples, sample_count, volume);
+				}
+				else {
+					AudioSampleSafety::ConvertFloatToInt16Limited(dst_samples, output_buffer.data(), sample_count, volume);
+				}
 				filled += got;
 				continue;
 			}
@@ -404,7 +408,7 @@ class DirectSoundPlayer2Thread {
 	int buffer_length;
 
 	/// System millisecond timestamp of last playback start, used to calculate playback position
-	DWORD last_playback_restart;
+	DWORD last_playback_restart = 0;
 
 	/// Audio provider to take sample data from
 	agi::AudioProvider *provider;
@@ -622,6 +626,7 @@ void DirectSoundPlayer2Thread::Run()
 						REPORT_ERROR("Could not start looping playback.")
 				}
 
+				last_playback_restart = GetTickCount();
 				SetEvent(is_playing);
 				playback_should_be_running = true;
 
@@ -976,13 +981,14 @@ int64_t DirectSoundPlayer2Thread::GetCurrentFrame()
 
 	int64_t milliseconds_elapsed = GetTickCount() - last_playback_restart;
 
-	int64_t real = start_frame + milliseconds_elapsed * provider->GetSampleRate() * playback_speed / 1000;
+	int64_t real = start_frame + static_cast<int64_t>(milliseconds_elapsed * provider->GetSampleRate() * playback_speed / 1000);
+	real = std::min<int64_t>(end_frame, std::max<int64_t>(start_frame, real));
 	if (real < last_position)
 		real = last_position;
 	else
 		last_position = real;
 
-	return real;
+	return std::min<int64_t>(end_frame, real);
 }
 
 int64_t DirectSoundPlayer2Thread::GetEndFrame()

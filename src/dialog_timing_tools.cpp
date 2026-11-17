@@ -311,7 +311,7 @@ DialogStitchTimings::DialogStitchTimings(agi::Context *context)
 DialogStitchTimings::~DialogStitchTimings() {
 	int gap = OPT_GET("Tool/Stitch Timings/Max Gap")->GetInt();
 	double seconds = 0.0;
-	if (max_gap->GetValue().ToDouble(&seconds) && seconds >= 0.0)
+	if (max_gap && max_gap->GetValue().ToDouble(&seconds) && std::isfinite(seconds) && seconds >= 0.0 && seconds <= 3600.0)
 		gap = static_cast<int>(std::lround(seconds * 1000.0));
 	OPT_SET("Tool/Stitch Timings/Anchor")->SetInt(anchor_mode->GetSelection());
 	OPT_SET("Tool/Stitch Timings/By Frames")->SetBool(unit_mode->GetSelection() == 1);
@@ -335,7 +335,7 @@ void DialogStitchTimings::OnSelectedSetChanged() {
 
 bool DialogStitchTimings::ReadMaxGap(int& ms) {
 	double seconds = 0.0;
-	if (!max_gap->GetValue().ToDouble(&seconds) || seconds < 0.0) {
+	if (!max_gap || !max_gap->GetValue().ToDouble(&seconds) || !std::isfinite(seconds) || seconds < 0.0 || seconds > 3600.0) {
 		wxMessageBox(_("Maximum gap must be a non-negative number of seconds."), _("Stitch Timings"), wxICON_EXCLAMATION);
 		return false;
 	}
@@ -2349,22 +2349,31 @@ void DialogFuriganaAnnotator::AutoFillReadings(wxCommandEvent&) {
 
 		wxArrayString output;
 		wxArrayString errors;
-		wxString command = wxString::Format("python \"%s\" \"%s\" \"%s\"", script_path, terms_path, output_path);
-		long code = wxExecute(command, output, errors, wxEXEC_SYNC);
-
-		if (code != 0) {
+		auto run_python = [&](wxString const& interpreter) {
 			output.Clear();
 			errors.Clear();
-			command = wxString::Format("python3 \"%s\" \"%s\" \"%s\"", script_path, terms_path, output_path);
-			code = wxExecute(command, output, errors, wxEXEC_SYNC);
-		}
+			wxString command = wxString::Format("%s \"%s\" \"%s\" \"%s\"",
+				interpreter, script_path, terms_path, output_path);
+			return wxExecute(command, output, errors, wxEXEC_SYNC);
+		};
+
+		long code = run_python("python");
+		if (code != 0)
+			code = run_python("python3");
 
 #ifdef __WXMSW__
+		if (code != 0)
+			code = run_python("py -3");
+#endif
+#ifdef __APPLE__
 		if (code != 0) {
-			output.Clear();
-			errors.Clear();
-			command = wxString::Format("py -3 \"%s\" \"%s\" \"%s\"", script_path, terms_path, output_path);
-			code = wxExecute(command, output, errors, wxEXEC_SYNC);
+			for (const char *py_path : {"/opt/homebrew/bin/python3", "/usr/local/bin/python3"}) {
+				if (!agi::fs::FileExists(agi::fs::path(py_path)))
+					continue;
+				code = run_python(wxString::Format("\"%s\"", wxString::FromUTF8(py_path)));
+				if (code == 0)
+					break;
+			}
 		}
 #endif
 

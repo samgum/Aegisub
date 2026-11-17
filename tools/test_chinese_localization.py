@@ -45,11 +45,23 @@ def test_readme_bilingual_switchers_and_docs():
     assert ("检查样式重叠" in cn_readme) or ("Check Style Overlaps" in cn_readme)
 
 
+def test_pair_check_format_specifiers_and_no_fuzzy_chinese_entries():
+    for path in (ZH_CN, ZH_TW):
+        text = path.read_text(encoding="utf-8")
+        assert "#, fuzzy" not in text
+        for prefix in ("Unexpected closing %s at character %llu", "Unclosed %s at character %llu"):
+            assert f'msgid "{prefix}"\n' in text
+            block = text.split(f'msgid "{prefix}"\n', 1)[1].split("\n\n", 1)[0]
+            assert "%s" in block and "%llu" in block
+            assert block.index("%s") < block.index("%llu")
+
+
 def main():
     tests = [
         test_apply_is_translated_in_chinese_catalogs,
         test_standard_apply_buttons_use_aegisub_translation,
         test_readme_bilingual_switchers_and_docs,
+        test_pair_check_format_specifiers_and_no_fuzzy_chinese_entries,
     ]
     for test in tests:
         test()

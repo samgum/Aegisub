@@ -413,8 +413,8 @@ void TTMLSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename
 				if (!paragraph_timed) {
 					bool has_begin = false;
 					for (auto attr = cur->GetAttributes(); attr; attr = attr->GetNext()) {
-						auto name = attr->GetName().ToStdString(wxConvUTF8);
-						if (name == "begin" || name.ends_with(":begin")) has_begin = true;
+						auto attr_name = attr->GetName().ToStdString(wxConvUTF8);
+						if (attr_name == "begin" || attr_name.ends_with(":begin")) has_begin = true;
 					}
 					if (has_begin) continue;
 					// Apple Music exports songs without any timing at all

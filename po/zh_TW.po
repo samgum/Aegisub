@@ -5406,9 +5406,8 @@ msgid "Normal"
 msgstr "普通"
 
 #: ../src/preferences.cpp:256
-#, fuzzy
 msgid "Comments"
-msgstr "註解(&N)"
+msgstr "註解"
 
 #: ../src/preferences.cpp:257
 msgid "Drawing Commands"
@@ -6447,7 +6446,6 @@ msgid "Select overlaps"
 msgstr "選取重疊"
 
 #: ../automation/autoload/select-overlaps.moon:18
-#, fuzzy
 msgid "Select lines which begin while another non-comment line is active"
 msgstr "選取開始時間落在其他行（非註解）運行期間內的行句"
 
@@ -7165,12 +7163,12 @@ msgid "convert Chinese script"
 msgstr "轉換中文簡繁"
 
 #: ../src/dialog_timing_tools.cpp:0
-msgid "Unexpected closing %s at byte %llu"
-msgstr "第 %llu 位元組出現未配對的結束符 %s"
+msgid "Unexpected closing %s at character %llu"
+msgstr "未配對的結束符 %s（第 %llu 個字元）"
 
 #: ../src/dialog_timing_tools.cpp:0
-msgid "Unclosed %s at byte %llu"
-msgstr "第 %llu 位元組的 %s 未閉合"
+msgid "Unclosed %s at character %llu"
+msgstr "未閉合的 %s（第 %llu 個字元）"
 
 #: ../src/dialog_timing_tools.cpp:0
 msgid "Unpaired ASCII double quote"
@@ -7549,3 +7547,39 @@ msgstr "當前影格範圍"
 #: ../src/preferences.cpp:0
 msgid "Previous frame range"
 msgstr "上一影格範圍"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Failed to initialize ICU Chinese transliterator."
+msgstr "初始化 ICU 中文轉寫器失敗。"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Settings"
+msgstr "設定"
+
+#: ../src/command/audio.cpp:0
+msgid "Audio and Video Formats"
+msgstr "音訊與視訊格式"
+
+#: ../src/dialog_properties.cpp:0
+msgid "From video"
+msgstr "來自視訊"
+
+#: ../src/dialog_properties.cpp:0
+msgid "Layout: "
+msgstr "版面："
+
+#: ../src/dialog_properties.cpp:0
+msgid "Script: "
+msgstr "腳本："
+
+#: ../src/project.cpp:0
+msgid "Load linked AviSynth script?"
+msgstr "是否載入關聯的 AviSynth 腳本？"
+
+#: ../src/project.cpp:0
+msgid "Trust author && load"
+msgstr "信任作者並載入"
+
+#: ../src/project.cpp:0
+msgid "Do not load"
+msgstr "不載入"

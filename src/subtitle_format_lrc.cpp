@@ -288,8 +288,8 @@ void LrcSubtitleFormat::ReadFile(AssFile *target, agi::fs::path const& filename,
 		// every other reader does; a smart pointer would unlink and free
 		// each row the moment it goes out of scope.
 		auto diag = new AssDialogue;
-		diag->Start = agi::Time(cur.start_ms);
-		diag->End = agi::Time(end_ms);
+		diag->Start = agi::Time(static_cast<int>(std::clamp<int64_t>(cur.start_ms, 0, std::numeric_limits<int>::max())));
+		diag->End = agi::Time(static_cast<int>(std::clamp<int64_t>(end_ms, 0, std::numeric_limits<int>::max())));
 
 		if (cur.has_syllables && !cur.syllables.empty()) {
 			// \kf takes centiseconds of *duration per segment* and sweeps the

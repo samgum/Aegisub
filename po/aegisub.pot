@@ -7204,3 +7204,53 @@ msgstr ""
 #: ../src/command/tool.cpp:0
 msgid "Update Preview"
 msgstr ""
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Unexpected closing %s at character %llu"
+msgstr ""
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Unclosed %s at character %llu"
+msgstr ""
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Failed to initialize ICU Chinese transliterator."
+msgstr ""
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid ""
+"Comment lines are ignored. Counts are pairs within the same style; touching "
+"endpoints are not counted as crossing overlaps."
+msgstr ""
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Settings"
+msgstr ""
+
+#: ../src/command/audio.cpp:0
+msgid "Audio and Video Formats"
+msgstr ""
+
+#: ../src/dialog_properties.cpp:0
+msgid "From video"
+msgstr ""
+
+#: ../src/dialog_properties.cpp:0
+msgid "Layout: "
+msgstr ""
+
+#: ../src/dialog_properties.cpp:0
+msgid "Script: "
+msgstr ""
+
+#: ../src/project.cpp:0
+msgid "Load linked AviSynth script?"
+msgstr ""
+
+#: ../src/project.cpp:0
+msgid "Trust author && load"
+msgstr ""
+
+#: ../src/project.cpp:0
+msgid "Do not load"
+msgstr ""

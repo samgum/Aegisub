@@ -36,8 +36,9 @@ void test_charset_detection(const agi::fs::path &file, std::optional<std::string
 	DetectReason reason;
 	auto detected_encoding = agi::charset::Detect(file, &reason);
 	EXPECT_EQ(expected_reason, reason);
-	if (expected_encoding)
+	if (expected_encoding) {
 		EXPECT_EQ(expected_encoding, detected_encoding);
+	}
 }
 }
 

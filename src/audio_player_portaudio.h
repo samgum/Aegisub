@@ -154,30 +154,30 @@ public:
 	/// @brief Play audio.
 	/// @param start Start position.
 	/// @param count Frame count
-	void Play(int64_t start,int64_t count);
+	void Play(int64_t start,int64_t count) override;
 	/// @brief Stop Playback
 	/// @param timerToo Stop display timer?
-	void Stop();
+	void Stop() override;
 
 	/// @brief Whether audio is currently being played.
 	/// @return Status
-	bool IsPlaying();
+	bool IsPlaying() override;
 
 	/// @brief End position playback will stop at.
 	/// @return End position.
-	int64_t GetEndPosition();
+	int64_t GetEndPosition() override;
 	/// @brief Get current stream position.
 	/// @return Stream position
-	int64_t GetCurrentPosition();
+	int64_t GetCurrentPosition() override;
 
 	/// @brief Set end position of playback
 	/// @param pos End position
-	void SetEndPosition(int64_t position);
+	void SetEndPosition(int64_t position) override;
 
 
 	/// @brief Set volume level
 	/// @param vol Volume
-	void SetVolume(double vol);
+	void SetVolume(double vol) override;
 
 	/// @brief Set playback speed
 	/// @param speed Playback speed multiplier, 1.0 is normal speed
@@ -185,7 +185,7 @@ public:
 
 	/// @brief Get current volume level
 	/// @return Volume level
-	double GetVolume();
+	double GetVolume() override;
 
 	/// Get list of available output devices
 	static wxArrayString GetOutputDevices();

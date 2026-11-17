@@ -241,7 +241,7 @@ void AudioSpectrumRenderer::FillBlock(size_t block_index, float *block)
 
 	float scale_factor = scale_fix * 9 / sqrt(2 * (float)(2<<derivation_size));
 
-	for (size_t si = 1<<derivation_size; si > 0; --si)
+	for (size_t si = (size_t)1<<derivation_size; si > 0; --si)
 	{
 		// With x in range [0;1], log10(x*9+1) will also be in range [0;1],
 		// although the FFT output can apparently get greater magnitudes than 1

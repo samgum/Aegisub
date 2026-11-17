@@ -31,7 +31,7 @@ inline std::string OptionalString(json::Object const& object, char const* key) {
 		return static_cast<json::String const&>(it->second);
 	}
 	catch (json::Exception const&) {
-		static_cast<json::Null const&>(it->second);
+		(void)static_cast<json::Null const&>(it->second);
 		return {};
 	}
 }

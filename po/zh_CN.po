@@ -334,8 +334,6 @@ msgid ""
 "Aegisub could not narrow down the character set to a single one.\n"
 "Please pick one below:"
 msgstr "Aegisub 无法将字符集缩小到唯一一个。\n请从下方选择："
-"Aegisub无法确定文字编码\n"
-"请从下列中选择："
 
 #: ../src/charset_detect.cpp:51
 msgid "Choose character set"
@@ -851,8 +849,6 @@ msgid ""
 "Open automation manager. Ctrl: Rescan autoload folder. Ctrl+Shift: Rescan "
 "autoload folder and reload all automation scripts"
 msgstr "打开自动化管理器。Ctrl：重新扫描自动加载目录。Ctrl+Shift：重新扫描自动加载目录并重新加载所有脚本"
-"打开自动化脚本管理器。按Ctrl：重新扫描自动加载文件夹。按Ctrl + Shift：重新扫"
-"描自动加载文件夹，并重新加载所有自动化脚本"
 
 #: ../src/command/command.cpp:35
 #, c-format
@@ -1071,7 +1067,6 @@ msgid ""
 "Split the current line into a line which ends on the current frame and a "
 "line which starts on the next frame"
 msgstr "将当前行分割为在当前帧结束的一行和从下一帧开始的一行"
-"将当前行以当前帧的时间为界分割为两行，一行在当前帧结束，另一行在下一帧开始"
 
 #: ../src/command/edit.cpp:746 ../src/command/edit.cpp:747
 msgid "Split lines before current frame"
@@ -1082,7 +1077,6 @@ msgid ""
 "Split the current line into a line which ends on the previous frame and a "
 "line which starts on the current frame"
 msgstr "将当前行分割为在上一帧结束的一行和从当前帧开始的一行"
-"将当前行以当前帧的时间为界分割为两行，一行在前一帧结束，另一行在当前帧开始"
 
 #: ../src/command/edit.cpp:788
 msgid "As &Karaoke"
@@ -2343,8 +2337,6 @@ msgid ""
 "  fractional (e.g. 16:9)\n"
 "  specific resolution (e.g. 853x480)"
 msgstr "请输入宽高比，支持以下格式：\n  小数（如 2.35）\n  分数（如 16:9）\n  具体分辨率（如 853x480）"
-"可以以小数(例如 2.35)或是比数(例如16:9)输入宽高比。\n"
-"也可以输入像853x480这样的数值来设置一个特定的分辨率"
 
 #: ../src/command/video.cpp:114
 msgid "Enter aspect ratio"
@@ -2866,7 +2858,7 @@ msgstr "画一个平滑的手绘形状"
 
 #: ../src/dialog_about.cpp:46
 msgid "Translated into LANGUAGE by PERSON\n"
-msgstr "由 PERSON 翻译为 LANGUAGE\n"
+msgstr ""
 "简体中文版汉化：Vmoe字幕组\n"
 "    原始翻译：芥末 & song_5007 & ……\n"
 "    电脑迷 修订更新翻译\n"
@@ -2877,8 +2869,6 @@ msgid ""
 "\n"
 "See the help file for full credits.\n"
 msgstr "\n完整致谢信息请参阅帮助文件。\n"
-"\n"
-"完整制作名单详见帮助文件。\n"
 
 #: ../src/dialog_about.cpp:133
 #, c-format
@@ -3306,8 +3296,6 @@ msgid ""
 "Time code offset in incorrect format. Ensure it is entered as four groups of "
 "two digits separated by colons."
 msgstr "时间码偏移格式不正确。请确保输入为四组两位数字，以冒号分隔。"
-"时间码偏移量格式不正确。确保输入为四组数字，两个数字为一组，组之间用冒号隔"
-"开。"
 
 #: ../src/dialog_export_ebu3264.cpp:99
 msgid "Export to EBU STL format"
@@ -3486,9 +3474,6 @@ msgid ""
 "Over 32 MB of fonts were copied. Some of the fonts may not be loaded by the "
 "player if they are all attached to a Matroska file."
 msgstr "\n已复制超过 32 MB 的字体。如果将它们全部附加到 Matroska 文件中，某些字体可能无法被播放器加载。"
-"\n"
-"超过32 MB的字体被复制。如果它们都被附加在一个Matroska(MKV)文件，一些字体可能"
-"不会被播放器被加载。"
 
 #: ../src/dialog_fonts_collector.cpp:233
 msgid "Check fonts for availability"
@@ -3622,14 +3607,6 @@ msgid ""
 "Enter: Link, accept line when done\n"
 "Backspace: Unlink last"
 msgstr "当目标文本框获得焦点时，可使用以下按键：\n\n右箭头：增加目标选择长度\n左箭头：减少目标选择长度\n上箭头：增加源选择长度\n下箭头：减少源选择长度\n回车：链接，完成后接受该行\n退格：取消上一条链接"
-"当定位于目标文本框时，使用下列按键:\n"
-"\n"
-"向右箭头：增加目标选择的长度\n"
-"向左箭头：减少目标选择的长度\n"
-"向上箭头：增加源选择的长度\n"
-"向下箭头：减少源选择的长度\n"
-"回车：连结，接受完成的行\n"
-"退格：解除最后的连结"
 
 #: ../src/dialog_kara_timing_copy.cpp:418
 msgid "S&tart!"
@@ -3820,8 +3797,6 @@ msgid ""
 "Scale border and shadow together with script/render resolution. If this is "
 "unchecked, relative border and shadow size will depend on renderer."
 msgstr "边框和阴影随脚本/渲染分辨率等比缩放。如果取消勾选，边框和阴影的相对大小将取决于渲染器。"
-"随脚本或渲染的分辨率按比例缩放边框和阴影，如果此项不选中，相关的边框和阴影大"
-"小将由渲染器决定。"
 
 #: ../src/dialog_properties.cpp:202
 msgid "property changes"
@@ -4817,8 +4792,6 @@ msgid ""
 "extend or shrink start time of the second line; if totally to right, it will "
 "extend or shrink the end time of the first line."
 msgstr "设置行间连接方式。如果完全向左，将扩展或缩短第二行的起始时间；如果完全向右，将扩展或缩短第一行的结束时间。"
-"设置如何紧贴字幕行，如果设为完全向左，将扩展至次行的开始时间；如果完全向右,将"
-"扩展至首行的结束时间。"
 
 #: ../src/dialog_timing_processor.cpp:206
 msgid "Bias: Start <- "
@@ -5084,10 +5057,6 @@ msgid ""
 "It can also be used to convert subtitles to a different speed video, such as "
 "NTSC to PAL speedup."
 msgstr "将字幕时间（包括特效标签中的时间）从输入帧率转换为输出帧率。\n\n适用于将固定时间字幕转换为 VFRaC 时间字幕用于硬字幕。\n也可用于将字幕转换为不同速度的视频，例如 NTSC 到 PAL 加速。"
-"将字幕时间（包括特效标签中的时间）从输入帧率转换为输出帧率。\n"
-"\n"
-"转换标准字幕时间到VFRaC字幕时间是特别有用的。\n"
-"它也可以用来转换字幕到不同帧率的视频，例如应对NTSC到PAL的帧率提高。"
 
 #: ../src/export_framerate.cpp:92
 msgid "V&ariable"
@@ -5199,8 +5168,6 @@ msgid ""
 "Done\n"
 "\n"
 msgstr "完成\n\n"
-"已完成\n"
-"\n"
 
 #: ../src/font_file_lister.cpp:234
 msgid "All fonts found.\n"
@@ -5431,9 +5398,6 @@ msgid ""
 "\n"
 "You can set up style catalogs in the Style Manager."
 msgstr "所选样式目录将在新建文件或导入各种格式的文件时自动加载。\n\n您可以在样式管理器中设置样式目录。"
-"所选的样式库将会在新建文件或者导入不同格式的文件时被自动加载。\n"
-"\n"
-"您可以在样式管理器中设置样式库。"
 
 #: ../src/preferences.cpp:119
 msgid "New files"
@@ -6028,8 +5992,6 @@ msgid ""
 "Changing these settings might result in bugs and/or crashes. Do not touch "
 "these unless you know what you're doing."
 msgstr "修改这些设置可能导致错误或崩溃。除非您清楚自己在做什么，否则请勿更改。"
-"修改这些设置可能导致出错，甚至异常崩溃，\n"
-"除非您知道自己在做什么，否则请不要修改这些设置。"
 
 #: ../src/preferences.cpp:382 ../src/preferences.cpp:449
 msgid "Expert"
@@ -6325,9 +6287,6 @@ msgid ""
 "\n"
 "The following providers were tried:\n"
 msgstr "没有可用的音频提供者能识别所选文件包含音频数据。\n\n已尝试以下提供者：\n"
-"可用的音频来源无法将所选文件识别为包含音频的文件。\n"
-"\n"
-"已尝试下列来源：\n"
 
 #: ../src/project.cpp:265
 msgid ""
@@ -6336,9 +6295,6 @@ msgid ""
 "\n"
 "The following providers were tried:\n"
 msgstr "没有可用的音频提供者具有处理所选文件的编解码器。\n\n已尝试以下提供者：\n"
-"可用的音频来源没有可用于处理所选文件的解码器。\n"
-"\n"
-"已尝试下列来源：\n"
 
 #: ../src/project.cpp:368
 msgid "Failed to parse timecodes file: "
@@ -6427,7 +6383,6 @@ msgid ""
 "Effect for this line. This can be used to store extra information for "
 "karaoke scripts, or for the effects supported by the renderer."
 msgstr "此行的特效。可用于存储卡拉OK脚本的额外信息，或渲染器支持的特效。"
-"该行的特效。这栏可以用来储存额外信息，针对卡拉OK脚本或渲染器支持的特效。"
 
 #: ../src/subs_edit_box.cpp:147
 msgid "Number of characters in the longest line of this subtitle."
@@ -6499,8 +6454,6 @@ msgid ""
 "edit box. This is sometimes useful when editing subtitles or translating "
 "subtitles into another language."
 msgstr "在编辑框上方显示字幕行首次被选中时的内容。这在编辑字幕或翻译字幕时有时很有用。"
-"在编辑框上方显示当前行被第一次选中时的原始内容。这个功能当你在编辑或翻译字幕"
-"时可能会非常实用。"
 
 #: ../src/subs_edit_box.cpp:445
 msgid "modify text"
@@ -7081,10 +7034,6 @@ msgid ""
 "no warranties of any kind are given either.%n%nSee the Aegisub website for "
 "information on obtaining the source code."
 msgstr "这将在您的电脑上安装 Aegisub {#BUILD_GIT_VERSION_STRING}。%n%nAegisub 基于 GNU 通用公共许可证第二版发布。这意味着您可以免费将此应用程序用于任何目的，但不提供任何形式的保证。%n%n请访问 Aegisub 网站获取源代码信息。"
-"将会在您的电脑上安装Aegisub {#BUILD_GIT_VERSION_STRING} 。%n%nAegisub适用于"
-"GNU通用公共许可证第二版(GPLv2)，这意味着您可以将该应用程序用于任何目的而不需"
-"要支付费用，但同时也不会得到任何形式的担保。%n%n您可以到Aegisub官网获取源代码"
-"信息。"
 
 #~ msgid "Kanji timing"
 #~ msgstr "汉字K值配对"
@@ -7673,12 +7622,12 @@ msgid "convert Chinese script"
 msgstr "转换中文简繁"
 
 #: ../src/dialog_timing_tools.cpp:0
-msgid "Unexpected closing %s at byte %llu"
-msgstr "第 %llu 字节出现未匹配的结束符 %s"
+msgid "Unexpected closing %s at character %llu"
+msgstr "未匹配的结束符 %s（第 %llu 个字符）"
 
 #: ../src/dialog_timing_tools.cpp:0
-msgid "Unclosed %s at byte %llu"
-msgstr "第 %llu 字节的 %s 未闭合"
+msgid "Unclosed %s at character %llu"
+msgstr "未闭合的 %s（第 %llu 个字符）"
 
 #: ../src/dialog_timing_tools.cpp:0
 msgid "Unpaired ASCII double quote"
@@ -8057,3 +8006,39 @@ msgstr "当前帧范围"
 #: ../src/preferences.cpp:0
 msgid "Previous frame range"
 msgstr "上一帧范围"
+
+#: ../src/dialog_timing_tools.cpp:0
+msgid "Failed to initialize ICU Chinese transliterator."
+msgstr "初始化 ICU 中文转写器失败。"
+
+#: ../src/dialog_ai_analysis.cpp:0
+msgid "Settings"
+msgstr "设置"
+
+#: ../src/command/audio.cpp:0
+msgid "Audio and Video Formats"
+msgstr "音频和视频格式"
+
+#: ../src/dialog_properties.cpp:0
+msgid "From video"
+msgstr "来自视频"
+
+#: ../src/dialog_properties.cpp:0
+msgid "Layout: "
+msgstr "布局："
+
+#: ../src/dialog_properties.cpp:0
+msgid "Script: "
+msgstr "脚本："
+
+#: ../src/project.cpp:0
+msgid "Load linked AviSynth script?"
+msgstr "是否加载关联的 AviSynth 脚本？"
+
+#: ../src/project.cpp:0
+msgid "Trust author && load"
+msgstr "信任作者并加载"
+
+#: ../src/project.cpp:0
+msgid "Do not load"
+msgstr "不加载"

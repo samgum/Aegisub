@@ -59,7 +59,7 @@ jobs:
             name: macOS x86_64 Debug,
             os: macos-15-intel,
             buildtype: debugoptimized,
-            args: -Ddefault_library=static -Dbuild_osx_bundle=true -Dlocal_boost=true --force-fallback-for=ffms2
+            args: -Ddefault_library=static -Dbuild_osx_bundle=false -Dlocal_boost=true --force-fallback-for=ffms2
           }
           - {
             name: macOS x86_64 Release,
@@ -69,9 +69,9 @@ jobs:
           }
           - {
             name: macOS arm64 Debug,
-            os: macos-15,
+            os: macos-14,
             buildtype: debugoptimized,
-            args: -Ddefault_library=static -Dbuild_osx_bundle=true -Dlocal_boost=true --force-fallback-for=ffms2
+            args: -Ddefault_library=static -Dbuild_osx_bundle=false -Dlocal_boost=true --force-fallback-for=ffms2
           }
           - {
             name: macOS arm64 Release,
@@ -243,7 +243,7 @@ jobs:
       # fails intermittently on runners (transient DNS resolution errors).
       # Retry the whole bundle+dmg task like upstream does.
       - name: Generate macOS installer
-        if: startsWith(matrix.config.os, 'macos-')
+        if: startsWith(matrix.config.os, 'macos-') && matrix.config.buildtype == 'release'
         run: |
           set -e
           max_attempts=10
@@ -263,7 +263,7 @@ jobs:
 
       - name: Upload artifacts - macOS dmg
         uses: actions/upload-artifact@v6
-        if: startsWith(matrix.config.os, 'macos-')
+        if: startsWith(matrix.config.os, 'macos-') && matrix.config.buildtype == 'release'
         with:
           name: ${{ matrix.config.name }} - installer
           path: build/Aegisub-*.dmg

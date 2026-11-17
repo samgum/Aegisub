@@ -275,16 +275,16 @@ LibassSubtitlesProvider::~LibassSubtitlesProvider() {
 #define _a(c) ((c)&0xFF)
 
 void LibassSubtitlesProvider::DrawSubtitles(VideoFrame &frame,double time) {
-	auto r = renderer();
+	auto ass_renderer = renderer();
 	ASS_Image* img = nullptr;
 	{
 		std::lock_guard<std::mutex> lock(library_mutex);
-		ass_set_frame_size(r, frame.width, frame.height);
+		ass_set_frame_size(ass_renderer, frame.width, frame.height);
 		// Note: this relies on Aegisub always rendering at video storage res
-		ass_set_storage_size(r, frame.width, frame.height);
+		ass_set_storage_size(ass_renderer, frame.width, frame.height);
 
 		// Add 1e-6 to guard against floating point imprecision errors on int -> float -> *1000 -> int round trips
-		img = ass_render_frame(r, ass_track, floor(time * 1000 + 1e-6), nullptr);
+		img = ass_render_frame(ass_renderer, ass_track, floor(time * 1000 + 1e-6), nullptr);
 	}
 
 	// libass actually returns several alpha-masked monochrome images.

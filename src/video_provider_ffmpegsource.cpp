@@ -481,6 +481,11 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 	if (UseCpuToneMap && UseYuvDecodePath) {
 		// Reference BT.2100 decode: raw PQ/HLG YCbCr planes from swscale.
 		// Planes follow Data[0]/Data[1]/Data[2] with their own strides.
+		if (!frame->Data[0] || !frame->Data[1] || !frame->Data[2] ||
+			std::abs(frame->Linesize[0]) < 2 * Width ||
+			std::abs(frame->Linesize[1]) < 2 * Width ||
+			std::abs(frame->Linesize[2]) < 2 * Width)
+			throw VideoDecodeError("Invalid FFMS2 YUV444P16 frame data or linesize");
 		out.pitch = 4 * Width;
 		out.data.resize(static_cast<size_t>(out.pitch) * Height);
 		CpuToneMapper->ToneMapYUV444P16toBGRA8(
@@ -491,6 +496,8 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 	}
 	else if (UseCpuToneMap) {
 		// Fallback: swscale-applied matrix in the transfer domain.
+		if (!frame->Data[0] || std::abs(frame->Linesize[0]) < 6 * Width)
+			throw VideoDecodeError("Invalid FFMS2 RGB48 frame data or linesize");
 		out.pitch = 4 * Width;
 		out.data.resize(static_cast<size_t>(out.pitch) * Height);
 		CpuToneMapper->ToneMapRGB48toBGRA8(frame->Data[0], frame->Linesize[0],
@@ -517,14 +524,14 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 	// Handle flip — use out.pitch (not frame->Linesize[0]) so this is correct
 	// for both the HDR tone-mapped buffer and the raw SDR buffer.
 	if (VideoInfo->Flip > 0)
-		for (int x = 0; x < Height; ++x)
-			for (int y = 0; y < Width / 2; ++y)
+		for (size_t x = 0; x < static_cast<size_t>(Height); ++x)
+			for (size_t y = 0; y < static_cast<size_t>(Width / 2); ++y)
 				swap_bgra(out.data.data() + out.pitch * x + 4 * y,
 					out.data.data() + out.pitch * x + 4 * (Width - 1 - y));
 
 	else if (VideoInfo->Flip < 0)
-		for (int x = 0; x < Height / 2; ++x)
-			for (int y = 0; y < Width; ++y)
+		for (size_t x = 0; x < static_cast<size_t>(Height / 2); ++x)
+			for (size_t y = 0; y < static_cast<size_t>(Width); ++y)
 				swap_bgra(out.data.data() + out.pitch * x + 4 * y,
 					out.data.data() + out.pitch * (Height - 1 - x) + 4 * y);
 
@@ -532,18 +539,18 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 	auto rotation = normalize_rotation(VideoInfo->Rotation);
 	if (rotation == 180) {
 		std::vector<unsigned char> data(std::move(out.data));
-		out.data.resize(Width * Height * 4);
-		for (int x = 0; x < Height; ++x)
-			for (int y = 0; y < Width; ++y)
+		out.data.resize(static_cast<size_t>(Width) * Height * 4);
+		for (size_t x = 0; x < static_cast<size_t>(Height); ++x)
+			for (size_t y = 0; y < static_cast<size_t>(Width); ++y)
 				copy_bgra(out.data.data() + 4 * (Width * x + y),
 					data.data() + out.pitch * (Height - 1 - x) + 4 * (Width - 1 - y));
 		out.pitch = 4 * Width;
 	}
 	else if (rotation == 90) {
 		std::vector<unsigned char> data(std::move(out.data));
-		out.data.resize(Width * Height * 4);
-		for (int x = 0; x < Width; ++x)
-			for (int y = 0; y < Height; ++y)
+		out.data.resize(static_cast<size_t>(Width) * Height * 4);
+		for (size_t x = 0; x < static_cast<size_t>(Width); ++x)
+			for (size_t y = 0; y < static_cast<size_t>(Height); ++y)
 				copy_bgra(out.data.data() + 4 * (Height * x + y),
 					data.data() + out.pitch * y + 4 * (Width - 1 - x));
 		out.width = Height;
@@ -552,9 +559,9 @@ void FFmpegSourceVideoProvider::GetFrame(int n, VideoFrame &out) {
 	}
 	else if (rotation == 270) {
 		std::vector<unsigned char> data(std::move(out.data));
-		out.data.resize(Width * Height * 4);
-		for (int x = 0; x < Width; ++x)
-			for (int y = 0; y < Height; ++y)
+		out.data.resize(static_cast<size_t>(Width) * Height * 4);
+		for (size_t x = 0; x < static_cast<size_t>(Width); ++x)
+			for (size_t y = 0; y < static_cast<size_t>(Height); ++y)
 				copy_bgra(out.data.data() + 4 * (Height * x + y),
 					data.data() + out.pitch * (Height - 1 - y) + 4 * x);
 		out.width = Height;

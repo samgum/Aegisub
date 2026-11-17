@@ -104,6 +104,8 @@ def test_ai_json_unescape_and_cjk_cleanup_fixes():
     assert "0xD800" in ai
     assert 'OPT_SUB("Tool/AI Analysis/Enabled"' in edit_box
     assert "convert_chinese_with_transliterator" in timing_tools
+    assert "/opt/homebrew/bin/python3" in timing_tools
+    assert "std::isfinite(seconds)" in timing_tools
 
 
 def main():

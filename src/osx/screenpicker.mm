@@ -40,7 +40,7 @@ void CopyToDC(CGImageRef img, wxMemoryDC &capdc, int resx, int resy, int magnifi
 	agi::scoped_holder<CGColorSpaceRef> colorspace(CGColorSpaceCreateDeviceRGB(), CGColorSpaceRelease);
 	agi::scoped_holder<CGContextRef> bmp_context(CGBitmapContextCreate(
 		imgdata.data(), resx, resy, 8, 4 * resx, colorspace,
-		kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big), CGContextRelease);
+		static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) | static_cast<uint32_t>(kCGBitmapByteOrder32Big)), CGContextRelease);
 
 	if (!bmp_context) return;
 	CGContextSetInterpolationQuality(bmp_context, kCGInterpolationNone);
