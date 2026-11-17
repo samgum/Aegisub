@@ -18,7 +18,13 @@ project('Aegisub', ['c', 'cpp'],
 
 cmake = import('cmake')
 
+cxx = meson.get_compiler('cpp')
+cc = meson.get_compiler('c')
+
 if host_machine.system() == 'windows'
+    # The CRT must be linked dynamically (the default): the automation code
+    # assumes the app and LuaJIT's ffi.C use the same CRT, which doesn't hold
+    # when the CRT is statically linked.
     add_project_arguments('-DUNICODE', '-DNOMINMAX', '-D_WIN32_WINNT=0x0601', language: 'cpp')
 
     if not get_option('csri').disabled()
@@ -30,6 +36,10 @@ if host_machine.system() == 'windows'
         nasm = subproject('nasm').get_variable('nasm')
         meson.override_find_program('nasm', nasm)
     endif
+else
+    # luajit's external frame unwinding requires requires all C code that can be called from lua
+    # to be compiled with -funwind-tables or -fexceptions .
+    add_global_arguments(cc.get_supported_arguments(['-fexceptions']), language: ['c'])
 endif
 
 if host_machine.system() == 'windows'
@@ -70,6 +80,13 @@ if get_option('debug') and host_machine.system() != 'windows'
 endif
 
 conf = configuration_data()
+# The version declared above is that of the latest release this was built
+# from, or of the release being prepared
+aegisub_version = meson.project_version().split('.')
+assert(aegisub_version.length() >= 3, 'The project version must have at least 3 components')
+conf.set('AEGISUB_VERSION_MAJOR', aegisub_version[0].to_int())
+conf.set('AEGISUB_VERSION_MINOR', aegisub_version[1].to_int())
+conf.set('AEGISUB_VERSION_PATCH', aegisub_version[2].to_int())
 conf.set_quoted('P_DATA', dataroot)
 conf.set_quoted('P_LOCALE', localedir)
 if get_option('credit') != ''
@@ -96,8 +113,6 @@ elif host_machine.system() != 'windows'
     deps += dependency('fontconfig')
 endif
 
-cxx = meson.get_compiler('cpp')
-cc = meson.get_compiler('c')
 deps += cc.find_library('m', required: false)
 deps += cc.find_library('dl', required: false)
 
@@ -467,6 +482,7 @@ subdir('po')
 subdir('src')
 if get_option('tests')
     subdir('tests')
+    subdir('automation/tests')
 endif
 
 aegisub_cpp_pch = ['src/include/agi_pre.h']
