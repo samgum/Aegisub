@@ -277,8 +277,10 @@ std::string remove_parenthesized_tag(std::string text, std::string const& tag) {
 	size_t pos = 0;
 	while ((pos = text.find(tag, pos)) != std::string::npos) {
 		size_t open = text.find('(', pos + tag.size());
-		if (open != pos + tag.size())
-			break;
+		if (open != pos + tag.size()) {
+			pos += tag.size();
+			continue;
+		}
 
 		int depth = 0;
 		size_t end = open;
@@ -633,7 +635,8 @@ class DialogLyricScroll final : public wxDialog {
 	std::string PreviewText(bool current) {
 		std::vector<std::string> samples;
 		auto add_sample = [&](AssDialogue *line) {
-			std::string text = escape_ass_text(plain_lyric_text(line, settings));
+			std::string text = plain_lyric_text(line, settings);
+			text = settings.strip_tags ? escape_ass_text(std::move(text)) : normalize_line_breaks(std::move(text));
 			if (!text.empty())
 				samples.push_back(std::move(text));
 		};
@@ -1335,8 +1338,11 @@ double row_center_y(std::vector<LyricRow> const& rows, int active_index, int row
 }
 
 std::string build_body(LyricRow const& row, bool current, LyricScrollSettings const& settings, LyricRenderLayout const& layout) {
-	std::string primary = escape_ass_text(wrapped_primary(row, layout));
-	std::string secondary = escape_ass_text(wrapped_secondary(row, layout));
+	auto format_row_text = [&](std::string text) {
+		return settings.strip_tags ? escape_ass_text(std::move(text)) : normalize_line_breaks(std::move(text));
+	};
+	std::string primary = format_row_text(wrapped_primary(row, layout));
+	std::string secondary = format_row_text(wrapped_secondary(row, layout));
 	std::string alignment = "\\an" + std::to_string(lyric_ass_alignment(settings));
 	std::string primary_font = clean_ass_tag_value(current ?
 		font_or_default(settings.active_primary_font, DEFAULT_ACTIVE_PRIMARY_FONT) :
@@ -1490,9 +1496,8 @@ void generate_scroll_events(agi::Context *c, std::vector<LyricRow> const& rows, 
 }
 
 void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
-	// Holds source lines detached from the event list but not yet freed, so
-	// they survive the Commit + SetSelectionAndActive calls below (see the
-	// source_action==2 branch). Freed when the function returns.
+	// Holds detached lines until after Commit + SetSelectionAndActive complete,
+	// so commit listeners and selection state never touch a freed AssDialogue.
 	std::vector<std::unique_ptr<AssDialogue>> disposed;
 	auto sources = collect_lyric_sources(c, settings);
 	bool removed_previous = false;
@@ -1501,13 +1506,40 @@ void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
 			return line.Effect.get() == LYRIC_SCROLL_GENERATED;
 		}, [&](AssDialogue *line) {
 			removed_previous = true;
-			delete line;
+			disposed.emplace_back(line);
 		});
 	}
 
+	auto finalize_cleared_selection = [&] {
+		if (!removed_previous)
+			return;
+		std::set<AssDialogue *> alive;
+		for (auto& line : c->ass->Events)
+			alive.insert(&line);
+		Selection survivors;
+		for (auto line : c->selectionController->GetSelectedSet()) {
+			if (alive.count(line))
+				survivors.insert(line);
+		}
+		AssDialogue *new_active = c->selectionController->GetActiveLine();
+		if (!new_active || !alive.count(new_active))
+			new_active = nullptr;
+		if (!new_active && !survivors.empty())
+			new_active = *survivors.begin();
+		if (!new_active && !c->ass->Events.empty())
+			new_active = &c->ass->Events.front();
+		if (!new_active) {
+			new_active = new AssDialogue;
+			c->ass->Events.push_back(*new_active);
+		}
+		if (survivors.empty())
+			survivors.insert(new_active);
+		c->ass->Commit(_("clear music lyric scroll"), AssFile::COMMIT_DIAG_ADDREM);
+		c->selectionController->SetSelectionAndActive(std::move(survivors), new_active);
+	};
+
 	if (sources.empty()) {
-		if (removed_previous)
-			c->ass->Commit(_("clear music lyric scroll"), AssFile::COMMIT_DIAG_ADDREM);
+		finalize_cleared_selection();
 		wxMessageBox(_("No subtitle lines were available for lyric scrolling."), _("Music Lyrics Scroll"), wxOK | wxICON_INFORMATION, c->parent);
 		return;
 	}
@@ -1522,6 +1554,7 @@ void apply_lyric_scroll(agi::Context *c, LyricScrollSettings const& settings) {
 	build_lyric_rows(sources, settings, rows, credits, primary_style, secondary_style, credit_style);
 
 	if (rows.empty() && credits.empty()) {
+		finalize_cleared_selection();
 		wxMessageBox(_("No lyric rows were available after grouping source subtitles."), _("Music Lyrics Scroll"), wxOK | wxICON_INFORMATION, c->parent);
 		return;
 	}

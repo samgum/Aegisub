@@ -375,6 +375,13 @@ void OpenALPlayer::Notify()
 	if (selected_audio_finished && buffers_free == num_buffers) {
 		Stop();
 	}
+	else if (buffers_free < num_buffers) {
+		ALint state = AL_STOPPED;
+		alGetSourcei(source, AL_SOURCE_STATE, &state);
+		if (state != AL_PLAYING) {
+			alSourcePlay(source);
+		}
+	}
 }
 
 void OpenALPlayer::SetEndPosition(int64_t pos)
@@ -469,7 +476,7 @@ int64_t OpenALPlayer::GetCurrentPosition()
 	// quickly those source samples are consumed, so applying playback_speed
 	// again here would double-correct the reported position.
 
-	int64_t real = std::max<int64_t>(start_frame, start_frame + output_frames);
+	int64_t real = std::min<int64_t>(end_frame, std::max<int64_t>(start_frame, start_frame + output_frames));
 	if (real < last_position)
 		real = last_position;
 	else

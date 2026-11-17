@@ -15,7 +15,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstdint>
 #include <cstdio>
+#include <locale>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -86,6 +88,41 @@ std::string json_escape_ai(std::string const& text) {
 }
 
 std::string json_unescape_ai(std::string const& text) {
+	auto append_utf8 = [](std::string& out, uint32_t cp) {
+		if (cp < 0x80) {
+			out += static_cast<char>(cp);
+		}
+		else if (cp < 0x800) {
+			out += static_cast<char>(0xC0 | (cp >> 6));
+			out += static_cast<char>(0x80 | (cp & 0x3F));
+		}
+		else if (cp < 0x10000) {
+			out += static_cast<char>(0xE0 | (cp >> 12));
+			out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+			out += static_cast<char>(0x80 | (cp & 0x3F));
+		}
+		else {
+			out += static_cast<char>(0xF0 | (cp >> 18));
+			out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+			out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+			out += static_cast<char>(0x80 | (cp & 0x3F));
+		}
+	};
+	auto parse_hex4 = [&](size_t offset, uint32_t& val) {
+		if (offset + 4 > text.size())
+			return false;
+		val = 0;
+		for (size_t k = 0; k < 4; ++k) {
+			unsigned char h = static_cast<unsigned char>(text[offset + k]);
+			val <<= 4;
+			if (h >= '0' && h <= '9') val |= (h - '0');
+			else if (h >= 'a' && h <= 'f') val |= (h - 'a' + 10);
+			else if (h >= 'A' && h <= 'F') val |= (h - 'A' + 10);
+			else return false;
+		}
+		return true;
+	};
+
 	std::string out;
 	out.reserve(text.size());
 	for (size_t i = 0; i < text.size(); ++i) {
@@ -98,8 +135,30 @@ std::string json_unescape_ai(std::string const& text) {
 			case 'n': out += '\n'; break;
 			case 'r': out += '\r'; break;
 			case 't': out += '\t'; break;
+			case 'b': out += '\b'; break;
+			case 'f': out += '\f'; break;
+			case '/': out += '/'; break;
 			case '"': out += '"'; break;
 			case '\\': out += '\\'; break;
+			case 'u': {
+				uint32_t cp = 0;
+				if (parse_hex4(i + 1, cp)) {
+					i += 4;
+					if (cp >= 0xD800 && cp <= 0xDBFF && i + 6 < text.size()
+					&& text[i + 1] == '\\' && text[i + 2] == 'u') {
+						uint32_t low = 0;
+						if (parse_hex4(i + 3, low) && low >= 0xDC00 && low <= 0xDFFF) {
+							cp = 0x10000 + (((cp - 0xD800) << 10) | (low - 0xDC00));
+							i += 6;
+						}
+					}
+					append_utf8(out, cp);
+				}
+				else {
+					out += 'u';
+				}
+				break;
+			}
 			default: out += c; break;
 		}
 	}
@@ -107,35 +166,50 @@ std::string json_unescape_ai(std::string const& text) {
 }
 
 std::string extract_message_content(std::string const& json) {
-	size_t key = json.find("\"content\"");
-	if (key == std::string::npos)
-		return {};
-	size_t colon = json.find(':', key);
-	if (colon == std::string::npos)
-		return {};
-	size_t quote = json.find('"', colon + 1);
-	if (quote == std::string::npos)
-		return {};
+	size_t search_pos = 0;
+	while (true) {
+		size_t key = json.find("\"content\"", search_pos);
+		if (key == std::string::npos)
+			return {};
+		size_t colon = json.find(':', key + 9);
+		if (colon == std::string::npos)
+			return {};
+		size_t val = colon + 1;
+		while (val < json.size() && std::isspace(static_cast<unsigned char>(json[val])))
+			++val;
+		if (val >= json.size())
+			return {};
+		if (json[val] != '"') {
+			search_pos = val;
+			continue;
+		}
 
-	std::string raw;
-	bool escaped = false;
-	for (size_t i = quote + 1; i < json.size(); ++i) {
-		char c = json[i];
-		if (escaped) {
-			raw += '\\';
+		std::string raw;
+		bool escaped = false;
+		for (size_t i = val + 1; i < json.size(); ++i) {
+			char c = json[i];
+			if (escaped) {
+				raw += '\\';
+				raw += c;
+				escaped = false;
+				continue;
+			}
+			if (c == '\\') {
+				escaped = true;
+				continue;
+			}
+			if (c == '"') {
+				std::string parsed = json_unescape_ai(raw);
+				if (!parsed.empty())
+					return parsed;
+				search_pos = i + 1;
+				break;
+			}
 			raw += c;
-			escaped = false;
-			continue;
 		}
-		if (c == '\\') {
-			escaped = true;
-			continue;
-		}
-		if (c == '"')
-			return json_unescape_ai(raw);
-		raw += c;
+		if (search_pos <= val)
+			return {};
 	}
-	return {};
 }
 
 std::string default_target_language() {
@@ -193,6 +267,7 @@ bool call_ai(std::string const& body, std::string const& base_url, std::string c
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
 	CURLcode code = curl_easy_perform(curl);
 	long http_code = 0;
@@ -345,6 +420,7 @@ class DialogAIAnalysis final : public wxDialog {
 		std::string system = "You are a professional subtitle grammar and translation assistant. Analyze only the provided subtitle line. Ignore ASS override tags if any are present. Write every heading and every explanation in the requested target language. Be complete but practical for subtitle editing: include source meaning, grammar structure, word/phrase notes, particles or function words when relevant, nuance and tone, subtitle-localization notes, recommended translation, and optional alternatives.";
 		std::string user = "Target language for the entire analysis and translation: " + target + "\nSubtitle text:\n" + text;
 		std::ostringstream body;
+		body.imbue(std::locale::classic());
 		body << "{\"model\":\"" << json_escape_ai(model) << "\",\"messages\":["
 			<< "{\"role\":\"system\",\"content\":\"" << json_escape_ai(system) << "\"},"
 			<< "{\"role\":\"user\",\"content\":\"" << json_escape_ai(user) << "\"}],"
@@ -383,13 +459,15 @@ class DialogAIAnalysis final : public wxDialog {
 				content = error;
 			}
 
-			wxTheApp->CallAfter([alive_token, result_ctrl, button, content] {
-				if (!alive_token->load())
-					return;
-				result_ctrl->SetValue(to_wx(content));
-				if (button)
-					button->Enable(true);
-			});
+			if (alive_token->load() && wxTheApp) {
+				wxTheApp->CallAfter([alive_token, result_ctrl, button, content] {
+					if (!alive_token->load())
+						return;
+					result_ctrl->SetValue(to_wx(content));
+					if (button)
+						button->Enable(true);
+				});
+			}
 		}).detach();
 #else
 		result->SetValue(_("This build was compiled without libcurl/update-checker support, so AI requests are unavailable."));

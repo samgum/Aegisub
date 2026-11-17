@@ -415,7 +415,15 @@ void PortAudioPlayer::Play(int64_t start_sample, int64_t count) {
 		return;
 	}
 #else
-	RefreshDefaultDevice();
+	try {
+		RefreshDefaultDevice();
+	} catch (AudioPlayerOpenError const& err) {
+		LOG_E("audio/player/portaudio") << err.GetMessage();
+		return;
+	} catch (...) {
+		LOG_E("audio/player/portaudio") << "Unknown error refreshing default audio device";
+		return;
+	}
 #endif
 
 	// Defensive guard: if for any reason there is no live stream, bail out

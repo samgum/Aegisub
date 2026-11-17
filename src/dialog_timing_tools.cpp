@@ -40,6 +40,7 @@
 
 #include <boost/algorithm/string/predicate.hpp>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
@@ -48,6 +49,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -585,13 +587,40 @@ FollowingText following_plain_text(std::vector<std::unique_ptr<AssDialogueBlock>
 
 size_t clean_fullwidth_periods(std::string& text, FollowingText following_text, size_t& spaced) {
 	static std::string const period = "\xE3\x80\x82";
+	auto is_non_word_boundary = [&](size_t next) {
+		if (next >= text.size())
+			return following_text != FollowingText::StartsWithoutSpace;
+		char c = text[next];
+		if (c == ' ' || c == '\t' || c == '"' || c == '\'' || c == ')' || c == ']')
+			return true;
+		if (c == '\\' && next + 1 < text.size() && (text[next + 1] == 'N' || text[next + 1] == 'n' || text[next + 1] == 'h'))
+			return true;
+		static const char *const closers[] = {
+			"\xE3\x80\x82", // 。
+			"\xE2\x80\x9D", // ”
+			"\xE2\x80\x99", // ’
+			"\xE3\x80\x8D", // 」
+			"\xE3\x80\x8F", // 』
+			"\xEF\xBC\x89", // ）
+			"\xE3\x80\x8B", // 》
+			"\xE3\x80\x89", // 〉
+			"\xE3\x80\x91"  // 】
+		};
+		for (auto closer : closers) {
+			size_t len = std::strlen(closer);
+			if (next + len <= text.size() && text.compare(next, len, closer) == 0)
+				return true;
+		}
+		return false;
+	};
+
 	size_t removed = 0;
 	spaced = 0;
 
 	size_t pos = 0;
 	while ((pos = text.find(period, pos)) != std::string::npos) {
 		size_t next = pos + period.size();
-		if ((next < text.size() && text[next] != ' ') || (next == text.size() && following_text == FollowingText::StartsWithoutSpace)) {
+		if (!is_non_word_boundary(next)) {
 			text.replace(pos, period.size(), " ");
 			++spaced;
 			pos += 1;
@@ -792,17 +821,10 @@ wxArrayString get_style_choices(AssFile *ass) {
 	return choices;
 }
 
-bool convert_chinese_text(std::string& text, bool to_traditional) {
-	UErrorCode status = U_ZERO_ERROR;
-	icu::UnicodeString transform_id = icu::UnicodeString::fromUTF8(to_traditional ? "Simplified-Traditional" : "Traditional-Simplified");
-	std::unique_ptr<icu::Transliterator> transliterator(
-		icu::Transliterator::createInstance(transform_id, UTRANS_FORWARD, status));
-	if (U_FAILURE(status) || !transliterator)
-		return false;
-
+bool convert_chinese_with_transliterator(std::string& text, icu::Transliterator& transliterator) {
 	icu::UnicodeString utext = icu::UnicodeString::fromUTF8(text);
 	icu::UnicodeString before = utext;
-	transliterator->transliterate(utext);
+	transliterator.transliterate(utext);
 	if (utext == before)
 		return false;
 
@@ -810,6 +832,16 @@ bool convert_chinese_text(std::string& text, bool to_traditional) {
 	utext.toUTF8String(out);
 	text = out;
 	return true;
+}
+
+bool convert_chinese_text(std::string& text, bool to_traditional) {
+	UErrorCode status = U_ZERO_ERROR;
+	icu::UnicodeString transform_id = icu::UnicodeString::fromUTF8(to_traditional ? "Simplified-Traditional" : "Traditional-Simplified");
+	std::unique_ptr<icu::Transliterator> transliterator(
+		icu::Transliterator::createInstance(transform_id, UTRANS_FORWARD, status));
+	if (U_FAILURE(status) || !transliterator)
+		return false;
+	return convert_chinese_with_transliterator(text, *transliterator);
 }
 
 DialogChineseConverter::DialogChineseConverter(agi::Context *context)
@@ -879,6 +911,15 @@ void DialogChineseConverter::Process(wxCommandEvent&) {
 	auto lines = get_tool_target_lines(context, selection_mode->GetSelection() == 1, style_filter);
 	bool to_traditional = direction_mode->GetSelection() == 1;
 
+	UErrorCode status = U_ZERO_ERROR;
+	icu::UnicodeString transform_id = icu::UnicodeString::fromUTF8(to_traditional ? "Simplified-Traditional" : "Traditional-Simplified");
+	std::unique_ptr<icu::Transliterator> transliterator(
+		icu::Transliterator::createInstance(transform_id, UTRANS_FORWARD, status));
+	if (U_FAILURE(status) || !transliterator) {
+		wxMessageBox(_("Failed to initialize ICU Chinese transliterator."), _("Chinese Simplified/Traditional Conversion"), wxICON_ERROR, this);
+		return;
+	}
+
 	size_t checked = 0;
 	size_t changed = 0;
 	size_t plain_blocks_changed = 0;
@@ -890,7 +931,7 @@ void DialogChineseConverter::Process(wxCommandEvent&) {
 			if (block->GetType() != AssBlockType::PLAIN)
 				continue;
 			auto& text = static_cast<AssDialogueBlockPlain *>(block.get())->text;
-			if (convert_chinese_text(text, to_traditional)) {
+			if (convert_chinese_with_transliterator(text, *transliterator)) {
 				line_changed = true;
 				++plain_blocks_changed;
 			}
@@ -946,30 +987,46 @@ wxString check_pairs_in_text(std::string const& text) {
 	bool ascii_single_quote_open = false;
 	wxString issues;
 
+	auto is_word_apostrophe = [&](size_t offset, size_t token_len) {
+		return offset > 0 && offset + token_len < text.size()
+			&& std::isalnum(static_cast<unsigned char>(text[offset - 1]))
+			&& std::isalnum(static_cast<unsigned char>(text[offset + token_len]));
+	};
+
+	size_t char_index = 1;
 	for (size_t pos = 0; pos < text.size();) {
 		bool matched = false;
 		if (text[pos] == '"') {
 			ascii_double_quote_open = !ascii_double_quote_open;
 			++pos;
+			++char_index;
 			continue;
 		}
 		if (text[pos] == '\'') {
-			ascii_single_quote_open = !ascii_single_quote_open;
+			if (!is_word_apostrophe(pos, 1))
+				ascii_single_quote_open = !ascii_single_quote_open;
 			++pos;
+			++char_index;
+			continue;
+		}
+		if (starts_with_at(text, pos, "\xE2\x80\x99") && is_word_apostrophe(pos, 3) && (stack.empty() || stack.back() != 10)) {
+			pos += 3;
+			++char_index;
 			continue;
 		}
 
 		for (int i = 0; i < static_cast<int>(sizeof(pair_tokens) / sizeof(pair_tokens[0])); ++i) {
 			if (starts_with_at(text, pos, pair_tokens[i].open)) {
 				stack.push_back(i);
-				positions.push_back(pos);
+				positions.push_back(char_index);
 				pos += std::strlen(pair_tokens[i].open);
+				++char_index;
 				matched = true;
 				break;
 			}
 			if (starts_with_at(text, pos, pair_tokens[i].close)) {
 				if (stack.empty() || stack.back() != i) {
-					issues += wxString::Format(_("Unexpected closing %s at byte %llu").c_str(), to_wx(pair_tokens[i].close).c_str(), static_cast<unsigned long long>(pos));
+					issues += wxString::Format(_("Unexpected closing %s at character %llu").c_str(), to_wx(pair_tokens[i].close).c_str(), static_cast<unsigned long long>(char_index));
 					issues += "\n";
 				}
 				else {
@@ -977,6 +1034,7 @@ wxString check_pairs_in_text(std::string const& text) {
 					positions.pop_back();
 				}
 				pos += std::strlen(pair_tokens[i].close);
+				++char_index;
 				matched = true;
 				break;
 			}
@@ -985,11 +1043,12 @@ wxString check_pairs_in_text(std::string const& text) {
 			unsigned char c = static_cast<unsigned char>(text[pos]);
 			size_t len = c < 0x80 ? 1 : ((c & 0xE0) == 0xC0 ? 2 : ((c & 0xF0) == 0xE0 ? 3 : ((c & 0xF8) == 0xF0 ? 4 : 1)));
 			pos += std::min(len, text.size() - pos);
+			++char_index;
 		}
 	}
 
 	for (size_t i = 0; i < stack.size(); ++i) {
-		issues += wxString::Format(_("Unclosed %s at byte %llu").c_str(), to_wx(pair_tokens[stack[i]].open).c_str(), static_cast<unsigned long long>(positions[i]));
+		issues += wxString::Format(_("Unclosed %s at character %llu").c_str(), to_wx(pair_tokens[stack[i]].open).c_str(), static_cast<unsigned long long>(positions[i]));
 		issues += "\n";
 	}
 	if (ascii_double_quote_open)
@@ -1492,6 +1551,7 @@ std::vector<FuriganaWrapToken> tokenize_for_furigana_wrap(std::string const& tex
 		if (is_cjk_ideograph(cp)) {
 			std::string group = pending + text.substr(pos, len);
 			double width = furigana_wrap_token_units(cp, state, format);
+			size_t char_count = 1;
 			pos += len;
 			while (pos < text.size()) {
 				uint32_t next_cp = 0;
@@ -1501,15 +1561,19 @@ std::vector<FuriganaWrapToken> tokenize_for_furigana_wrap(std::string const& tex
 					break;
 				group += text.substr(pos, next_len);
 				width += furigana_wrap_token_units(next_cp, state, format);
+				++char_count;
 				pos += next_len;
 			}
 
+			double per_char_spacing = state.spacing / std::max(1.0, format.base_size);
 			FuriganaWrapToken token;
 			token.raw = group;
-			token.width = width;
-			token.spacing = 0;  // no inter-CJK spacing within a run
+			token.width = width + static_cast<double>(char_count - 1) * per_char_spacing;
+			token.spacing = per_char_spacing;
 			token.visible = state.drawing == 0;
-			token.allow_wrap = false;  // never split a CJK run across lines
+			// CJK characters in the run are already grouped so a compound is
+			// never split mid-run, while allowing a wrap before the CJK run.
+			token.allow_wrap = state.wrap_style != 2;
 			tokens.push_back(std::move(token));
 			pending.clear();
 			continue;
@@ -1718,23 +1782,36 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 			continue;
 		}
 
-		if (block->GetType() != AssBlockType::PLAIN) {
-			append_hidden_text_width(result, block->GetText(), format);
+		if (block->GetType() != AssBlockType::PLAIN)
 			continue;
-		}
 
 		auto const& text = static_cast<AssDialogueBlockPlain const *>(block.get())->text;
+		double non_cjk_units = 0.0;
+		auto flush_non_cjk = [&] {
+			if (non_cjk_units > 0.0) {
+				append_hidden_space(result, non_cjk_units * format.base_size, format);
+				non_cjk_units = 0.0;
+			}
+		};
+
 		for (size_t pos = 0; pos < text.size(); ) {
+			if (text[pos] == '\\' && pos + 1 < text.size() && text[pos + 1] == 'h') {
+				non_cjk_units += furigana_codepoint_units(' ');
+				pos += 2;
+				continue;
+			}
+
 			uint32_t cp = 0;
 			size_t len = 1;
 			read_utf8_codepoint(text, pos, cp, len);
 
 			if (!is_cjk_ideograph(cp)) {
-				append_hidden_text_width(result, text.substr(pos, len), format);
+				non_cjk_units += furigana_codepoint_units(cp);
 				pos += len;
 				continue;
 			}
 
+			flush_non_cjk();
 			size_t start = pos;
 			do {
 				pos += len;
@@ -1746,6 +1823,7 @@ std::string make_aligned_reading_line(std::string const& raw_text, std::map<std:
 			++occurrence;
 			result += make_aligned_reading_for_cjk_run(text.substr(start, pos - start), readings, format, active_tags, any_reading, row, occurrence);
 		}
+		flush_non_cjk();
 	}
 
 	return result + "{\\r}";
@@ -2696,9 +2774,12 @@ DialogFixCommonErrors::DialogFixCommonErrors(agi::Context *context)
 	remove_empty        = new wxCheckBox(this, -1, _("Remove empty / whitespace-only lines"));
 	strip_trailing_space= new wxCheckBox(this, -1, _("Strip trailing whitespace from text"));
 
-	min_gap_ms       = new wxSpinCtrl(this, -1, wxString::Format("%d", OPT_GET("Tool/Fix Errors/Min Gap")->GetInt()), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 2000, 100);
-	min_duration_ms  = new wxSpinCtrl(this, -1, wxString::Format("%d", OPT_GET("Tool/Fix Errors/Min Duration")->GetInt()), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 100, 10000, 1000);
-	max_duration_ms  = new wxSpinCtrl(this, -1, wxString::Format("%d", OPT_GET("Tool/Fix Errors/Max Duration")->GetInt()), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 1000, 60000, 7000);
+	int init_min_gap = OPT_GET("Tool/Fix Errors/Min Gap")->GetInt();
+	int init_min_dur = OPT_GET("Tool/Fix Errors/Min Duration")->GetInt();
+	int init_max_dur = OPT_GET("Tool/Fix Errors/Max Duration")->GetInt();
+	min_gap_ms       = new wxSpinCtrl(this, -1, wxString::Format("%d", init_min_gap), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 0, 2000, init_min_gap);
+	min_duration_ms  = new wxSpinCtrl(this, -1, wxString::Format("%d", init_min_dur), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 100, 10000, init_min_dur);
+	max_duration_ms  = new wxSpinCtrl(this, -1, wxString::Format("%d", init_max_dur), wxDefaultPosition, wxDefaultSize, wxSP_ARROW_KEYS, 1000, 60000, init_max_dur);
 
 	fix_overlaps->SetValue(true);
 	fix_short_gaps->SetValue(true);
@@ -2763,6 +2844,9 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 	int min_gap = min_gap_ms->GetValue();
 	int min_dur = min_duration_ms->GetValue();
 	int max_dur = max_duration_ms->GetValue();
+	OPT_SET("Tool/Fix Errors/Min Gap")->SetInt(min_gap);
+	OPT_SET("Tool/Fix Errors/Min Duration")->SetInt(min_dur);
+	OPT_SET("Tool/Fix Errors/Max Duration")->SetInt(max_dur);
 
 	int n_overlap = 0, n_gap = 0, n_short = 0, n_long = 0, n_empty = 0, n_trim = 0;
 
@@ -2772,28 +2856,6 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 		return all_rows || targets.count(d) != 0;
 	};
 
-	// --- Per-line duration fixes. Do these before neighbour fixes so extending a
-	// short line cannot reintroduce an overlap which was already removed.
-	for (auto line : lines) {
-		if (line->Comment)
-			continue;
-
-		int start = line->Start;
-		int dur = line->End - start;
-
-		if (do_short_dur && dur < min_dur) {
-			line->End = start + min_dur;
-			++n_short;
-		}
-		else if (do_long_dur && dur > max_dur) {
-			line->End = start + max_dur;
-			++n_long;
-		}
-	}
-
-	// --- Neighbour timing fixes. File/row order is not necessarily temporal;
-	// compare a stable start-time ordering and omit comment rows entirely so a
-	// comment cannot hide an overlap between the surrounding dialogue rows.
 	std::vector<AssDialogue *> all;
 	all.reserve(context->ass->Events.size());
 	for (auto& line : context->ass->Events) {
@@ -2804,6 +2866,50 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 		return lhs->Start < rhs->Start;
 	});
 
+	std::unordered_map<AssDialogue const *, int> next_start_of;
+	for (size_t i = 0; i < all.size(); ++i) {
+		int cur_start = all[i]->Start;
+		for (size_t j = i + 1; j < all.size(); ++j) {
+			if (all[j]->Start > cur_start) {
+				next_start_of[all[i]] = all[j]->Start;
+				break;
+			}
+		}
+	}
+
+	// --- Per-line duration fixes. Do these before neighbour fixes and clamp
+	// against the next line's start so extending a short line never introduces
+	// a new overlap or double-counts with overlap trimming.
+	for (auto line : lines) {
+		if (line->Comment)
+			continue;
+
+		int start = line->Start;
+		int dur = line->End - start;
+
+		if (do_short_dur && dur < min_dur) {
+			int target_end = start + min_dur;
+			if (auto it = next_start_of.find(line); it != next_start_of.end()) {
+				int limit = it->second - (do_short_gap ? min_gap : 0);
+				if (limit > start)
+					target_end = std::min(target_end, limit);
+				else
+					target_end = line->End;
+			}
+			if (target_end > line->End) {
+				line->End = target_end;
+				++n_short;
+			}
+		}
+		else if (do_long_dur && dur > max_dur) {
+			line->End = start + max_dur;
+			++n_long;
+		}
+	}
+
+	// --- Neighbour timing fixes. File/row order is not necessarily temporal;
+	// compare a stable start-time ordering and omit comment rows entirely so a
+	// comment cannot hide an overlap between the surrounding dialogue rows.
 	if (do_overlaps || do_short_gap) {
 		for (size_t i = 0; i + 1 < all.size(); ++i) {
 			AssDialogue *cur = all[i];
@@ -2846,6 +2952,8 @@ void DialogFixCommonErrors::Process(wxCommandEvent&) {
 	if (do_trim) {
 		for (auto line : lines) {
 			if (line->Comment)
+				continue;
+			if (do_empty && is_ass_whitespace_only(*line))
 				continue;
 
 			std::string text = line->Text.get();

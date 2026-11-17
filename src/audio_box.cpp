@@ -59,14 +59,14 @@ enum {
 };
 
 namespace {
-const int playback_speeds[] = { 50, 75, 100, 125, 150, 175, 200 };
+const int playback_speeds[] = { 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400 };
 
 int PlaybackSpeedSelection(int speed) {
 	for (size_t i = 0; i < sizeof(playback_speeds) / sizeof(playback_speeds[0]); ++i) {
 		if (playback_speeds[i] == speed)
 			return static_cast<int>(i);
 	}
-	return 2;
+	return 3;
 }
 }
 

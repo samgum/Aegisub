@@ -155,6 +155,10 @@ public:
 		return input_frame;
 	}
 
+	bool IsFinished() const {
+		return output_finished;
+	}
+
 	DWORD Fill(void *dst, DWORD bytes) {
 		auto bytes_per_frame = provider->GetChannels() * provider->GetBytesPerSample();
 		auto requested_frames = bytes / bytes_per_frame;
@@ -173,7 +177,7 @@ public:
 			input_frame += available;
 			input_finished = input_frame >= end_frame;
 			output_finished = input_finished;
-			return bytes;
+			return available * bytes_per_frame;
 		}
 
 		DWORD filled = 0;
@@ -205,7 +209,7 @@ public:
 		if (filled < requested_frames)
 			memset(out + filled * channels(), 0, (requested_frames - filled) * bytes_per_frame);
 
-		return bytes;
+		return filled * bytes_per_frame;
 	}
 };
 
@@ -544,6 +548,7 @@ void DirectSoundPlayer2Thread::Run()
 
 	int64_t next_input_frame = 0;
 	DWORD buffer_offset = 0;
+	DWORD silent_bytes_written = 0;
 	bool playback_should_be_running = false;
 	int current_latency = wanted_latency;
 	const DWORD wanted_latency_bytes = wanted_latency*waveFormat.nSamplesPerSec*provider->GetBytesPerSample()/1000;
@@ -566,6 +571,7 @@ void DirectSoundPlayer2Thread::Run()
 				DWORD buf_size; // size of buffer locked for filling
 				void *buf;
 				buffer_offset = 0;
+				silent_bytes_written = 0;
 
 				if (FAILED(bfr->SetCurrentPosition(0)))
 					REPORT_ERROR("Could not reset playback buffer cursor before filling first buffer.")
@@ -592,6 +598,9 @@ void DirectSoundPlayer2Thread::Run()
 				memset(buf, 0, buf_size);
 
 				DWORD bytes_filled = FillAndUnlockBuffers(buf, buf_size, 0, 0, tempo_stream, next_input_frame, bfr.get());
+				if (bytes_filled == 0)
+					goto stop_playback;
+
 				buffer_offset += bytes_filled;
 				if (buffer_offset >= bufSize) buffer_offset -= bufSize;
 
@@ -672,9 +681,13 @@ do_fill_buffer:
 
 				if (!(status & DSBSTATUS_LOOPING))
 				{
-					// Not looping playback...
-					// hopefully we only triggered timeout after being done with the buffer
-					goto stop_playback;
+					// Single-shot playback stops once the valid audio prefix has played out
+					DWORD play_cursor = 0;
+					if (!(status & DSBSTATUS_PLAYING) || FAILED(bfr->GetCurrentPosition(&play_cursor, 0)) || play_cursor >= buffer_offset)
+						goto stop_playback;
+
+					current_latency = LatencyFromBytes(buffer_offset - play_cursor, waveFormat);
+					break;
 				}
 
 				DWORD play_cursor;
@@ -728,10 +741,30 @@ do_fill_buffer:
 				}
 
 				DWORD bytes_filled = FillAndUnlockBuffers(buf1, buf1sz, buf2, buf2sz, tempo_stream, next_input_frame, bfr.get());
-				buffer_offset += bytes_filled;
+				if (tempo_stream.IsFinished())
+				{
+					DWORD actual_bytes = std::min<DWORD>(bytes_filled, (DWORD)bytes_needed);
+					if (actual_bytes > 0)
+						silent_bytes_written = (DWORD)bytes_needed - actual_bytes;
+					else
+						silent_bytes_written += (DWORD)bytes_needed;
+					buffer_offset += (DWORD)bytes_needed;
+				}
+				else
+				{
+					silent_bytes_written = 0;
+					buffer_offset += bytes_filled;
+				}
 				if (buffer_offset >= bufSize) buffer_offset -= bufSize;
 
-				if (bytes_filled < 1024)
+				if (silent_bytes_written >= bufSize)
+					goto stop_playback;
+
+				if (tempo_stream.IsFinished())
+				{
+					current_latency = wanted_latency;
+				}
+				else if (bytes_filled < 1024)
 				{
 					// Arbitrary low number, we filled in very little so better get back to filling in the rest with silence
 					// really fast... set latency to zero in this case.

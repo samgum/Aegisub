@@ -453,7 +453,7 @@ static inline void toggle(const char *opt) {
 	OPT_SET(opt)->SetBool(!OPT_GET(opt)->GetBool());
 }
 
-const int playback_speeds[] = { 50, 75, 100, 125, 150, 175, 200 };
+const int playback_speeds[] = { 25, 50, 75, 100, 125, 150, 175, 200, 250, 300, 400 };
 
 void set_playback_speed(agi::Context *c, int speed) {
 	OPT_SET("Audio/Playback Speed")->SetInt(speed);
